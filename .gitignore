@@ -1,0 +1,7 @@
+﻿# カード画像・カードデータ・一次資料はリポジトリに含めない（権利面の配慮）
+_local/
+dist-data/
+public/cards/
+*.zip
+node_modules/
+dist/
