@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
+import type { Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
@@ -10,6 +11,8 @@ const nextLogId = () => `log_${++logSeq}_${Date.now()}`
 
 export type ConnMode = 'solo' | 'host' | 'guest'
 export type ConnStatus = 'idle' | 'connecting' | 'waiting' | 'connected' | 'disconnected' | 'error'
+
+export const otherSeat = (s: Seat): Seat => (s === 'A' ? 'B' : 'A')
 
 /**
  * 盤面の状態を管理する。IndexedDBに自動保存しリロードで復元する（P1）のに加えて、
@@ -28,6 +31,19 @@ export function useBoard() {
   const [connStatus, setConnStatus] = useState<ConnStatus>('idle')
   const [connError, setConnError] = useState<string | null>(null)
   const [roomCode, setRoomCode] = useState<string | null>(null)
+
+  // 「自分がどちらの座席か」はこのクライアントだけが知る情報。BoardStateには絶対に入れない
+  // （配信で上書きされて壊れる＝PHASE2.5.md §2.2の最大の地雷）。ホスト=A・ゲスト=B固定。
+  // ソロ時はA既定で、ひとり回しの見え方確認用にA⇄B切替できる（PHASE2.5.md §2.3、任意機能）。
+  const [localSeat, setLocalSeatState] = useState<Seat>('A')
+  const modeRef = useRef<ConnMode>('solo')
+  modeRef.current = mode
+
+  const setLocalSeat = useCallback((seat: Seat) => {
+    // 接続中は座席が役割で固定される。切替はソロ時のみ許可
+    if (modeRef.current !== 'solo') return
+    setLocalSeatState(seat)
+  }, [])
 
   const transportRef = useRef<PeerJsTransport | null>(null)
   const hostMetaRef = useRef<HostMeta>(initialHostMeta)
@@ -165,6 +181,7 @@ export function useBoard() {
       wireTransport(t, 'host')
       setRoomCode(code)
       setMode('host')
+      setLocalSeatState('A') // ホスト＝A固定（PHASE2.5.md §2.2）
       setConnStatus('waiting')
     } catch (e) {
       t.destroy()
@@ -185,6 +202,7 @@ export function useBoard() {
         wireTransport(t, 'guest')
         setRoomCode(code)
         setMode('guest')
+        setLocalSeatState('B') // ゲスト＝B固定（PHASE2.5.md §2.2。役割から自明に導出）
         setConnStatus('connected')
         t.send({ kind: 'hello', role: 'guest', name: 'ゲスト' } satisfies NetMessage)
       } catch (e) {
@@ -203,6 +221,7 @@ export function useBoard() {
     setConnStatus('idle')
     setRoomCode(null)
     setConnError(null)
+    setLocalSeatState('A') // ソロに戻る＝既定のAへ（PHASE2.5.md §2.2）
   }, [])
 
   return {
@@ -221,6 +240,8 @@ export function useBoard() {
     connectHost,
     connectGuest,
     disconnect,
+    localSeat,
+    setLocalSeat,
   }
 }
 

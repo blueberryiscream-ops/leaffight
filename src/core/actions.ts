@@ -3,11 +3,11 @@
 // ここでも乱数・時刻は持たない。呼び出し側が iid・並び順を決めて渡す。
 
 import * as board from './board'
-import type { BoardState, ModScope, Modifier, Orientation, Player, ZoneId } from './board'
+import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 
 export type BoardAction =
-  | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Player; zone: ZoneId }
-  | { type: 'moveCard'; iid: string; toOwner?: Player; toZone: ZoneId; toIndex?: number; cardName: string }
+  | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId }
+  | { type: 'moveCard'; iid: string; toOwner?: Seat; toZone: ZoneId; toIndex?: number; cardName: string }
   | { type: 'setOrientation'; iid: string; orientation: Orientation; cardName: string }
   | { type: 'toggleOrientation'; iid: string; cardName: string }
   | { type: 'setKiryoku'; iid: string; value: number; cardName: string }
@@ -21,7 +21,7 @@ export type BoardAction =
   | { type: 'detach'; itemIid: string; itemName: string }
   | { type: 'toTrash'; iid: string; cardName: string }
   | { type: 'removeCard'; iid: string; cardName: string }
-  | { type: 'shuffleDeck'; owner: Player; orderedIids: string[] }
+  | { type: 'shuffleDeck'; owner: Seat; orderedIids: string[] }
   | { type: 'clearBoard' }
 
 export function applyAction(state: BoardState, action: BoardAction): board.Result {

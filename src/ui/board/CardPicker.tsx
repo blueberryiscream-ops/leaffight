@@ -1,33 +1,41 @@
 import { useMemo, useState } from 'react'
 import { searchKey } from '../../core/name'
-import type { Player, ZoneId } from '../../core/board'
+import type { Seat, ZoneId } from '../../core/board'
 import { CARD_KINDS, CARD_KIND_LABEL, type CardKind } from '../../core/types'
 import type { PoolCard } from '../../data/types'
+import { otherSeat } from './useBoard'
 
 // P0のカード一覧を「ピッカー」として使う（PHASE1.md §3.2）。
 // クリックで選択中の 持ち主/ゾーン に1枚スポーンする。
+// 「自分/相手」の割り当てはmySeat基準（PHASE2.5.md §2.3。以前は'me'決め打ちだったのを解消）。
 
-const TARGET_ZONES: { owner: Player; zone: ZoneId; label: string }[] = [
-  { owner: 'me', zone: 'deck', label: '自分のデッキ' },
-  { owner: 'me', zone: 'hand', label: '自分の手札' },
-  { owner: 'me', zone: 'leader', label: '自分のリーダー' },
-  { owner: 'opp', zone: 'deck', label: '相手のデッキ' },
-  { owner: 'opp', zone: 'hand', label: '相手の手札' },
-  { owner: 'opp', zone: 'leader', label: '相手のリーダー' },
-]
+function targetZones(mySeat: Seat): { owner: Seat; zone: ZoneId; label: string }[] {
+  const theirs = otherSeat(mySeat)
+  return [
+    { owner: mySeat, zone: 'deck', label: '自分のデッキ' },
+    { owner: mySeat, zone: 'hand', label: '自分の手札' },
+    { owner: mySeat, zone: 'leader', label: '自分のリーダー' },
+    { owner: theirs, zone: 'deck', label: '相手のデッキ' },
+    { owner: theirs, zone: 'hand', label: '相手の手札' },
+    { owner: theirs, zone: 'leader', label: '相手のリーダー' },
+  ]
+}
 
 export function CardPicker({
   cards,
+  mySeat,
   onPick,
   onClose,
 }: {
   cards: PoolCard[]
-  onPick: (card: PoolCard, owner: Player, zone: ZoneId) => void
+  mySeat: Seat
+  onPick: (card: PoolCard, owner: Seat, zone: ZoneId) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<CardKind | ''>('')
   const [targetIdx, setTargetIdx] = useState(0)
+  const TARGET_ZONES = useMemo(() => targetZones(mySeat), [mySeat])
 
   const visible = useMemo(() => {
     const q = searchKey(query)

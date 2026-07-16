@@ -5,7 +5,9 @@
 
 import type { Attr } from './types'
 
-export type Player = 'me' | 'opp'
+// 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
+// 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
+export type Seat = 'A' | 'B'
 
 export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field'
 
@@ -14,7 +16,7 @@ export type Orientation = 'ready' | 'rested'
 export interface CardInstance {
   iid: string
   cardId: string
-  owner: Player
+  owner: Seat
   zone: ZoneId
   index: number
   orientation: Orientation
@@ -57,7 +59,7 @@ export function isSlotted(zone: ZoneId): boolean {
   return zone in SLOT_CAPACITY
 }
 
-export function cardsInZone(state: BoardState, owner: Player, zone: ZoneId): CardInstance[] {
+export function cardsInZone(state: BoardState, owner: Seat, zone: ZoneId): CardInstance[] {
   return Object.values(state.cards)
     .filter((c) => c.owner === owner && c.zone === zone)
     .sort((a, b) => a.index - b.index)
@@ -80,7 +82,7 @@ function cloneBoard(state: BoardState): BoardState {
 }
 
 /** ゾーン内の index を 0..n-1 の連番に詰め直す（DESIGN.md §2.2「正規化して1箇所で管理」） */
-function normalizeZone(state: BoardState, owner: Player, zone: ZoneId): BoardState {
+function normalizeZone(state: BoardState, owner: Seat, zone: ZoneId): BoardState {
   const next = cloneBoard(state)
   const list = cardsInZone(next, owner, zone)
   list.forEach((c, i) => {
@@ -100,7 +102,7 @@ export interface Result {
 
 export function spawnCard(
   state: BoardState,
-  args: { iid: string; cardId: string; cardName: string; owner: Player; zone: ZoneId },
+  args: { iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId },
 ): Result {
   const { iid, cardId, cardName, owner, zone } = args
   const index = cardsInZone(state, owner, zone).length
@@ -124,7 +126,7 @@ export function spawnCard(
 /** 占有スロットに移動するときは、既存の占有カードと入れ替える（実物マットの入れ替えと同じ挙動） */
 export function moveCard(
   state: BoardState,
-  args: { iid: string; toOwner?: Player; toZone: ZoneId; toIndex?: number; cardName: string },
+  args: { iid: string; toOwner?: Seat; toZone: ZoneId; toIndex?: number; cardName: string },
 ): Result {
   const card = state.cards[args.iid]
   if (!card) return { state, log: '' }
@@ -278,14 +280,15 @@ export function removeCard(state: BoardState, args: { iid: string; cardName: str
 }
 
 /** シャッフル。乱数は呼び出し側が消費し、結果の並び（iid配列）だけを渡す（core純粋性のため） */
-export function shuffleDeck(state: BoardState, args: { owner: Player; orderedIids: string[] }): Result {
+export function shuffleDeck(state: BoardState, args: { owner: Seat; orderedIids: string[] }): Result {
   let next = cloneBoard(state)
   args.orderedIids.forEach((iid, i) => {
     const card = next.cards[iid]
     if (card) next.cards[iid] = { ...card, index: i }
   })
   next = normalizeZone(next, args.owner, 'deck')
-  return { state: next, log: `${PLAYER_LABEL[args.owner]} のデッキをシャッフルした` }
+  // ログは座席名(A/B)で書く。「自分/相手」は視点依存でcoreに置けない（PHASE2.5.md §2.1）
+  return { state: next, log: `${args.owner} のデッキをシャッフルした` }
 }
 
 export function clearBoard(): Result {
@@ -300,9 +303,4 @@ export const ZONE_LABEL: Record<ZoneId, string> = {
   char: 'キャラ',
   battle: 'バトル',
   field: 'フィールド',
-}
-
-export const PLAYER_LABEL: Record<Player, string> = {
-  me: '自分',
-  opp: '相手',
 }

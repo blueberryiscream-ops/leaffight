@@ -1,11 +1,11 @@
-import type { BoardState, Player } from '../../core/board'
+import type { BoardState, Seat } from '../../core/board'
 import { cardsInZone, SLOT_CAPACITY } from '../../core/board'
 import type { PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
 import { DroppableSlot } from './DroppableSlot'
 import { ZoneBundle } from './ZoneBundle'
 
-// 1プレイヤー分の盤面。DESIGN.md §4.13:
+// 1座席分の盤面。DESIGN.md §4.13:
 // 中央（相手との境界）から自陣の端へ [前線: バトル×3 + フィールド] [キャラ段×5] [最後列: ゴミ箱/リーダー/デッキ] [手札]
 
 function SlotRow({
@@ -17,7 +17,7 @@ function SlotRow({
   onCardClick,
   label,
 }: {
-  owner: Player
+  owner: Seat
   zone: 'char' | 'battle' | 'field' | 'leader'
   board: BoardState
   cardOf: (cardId: string) => PoolCard | undefined
@@ -50,8 +50,9 @@ function SlotRow({
   )
 }
 
-export function PlayerBoard({
+export function SeatBoard({
   owner,
+  mySeat,
   board,
   cardOf,
   imageUrlOf,
@@ -59,7 +60,9 @@ export function PlayerBoard({
   onShuffleDeck,
   reversed,
 }: {
-  owner: Player
+  owner: Seat
+  /** このクライアントの視点（自分の座席）。手札を伏せるかどうかの判定に使う（PHASE2.5.md §2.3） */
+  mySeat: Seat
   board: BoardState
   cardOf: (cardId: string) => PoolCard | undefined
   imageUrlOf: (cardId: string) => string | undefined
@@ -89,7 +92,16 @@ export function PlayerBoard({
   )
   const hand = (
     <div className="flex justify-center">
-      <ZoneBundle owner={owner} zone="hand" board={board} cardOf={cardOf} imageUrlOf={imageUrlOf} onCardClick={onCardClick} fanOut />
+      <ZoneBundle
+        owner={owner}
+        zone="hand"
+        board={board}
+        cardOf={cardOf}
+        imageUrlOf={imageUrlOf}
+        onCardClick={onCardClick}
+        fanOut
+        hideContents={owner !== mySeat}
+      />
     </div>
   )
 

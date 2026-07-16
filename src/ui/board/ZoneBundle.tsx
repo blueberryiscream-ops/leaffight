@@ -1,5 +1,5 @@
 import { useDroppable } from '@dnd-kit/core'
-import type { BoardState, Player, ZoneId } from '../../core/board'
+import type { BoardState, Seat, ZoneId } from '../../core/board'
 import { cardsInZone, ZONE_LABEL } from '../../core/board'
 import type { PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
@@ -15,8 +15,9 @@ export function ZoneBundle({
   onCardClick,
   onShuffle,
   fanOut,
+  hideContents,
 }: {
-  owner: Player
+  owner: Seat
   zone: Extract<ZoneId, 'deck' | 'hand' | 'trash'>
   board: BoardState
   cardOf: (cardId: string) => PoolCard | undefined
@@ -25,6 +26,11 @@ export function ZoneBundle({
   onShuffle?: () => void
   /** 手札は全部横並びで表示する。デッキ/ゴミ箱は一番上だけ見せる束にする */
   fanOut?: boolean
+  /**
+   * 相手の手札を伏せるためのフラグ（PHASE2.5.md §2.3）。状態(faceUp)は変えず、描画だけ隠す。
+   * 操作（ドラッグで動かす等）自体は塞がない＝「描画側で隠すだけ」の割り切り。
+   */
+  hideContents?: boolean
 }) {
   const dropId = `${owner}:${zone}`
   const { setNodeRef, isOver } = useDroppable({ id: dropId })
@@ -62,6 +68,7 @@ export function ZoneBundle({
               imageUrl={imageUrlOf(inst.cardId)}
               board={board}
               onClick={() => onCardClick(inst.iid)}
+              hidden={hideContents}
             />
           ))}
         </div>

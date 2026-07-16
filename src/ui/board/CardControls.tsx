@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { BoardAction } from '../../core/actions'
-import type { BoardState } from '../../core/board'
+import type { BoardState, Seat } from '../../core/board'
 import { cardsInZone, modifiersFor } from '../../core/board'
 import { ATTRS, type Attr } from '../../core/types'
 import type { PoolCard } from '../../data/types'
@@ -13,12 +13,15 @@ import { newIid } from './useBoard'
 export function CardControls({
   iid,
   board,
+  mySeat,
   cardOf,
   dispatch,
   onClose,
 }: {
   iid: string
   board: BoardState
+  /** 「自分/相手」ラベルの判定用（PHASE2.5.md §2.3） */
+  mySeat: Seat
   cardOf: (cardId: string) => PoolCard | undefined
   dispatch: (action: BoardAction) => void
   onClose: () => void
@@ -43,7 +46,12 @@ export function CardControls({
   const max = instance.zone === 'leader' && baseMax !== null ? baseMax * 2 : baseMax
 
   const attachedItems = Object.values(board.cards).filter((c) => c.attachedTo === iid)
-  const handCandidates = cardsInZone(board, instance.owner, 'hand').filter((c) => c.iid !== iid && c.attachedTo === null)
+  // 相手の手札は伏せる対象なので、相手のカードに付ける操作はここでは出さない
+  // （出すと「手札から選ぶ」の選択肢に相手の手札の中身がそのまま見えてしまう＝PHASE2.5.mdの伏せ表示が骨抜きになる）
+  const handCandidates =
+    instance.owner === mySeat
+      ? cardsInZone(board, instance.owner, 'hand').filter((c) => c.iid !== iid && c.attachedTo === null)
+      : []
 
   return (
     <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs">
@@ -51,7 +59,7 @@ export function CardControls({
         <div>
           <div className="text-sm font-semibold text-slate-100">{name}</div>
           <div className="text-[10px] text-slate-500">
-            {instance.owner === 'me' ? '自分' : '相手'} ・ {instance.zone}
+            {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
           </div>
         </div>
         <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200">

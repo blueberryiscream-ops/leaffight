@@ -16,6 +16,7 @@ export function CardPiece({
   board,
   onClick,
   dragDisabled,
+  hidden,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
@@ -23,6 +24,12 @@ export function CardPiece({
   board: BoardState
   onClick: () => void
   dragDisabled?: boolean
+  /**
+   * 相手の手札を伏せるためのフラグ（PHASE2.5.md §2.3）。カード自体の faceUp（ゲーム内の表裏）
+   * とは別に、「このクライアントの画面には見せない」という描画専用の上書き。
+   * 操作は塞がない（掴んで動かすことはできる。見えないだけ）。
+   */
+  hidden?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: instance.iid,
@@ -39,6 +46,7 @@ export function CardPiece({
 
   const mods = modifiersFor(board, instance.iid)
   const attachedCount = Object.values(board.cards).filter((c) => c.attachedTo === instance.iid).length
+  const faceUp = hidden ? false : instance.faceUp
 
   return (
     <button
@@ -52,7 +60,7 @@ export function CardPiece({
       onClick={onClick}
       className="relative flex h-[112px] w-20 shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border border-slate-600 bg-slate-900 text-left shadow transition-shadow hover:border-emerald-500 hover:shadow-emerald-900/40"
     >
-      {!instance.faceUp ? (
+      {!faceUp ? (
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-[9px] text-slate-500">
           裏
         </div>

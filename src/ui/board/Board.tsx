@@ -7,19 +7,19 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import type { Player, ZoneId } from '../../core/board'
+import type { Seat, ZoneId } from '../../core/board'
 import type { PoolCard } from '../../data/types'
 import { CardControls } from './CardControls'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
 import { LogPanel } from './LogPanel'
-import { PlayerBoard } from './PlayerBoard'
-import { newIid, useBoard } from './useBoard'
+import { SeatBoard } from './SeatBoard'
+import { newIid, otherSeat, useBoard } from './useBoard'
 
-function parseDropId(id: string): { owner: Player; zone: ZoneId; index?: number } | null {
+function parseDropId(id: string): { owner: Seat; zone: ZoneId; index?: number } | null {
   const parts = String(id).split(':')
-  if (parts.length === 2) return { owner: parts[0] as Player, zone: parts[1] as ZoneId }
-  if (parts.length === 3) return { owner: parts[0] as Player, zone: parts[1] as ZoneId, index: Number(parts[2]) }
+  if (parts.length === 2) return { owner: parts[0] as Seat, zone: parts[1] as ZoneId }
+  if (parts.length === 3) return { owner: parts[0] as Seat, zone: parts[1] as ZoneId, index: Number(parts[2]) }
   return null
 }
 
@@ -40,9 +40,15 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     connectHost,
     connectGuest,
     disconnect,
+    localSeat,
+    setLocalSeat,
   } = useBoard()
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+
+  // 自分の座席を手前に描く（PHASE2.5.md §2.3）。ホスト/ゲストで固定、ソロはA既定・切替可
+  const mySeat: Seat = localSeat
+  const theirSeat: Seat = otherSeat(localSeat)
 
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
   const cardOf = (cardId: string) => cardMap.get(cardId)
@@ -77,7 +83,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     })
   }
 
-  function handleShuffle(owner: Player) {
+  function handleShuffle(owner: Seat) {
     const deckIids = Object.values(board.cards)
       .filter((c) => c.owner === owner && c.zone === 'deck')
       .map((c) => c.iid)
@@ -89,7 +95,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     dispatch({ type: 'shuffleDeck', owner, orderedIids: deckIids })
   }
 
-  function handlePick(card: PoolCard, owner: Player, zone: ZoneId) {
+  function handlePick(card: PoolCard, owner: Seat, zone: ZoneId) {
     dispatch({ type: 'spawnCard', iid: newIid(), cardId: card.id, cardName: card.name, owner, zone })
   }
 
@@ -105,13 +111,25 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
             <h1 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">🎴 対戦卓</h1>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="rounded border border-emerald-700 px-3 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
-            >
-              ＋ カードを追加
-            </button>
+            <div className="flex items-center gap-2">
+              {mode === 'solo' && (
+                <button
+                  type="button"
+                  onClick={() => setLocalSeat(theirSeat)}
+                  title="ひとり回し用: 自分の視点をA/Bで切り替える"
+                  className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+                >
+                  視点切替（現在: {mySeat}）
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="rounded border border-emerald-700 px-3 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
+              >
+                ＋ カードを追加
+              </button>
+            </div>
           </div>
 
           <ConnectionPanel
@@ -127,24 +145,26 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           <div className="flex-1 overflow-auto">
             <div className="border-b border-dashed border-slate-700 bg-slate-950/40 px-2">
               <p className="pt-1 text-center text-[9px] tracking-widest text-slate-600">相手</p>
-              <PlayerBoard
-                owner="opp"
+              <SeatBoard
+                owner={theirSeat}
+                mySeat={mySeat}
                 board={board}
                 cardOf={cardOf}
                 imageUrlOf={imageUrlOf}
                 onCardClick={setSelectedIid}
-                onShuffleDeck={() => handleShuffle('opp')}
+                onShuffleDeck={() => handleShuffle(theirSeat)}
                 reversed
               />
             </div>
             <div className="px-2">
-              <PlayerBoard
-                owner="me"
+              <SeatBoard
+                owner={mySeat}
+                mySeat={mySeat}
                 board={board}
                 cardOf={cardOf}
                 imageUrlOf={imageUrlOf}
                 onCardClick={setSelectedIid}
-                onShuffleDeck={() => handleShuffle('me')}
+                onShuffleDeck={() => handleShuffle(mySeat)}
                 reversed={false}
               />
               <p className="pb-1 text-center text-[9px] tracking-widest text-slate-600">自分</p>
@@ -166,6 +186,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           <CardControls
             iid={selectedIid}
             board={board}
+            mySeat={mySeat}
             cardOf={cardOf}
             dispatch={dispatch}
             onClose={() => setSelectedIid(null)}
@@ -173,7 +194,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
         )}
       </div>
 
-      {pickerOpen && <CardPicker cards={cards} onPick={handlePick} onClose={() => setPickerOpen(false)} />}
+      {pickerOpen && <CardPicker cards={cards} mySeat={mySeat} onPick={handlePick} onClose={() => setPickerOpen(false)} />}
     </DndContext>
   )
 }
