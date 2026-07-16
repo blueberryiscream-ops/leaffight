@@ -10,7 +10,7 @@
 | # | 完了条件 | 状態 |
 |---|---|---|
 | 1 | `npm run build` が型チェック込みで通る | ✅ |
-| 2 | GitHub Pages に自動デプロイされ、公開URLで開く | ⏸ **ユーザー操作待ち**（§6） |
+| 2 | GitHub Pages に自動デプロイされ、公開URLで開く | ✅ https://blueberryiscream-ops.github.io/leaffight/ |
 | 3 | ローカルのデータファイルを読み込むと ver.1〜3 の約420種が一覧表示される | ✅ **422種**を確認 |
 | 4 | `core/` が `ui/` `net/` を一切 import していない | ✅ ビルド時に機械チェック |
 
@@ -166,22 +166,14 @@ viewport 1440×900・6カラムで DOM を実測:
 
 ---
 
-## 6. 公開URL — **ユーザー操作が必要**
+## 6. 公開URL — **完了**
 
-このPCに `gh` CLI が無く、`leaffight/` はまだ git リポジトリでもないため、**リポジトリ作成と push は未実施**。
-コード側の準備（`.github/workflows/deploy.yml`、`base`、`.gitignore`）は完了している。
+**https://blueberryiscream-ops.github.io/leaffight/**（ユーザーが git init〜push〜Pages設定まで実施。console エラーゼロ、初回起動画面の表示を確認済み）
 
-想定URL: `https://blueberryiscream-ops.github.io/leaffight/`
-
-手順（tcg-companion のときと同じ）:
-
-1. https://github.com/new で **`blueberryiscream-ops/leaffight`** を作る。**Public**。README等は追加しない
-2. リポジトリの **Settings → Pages → Source を「GitHub Actions」** に設定
-3. ローカルで初回 push（**この操作は未実行。実行前に一声かけてほしい**）
-4. Actions が緑になれば公開
-
-**`.gitignore` に `_local/` `dist-data/` `*.zip` が入っていることを push 前に必ず確認すること。**
-カード画像・カードデータ・一次資料は1バイトもリポジトリに入れない（DESIGN.md §7.5）。
+- リポジトリ `blueberryiscream-ops/leaffight`（Public、README/.gitignore/ライセンス無しで作成）
+- push直後の初回デプロイは **deploy ジョブのみ失敗**（`actions/deploy-pages@v4`）。原因は push 時点でまだ Pages の Source が「GitHub Actions」に切り替わっていなかったため（build ジョブは `npm run build` まで全ステップ成功していた）
+- Source を GitHub Actions に切り替え後、Actions タブから **Re-run all jobs** で再実行 → 成功
+- `.gitignore` に `_local/` `dist-data/` `*.zip` が入っていることは push 前に確認済み。カード画像・カードデータ・一次資料は1バイトもリポジトリに入っていない（DESIGN.md §7.5）
 
 ---
 

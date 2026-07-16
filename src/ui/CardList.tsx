@@ -41,7 +41,7 @@ export function CardList({
   const withImage = visible.filter((c) => imageUrls.has(c.id)).length
 
   return (
-    <div className="mx-auto max-w-[1600px] p-4">
+    <div className="mx-auto h-full max-w-[1600px] overflow-y-auto p-4">
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">カード一覧</h1>

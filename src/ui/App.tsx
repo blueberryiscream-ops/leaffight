@@ -2,16 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadLibrary } from '../data/bundle'
 import { clearBundle, readBundleMeta } from '../data/db'
 import type { BundleMeta, PoolCard } from '../data/types'
+import { Board } from './board/Board'
 import { CardList } from './CardList'
 import { DataGate } from './DataGate'
 
 type Phase = 'booting' | 'empty' | 'ready'
+type View = 'board' | 'library'
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('booting')
   const [cards, setCards] = useState<PoolCard[]>([])
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map())
   const [meta, setMeta] = useState<BundleMeta | null>(null)
+  const [view, setView] = useState<View>('board')
 
   // 画像は Blob URL なので、使い終わったら必ず revoke する。
   // useState の更新関数の中で revoke してはいけない（React は更新関数を2回呼ぶことがあり、
@@ -71,5 +74,29 @@ export function App() {
   if (phase === 'empty') {
     return <DataGate onLoaded={() => void refresh()} />
   }
-  return <CardList cards={cards} imageUrls={imageUrls} meta={meta} onReset={() => void reset()} />
+  return (
+    <div className="flex h-full flex-col">
+      <nav className="flex shrink-0 gap-1 border-b border-slate-800 bg-slate-950 px-2 pt-2">
+        {(['board', 'library'] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setView(v)}
+            className={`rounded-t px-3 py-1.5 text-xs font-medium ${
+              view === v ? 'bg-slate-900 text-emerald-400' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {v === 'board' ? '対戦卓' : 'カード一覧'}
+          </button>
+        ))}
+      </nav>
+      <div className="min-h-0 flex-1">
+        {view === 'board' ? (
+          <Board cards={cards} imageUrls={imageUrls} />
+        ) : (
+          <CardList cards={cards} imageUrls={imageUrls} meta={meta} onReset={() => void reset()} />
+        )}
+      </div>
+    </div>
+  )
 }
