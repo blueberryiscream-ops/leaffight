@@ -8,18 +8,29 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
+import { cardsInZone, fieldCard } from '../../core/board'
 import type { PoolCard } from '../../data/types'
-import { CardControls } from './CardControls'
+import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
+import { CardPiece } from './CardPiece'
 import { ConnectionPanel } from './ConnectionPanel'
+import { DetailPanel } from './DetailPanel'
+import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
-import { SeatBoard } from './SeatBoard'
+import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
 
-function parseDropId(id: string): { owner: Seat; zone: ZoneId; index?: number } | null {
-  const parts = String(id).split(':')
-  if (parts.length === 2) return { owner: parts[0] as Seat, zone: parts[1] as ZoneId }
-  if (parts.length === 3) return { owner: parts[0] as Seat, zone: parts[1] as ZoneId, index: Number(parts[2]) }
+// 盤面レイアウト（PHASE2.6.md §2。原本図 _local/reference/layout_sketch.png.png が正）。
+// 1画面に収める＝盤面には overflow-auto を使わない（§4・§10地雷）。
+// ログと詳細パネルだけが例外的にスクロールしてよい。
+
+type DropTarget = { toZone: ZoneId; toOwner?: Seat; toIndex?: number }
+
+function parseDropId(id: string): DropTarget | null {
+  if (id === 'field') return { toZone: 'field' }
+  const parts = id.split(':')
+  if (parts.length === 2) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId }
+  if (parts.length === 3) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId, toIndex: Number(parts[2]) }
   return null
 }
 
@@ -44,15 +55,17 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     setLocalSeat,
   } = useBoard()
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
+  const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  // 自分の座席を手前に描く（PHASE2.5.md §2.3）。ホスト/ゲストで固定、ソロはA既定・切替可
   const mySeat: Seat = localSeat
   const theirSeat: Seat = otherSeat(localSeat)
 
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
   const cardOf = (cardId: string) => cardMap.get(cardId)
   const imageUrlOf = (cardId: string) => imageUrls.get(cardId)
+
+  const openMenu = (iid: string, x: number, y: number) => setMenuTarget({ iid, x, y })
 
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }))
@@ -67,18 +80,18 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     if (!target) return
 
     const samePlace =
-      instance.owner === target.owner &&
-      instance.zone === target.zone &&
-      (target.index === undefined || instance.index === target.index)
+      instance.zone === target.toZone &&
+      (target.toOwner === undefined || instance.owner === target.toOwner) &&
+      (target.toIndex === undefined || instance.index === target.toIndex)
     if (samePlace) return
 
     const cardName = cardOf(instance.cardId)?.name ?? instance.cardId
     dispatch({
       type: 'moveCard',
       iid,
-      toOwner: target.owner,
-      toZone: target.zone,
-      toIndex: target.index,
+      toOwner: target.toOwner,
+      toZone: target.toZone,
+      toIndex: target.toIndex,
       cardName,
     })
   }
@@ -102,97 +115,265 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
   function handleClearBoard() {
     if (!confirm('盤面をすべてクリアします。よろしいですか？')) return
     setSelectedIid(null)
+    setMenuTarget(null)
     resetBoard()
   }
 
+  const charSlots = (owner: Seat, indices: number[]) => (
+    <>
+      {indices.map((i) => {
+        const inst = cardsInZone(board, owner, 'char').find((c) => c.index === i)
+        return (
+          <DroppableSlot key={`${owner}-char-${i}`} dropId={`${owner}:char:${i}`} label="キャラ">
+            {inst && (
+              <CardPiece
+                instance={inst}
+                card={cardOf(inst.cardId)}
+                imageUrl={imageUrlOf(inst.cardId)}
+                board={board}
+                dispatch={dispatch}
+                onClick={() => setSelectedIid(inst.iid)}
+                onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
+                selected={selectedIid === inst.iid}
+              />
+            )}
+          </DroppableSlot>
+        )
+      })}
+    </>
+  )
+
+  const leaderSlot = (owner: Seat) => {
+    const inst = cardsInZone(board, owner, 'leader')[0]
+    return (
+      <DroppableSlot dropId={`${owner}:leader:0`} label="リーダー">
+        {inst && (
+          <CardPiece
+            instance={inst}
+            card={cardOf(inst.cardId)}
+            imageUrl={imageUrlOf(inst.cardId)}
+            board={board}
+            dispatch={dispatch}
+            onClick={() => setSelectedIid(inst.iid)}
+            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
+            selected={selectedIid === inst.iid}
+          />
+        )}
+      </DroppableSlot>
+    )
+  }
+
+  const battleRow = (owner: Seat) => (
+    <>
+      {[0, 1, 2].map((i) => {
+        const inst = cardsInZone(board, owner, 'battle').find((c) => c.index === i)
+        return (
+          <DroppableSlot key={`${owner}-battle-${i}`} dropId={`${owner}:battle:${i}`} label="バトル">
+            {inst && (
+              <CardPiece
+                instance={inst}
+                card={cardOf(inst.cardId)}
+                imageUrl={imageUrlOf(inst.cardId)}
+                board={board}
+                dispatch={dispatch}
+                onClick={() => setSelectedIid(inst.iid)}
+                onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
+                selected={selectedIid === inst.iid}
+              />
+            )}
+          </DroppableSlot>
+        )
+      })}
+    </>
+  )
+
+  const fieldSlot = () => {
+    const inst = fieldCard(board)
+    return (
+      <DroppableSlot dropId="field" label="フィールド" emphasize>
+        {inst && (
+          <CardPiece
+            instance={inst}
+            card={cardOf(inst.cardId)}
+            imageUrl={imageUrlOf(inst.cardId)}
+            board={board}
+            dispatch={dispatch}
+            onClick={() => setSelectedIid(inst.iid)}
+            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
+            selected={selectedIid === inst.iid}
+          />
+        )}
+      </DroppableSlot>
+    )
+  }
+
+  const zoneBundle = (owner: Seat, zone: 'deck' | 'hand' | 'trash', opts: { fanOut?: boolean; thin?: boolean; onShuffle?: () => void } = {}) => (
+    <ZoneBundle
+      owner={owner}
+      zone={zone}
+      board={board}
+      cardOf={cardOf}
+      imageUrlOf={imageUrlOf}
+      dispatch={dispatch}
+      onCardClick={setSelectedIid}
+      onCardContextMenu={openMenu}
+      onShuffle={opts.onShuffle}
+      fanOut={opts.fanOut}
+      hideContents={zone === 'hand' && owner !== mySeat}
+      thin={opts.thin}
+      selectedIid={selectedIid}
+    />
+  )
+
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="flex h-full">
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
-            <h1 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200">🎴 対戦卓</h1>
-            <div className="flex items-center gap-2">
-              {mode === 'solo' && (
-                <button
-                  type="button"
-                  onClick={() => setLocalSeat(theirSeat)}
-                  title="ひとり回し用: 自分の視点をA/Bで切り替える"
-                  className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
-                >
-                  視点切替（現在: {mySeat}）
-                </button>
-              )}
+      <div className="flex h-full flex-col overflow-hidden bg-slate-950 text-slate-200">
+        {/* 上部の薄いチロム。原本図には無いが、接続/追加/Undo等の操作をどこかに置く必要があるため
+            盤面の外（chrome）にまとめた（PHASE2.6.mdはこの種の操作の置き場を指定していないための判断）。*/}
+        <div className="flex shrink-0 items-center gap-3 border-b border-slate-800 px-3 py-1.5">
+          <h1 className="text-sm font-semibold text-slate-200">🎴 対戦卓</h1>
+          {mode === 'solo' && (
+            <button
+              type="button"
+              onClick={() => setLocalSeat(theirSeat)}
+              title="ひとり回し用: 自分の視点をA/Bで切り替える"
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+            >
+              視点切替（現在: {mySeat}）
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="rounded border border-emerald-700 px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
+          >
+            ＋ カードを追加
+          </button>
+          {mode !== 'guest' && (
+            <>
+              <button type="button" onClick={undo} disabled={!canUndo} className="rounded border border-slate-600 px-2 py-1 text-xs disabled:opacity-30">
+                ↶ Undo
+              </button>
+              <button type="button" onClick={redo} disabled={!canRedo} className="rounded border border-slate-600 px-2 py-1 text-xs disabled:opacity-30">
+                ↷ Redo
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={handleClearBoard}
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-red-800 hover:text-red-300"
+          >
+            盤面クリア
+          </button>
+          <div className="ml-auto">
+            <ConnectionPanel
+              mode={mode}
+              connStatus={connStatus}
+              connError={connError}
+              roomCode={roomCode}
+              onHost={() => void connectHost()}
+              onJoin={(code) => void connectGuest(code)}
+              onDisconnect={disconnect}
+            />
+          </div>
+        </div>
+
+        {/* 本体: 左(システム+ログ) / 中央(盤面) / 右(詳細+割り込み枠) の3カラム。スクロールなし */}
+        <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr_300px] gap-1.5 p-1.5">
+          {/* 左列 */}
+          <div className="flex min-h-0 flex-col gap-1.5">
+            <div className="shrink-0 rounded border border-slate-800 bg-slate-900/60 p-2 text-[10px] text-slate-500">
+              <div className="mb-1 font-semibold text-slate-400">システム</div>
+              <div>ダウン数 -/-（P4）</div>
+              <div>ターン -（P4）</div>
+              <div>フェイズ -（P4）</div>
+            </div>
+            <LogPanel log={log} />
+          </div>
+
+          {/* 中央: 盤面。6行のCSS Grid（fr単位）。カードはaspect-ratioでセルに収まるよう自動で縮む */}
+          <div className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1fr 1.6fr' }}>
+            {/* 行1: 相手の外側列（手札極薄＋キャラ3＋ゴミ箱＋デッキ） */}
+            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
+              {zoneBundle(theirSeat, 'hand', { thin: true })}
+              {charSlots(theirSeat, [0, 1, 2])}
+              {zoneBundle(theirSeat, 'trash')}
+              {zoneBundle(theirSeat, 'deck')}
+            </div>
+
+            {/* 行2: 相手の内側列（キャラ2＋リーダー、中央寄せ） */}
+            <div className="flex min-h-0 min-w-0 items-stretch justify-center gap-1">
+              <div className="flex w-3/5 min-w-0 items-stretch gap-1">
+                {charSlots(theirSeat, [3])}
+                {leaderSlot(theirSeat)}
+                {charSlots(theirSeat, [4])}
+              </div>
+            </div>
+
+            {/* 行3: 共有中央行（相手バトル3・フィールド共有1・自分バトル3） */}
+            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
+              {battleRow(theirSeat)}
+              {fieldSlot()}
+              {battleRow(mySeat)}
+            </div>
+
+            {/* 行4: 自分の内側列（キャラ3、中央寄せ） */}
+            <div className="flex min-h-0 min-w-0 items-stretch justify-center gap-1">
+              <div className="flex w-3/5 min-w-0 items-stretch gap-1">{charSlots(mySeat, [0, 1, 2])}</div>
+            </div>
+
+            {/* 行5: 自分の外側列（ゴミ箱＋デッキ＋キャラ2＋リーダー） */}
+            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
+              {zoneBundle(mySeat, 'trash')}
+              {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
+              {charSlots(mySeat, [3])}
+              {leaderSlot(mySeat)}
+              {charSlots(mySeat, [4])}
+            </div>
+
+            {/* 行6: 自分の手札（大きく・扇状） */}
+            <div className="flex min-h-0 min-w-0 items-stretch">{zoneBundle(mySeat, 'hand', { fanOut: true })}</div>
+          </div>
+
+          {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
+          <div className="flex min-h-0 flex-col gap-1.5">
+            <div className="min-h-0 flex-1 rounded border border-slate-800 bg-slate-900/60">
+              <DetailPanel iid={selectedIid} board={board} mySeat={mySeat} cardOf={cardOf} imageUrlOf={imageUrlOf} />
+            </div>
+            <div className="flex shrink-0 gap-1.5">
+              <div className="flex-1 rounded border border-dashed border-slate-700 bg-slate-950/40 p-2 text-center text-[10px] text-slate-600">
+                割り込み関係
+                <br />
+                (P3で実装)
+              </div>
               <button
                 type="button"
-                onClick={() => setPickerOpen(true)}
-                className="rounded border border-emerald-700 px-3 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
+                disabled
+                title="P4で実装予定（ターン進行）"
+                className="flex-1 rounded border border-slate-700 bg-slate-900/40 p-2 text-[10px] text-slate-500"
               >
-                ＋ カードを追加
+                ターンエンド /<br />次フェイズへ
+                <br />
+                (P4で実装)
               </button>
             </div>
           </div>
-
-          <ConnectionPanel
-            mode={mode}
-            connStatus={connStatus}
-            connError={connError}
-            roomCode={roomCode}
-            onHost={() => void connectHost()}
-            onJoin={(code) => void connectGuest(code)}
-            onDisconnect={disconnect}
-          />
-
-          <div className="flex-1 overflow-auto">
-            <div className="border-b border-dashed border-slate-700 bg-slate-950/40 px-2">
-              <p className="pt-1 text-center text-[9px] tracking-widest text-slate-600">相手</p>
-              <SeatBoard
-                owner={theirSeat}
-                mySeat={mySeat}
-                board={board}
-                cardOf={cardOf}
-                imageUrlOf={imageUrlOf}
-                onCardClick={setSelectedIid}
-                onShuffleDeck={() => handleShuffle(theirSeat)}
-                reversed
-              />
-            </div>
-            <div className="px-2">
-              <SeatBoard
-                owner={mySeat}
-                mySeat={mySeat}
-                board={board}
-                cardOf={cardOf}
-                imageUrlOf={imageUrlOf}
-                onCardClick={setSelectedIid}
-                onShuffleDeck={() => handleShuffle(mySeat)}
-                reversed={false}
-              />
-              <p className="pb-1 text-center text-[9px] tracking-widest text-slate-600">自分</p>
-            </div>
-          </div>
-
-          <LogPanel
-            log={log}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={undo}
-            onRedo={redo}
-            onClearBoard={handleClearBoard}
-            showUndoRedo={mode !== 'guest'}
-          />
         </div>
-
-        {selectedIid && (
-          <CardControls
-            iid={selectedIid}
-            board={board}
-            mySeat={mySeat}
-            cardOf={cardOf}
-            dispatch={dispatch}
-            onClose={() => setSelectedIid(null)}
-          />
-        )}
       </div>
+
+      {menuTarget && (
+        <CardContextMenu
+          iid={menuTarget.iid}
+          board={board}
+          mySeat={mySeat}
+          x={menuTarget.x}
+          y={menuTarget.y}
+          cardOf={cardOf}
+          dispatch={dispatch}
+          onClose={() => setMenuTarget(null)}
+        />
+      )}
 
       {pickerOpen && <CardPicker cards={cards} mySeat={mySeat} onPick={handlePick} onClose={() => setPickerOpen(false)} />}
     </DndContext>

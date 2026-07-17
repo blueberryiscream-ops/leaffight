@@ -42,7 +42,7 @@ export function ConnectionPanel({
   const busy = connStatus === 'connecting'
 
   return (
-    <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs">
+    <div className="flex items-center gap-2 text-xs">
       <span className={`font-semibold ${STATUS_COLOR[connStatus]}`}>● {STATUS_LABEL[connStatus]}</span>
 
       {mode === 'solo' && (

@@ -47,22 +47,34 @@ export interface BoardState {
 
 export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {} }
 
-/** フィールド系ゾーンの固定スロット数（プレイヤーごと）。DESIGN.md §4.13。ルール強制ではなくUIの置き場 */
+/**
+ * フィールド系ゾーンの固定スロット数（座席ごと）。DESIGN.md §4.13。ルール強制ではなくUIの置き場。
+ * 🚨 `field` はここに含めない。両陣営で共有1枚であり「座席ごと」の容量という考え方自体が誤り
+ * （PHASE2.6.md §3。P1〜P2.5では座席ごとに1スロットあり、フィールドカード2枚同時という
+ * ルール上ありえない盤面を作れてしまっていた＝統括が承認していた簡略化の誤り）。
+ */
 export const SLOT_CAPACITY: Partial<Record<ZoneId, number>> = {
   leader: 1,
   char: 5,
   battle: 3,
-  field: 1,
 }
 
+/** フィールドは盤面全体で1枚（座席を問わない共有スロット）。DESIGN.md §4.13訂正 */
+export const FIELD_CAPACITY = 1
+
 export function isSlotted(zone: ZoneId): boolean {
-  return zone in SLOT_CAPACITY
+  return zone in SLOT_CAPACITY || zone === 'field'
 }
 
 export function cardsInZone(state: BoardState, owner: Seat, zone: ZoneId): CardInstance[] {
   return Object.values(state.cards)
     .filter((c) => c.owner === owner && c.zone === zone)
     .sort((a, b) => a.index - b.index)
+}
+
+/** フィールドの現在の1枚（無ければundefined）。座席を問わない共有スロットなのでownerでは絞らない */
+export function fieldCard(state: BoardState): CardInstance | undefined {
+  return Object.values(state.cards).find((c) => c.zone === 'field')
 }
 
 export function modifiersFor(state: BoardState, iid: string): Modifier[] {
@@ -105,7 +117,8 @@ export function spawnCard(
   args: { iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId },
 ): Result {
   const { iid, cardId, cardName, owner, zone } = args
-  const index = cardsInZone(state, owner, zone).length
+  // フィールドは共有1枚なので、座席を問わず既存の有無だけで index を決める
+  const index = zone === 'field' ? (fieldCard(state) ? 1 : 0) : cardsInZone(state, owner, zone).length
   const instance: CardInstance = {
     iid,
     cardId,
@@ -137,7 +150,16 @@ export function moveCard(
 
   let next = cloneBoard(state)
 
-  if (isSlotted(args.toZone) && args.toIndex !== undefined) {
+  if (args.toZone === 'field') {
+    // 共有1枚（座席を問わない）。既存の1枚があれば、移動元カードの元の場所へ追い出す
+    // （P1のmoveCardの既存の入れ替え挙動そのまま。PHASE2.6.md §3「自動化はP4」）
+    const occupant = fieldCard(next)
+    const actualOccupant = occupant && occupant.iid !== card.iid ? occupant : undefined
+    next.cards[card.iid] = { ...card, owner: toOwner, zone: 'field', index: 0 }
+    if (actualOccupant) {
+      next.cards[actualOccupant.iid] = { ...actualOccupant, owner: fromOwner, zone: fromZone, index: fromIndex }
+    }
+  } else if (isSlotted(args.toZone) && args.toIndex !== undefined) {
     const occupant = Object.values(next.cards).find(
       (c) => c.owner === toOwner && c.zone === args.toZone && c.index === args.toIndex && c.iid !== card.iid,
     )
