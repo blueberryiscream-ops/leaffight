@@ -14,9 +14,14 @@ import { HoverPreview } from './HoverPreview'
 //   左クリック → 詳細パネルで選択（Board.tsx側の右パネルに表示）
 //   左ダブルクリック → 待機⇔消耗
 //   右クリック → 状態変化メニュー（Board.tsx側で浮かせる CardContextMenu）
-// カードのサイズはレイアウト（親のスロット）が決める。ここでは
-// aspect-ratio + max-width/max-height の shrink-to-fit だけを行い、固定pxは持たない
-// （PHASE2.6.md §4「カードのサイズはレイアウトが決める」）。
+//
+// サイズは呼び出し側（Board.tsx）がpxで渡す（DESIGN.md §4.18.1）。
+// CSSのaspect-ratio/max-widthのパーセンテージ計算には頼らない
+// （P2.6で「幅未確定の要素にaspect-ratio+%を使うと循環参照で最初の1枚だけ
+// 小さく描画される」というバグを踏んだため。IMPLEMENTATION-NOTES.md参照）。
+// カード自体は常に「縦向きの自然な大きさ」(w×h)で描画し、消耗時は
+// transform:rotate(90deg)で見た目だけ回転させる（マス＝正方形はP2.7で
+// 呼び出し側が確保する。ここでは回転後にはみ出さないよう心配しない）。
 
 export function CardPiece({
   instance,
@@ -26,6 +31,7 @@ export function CardPiece({
   dispatch,
   onClick,
   onContextMenu,
+  size,
   dragDisabled,
   hidden,
   selected,
@@ -39,6 +45,8 @@ export function CardPiece({
   onClick: () => void
   /** 右クリック→状態変化メニューを開く（座標はBoard.tsx側で浮かせるため渡す） */
   onContextMenu: (clientX: number, clientY: number) => void
+  /** カードの自然な（縦向き・未回転の）サイズ(px)。呼び出し側が計算して渡す */
+  size: { w: number; h: number }
   dragDisabled?: boolean
   /**
    * 相手の手札を伏せるためのフラグ（PHASE2.5.md §2.3）。カード自体の faceUp（ゲーム内の表裏）
@@ -57,6 +65,8 @@ export function CardPiece({
 
   const rotate = instance.orientation === 'rested' ? 90 : 0
   const style = {
+    width: size.w,
+    height: size.h,
     transform: transform
       ? `${CSS.Translate.toString(transform)} rotate(${rotate}deg)`
       : `rotate(${rotate}deg)`,
@@ -70,7 +80,8 @@ export function CardPiece({
 
   return (
     <div
-      className="relative aspect-[63/88] h-full max-w-full shrink-0"
+      className="relative shrink-0"
+      style={{ width: size.w, height: size.h }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -91,7 +102,7 @@ export function CardPiece({
           e.preventDefault()
           onContextMenu(e.clientX, e.clientY)
         }}
-        className={`relative flex h-full w-full shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border bg-slate-900 text-left shadow transition-shadow hover:border-emerald-500 hover:shadow-emerald-900/40 ${
+        className={`relative flex shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border bg-slate-900 text-left shadow transition-shadow hover:border-emerald-500 hover:shadow-emerald-900/40 ${
           selected ? 'border-emerald-400 ring-2 ring-emerald-500/50' : 'border-slate-600'
         }`}
       >
@@ -112,36 +123,36 @@ export function CardPiece({
             </div>
             <div className="flex-1 overflow-hidden px-1 py-0.5">
               <div className="truncate text-[9px] font-semibold leading-tight text-slate-100">{name}</div>
-              {instance.kiryoku !== null && (
-                <div className="text-[8px] text-emerald-400">気{instance.kiryoku}</div>
+              {instance.kiryoku !== null && <div className="text-[8px] text-emerald-400">気{instance.kiryoku}</div>}
+              {mods.length > 0 && (
+                <div className="mt-0.5 flex flex-wrap gap-0.5">
+                  {ATTRS.filter((a) => mods.some((m) => m.stat === a)).map((a) => {
+                    const base = card?.stats?.[a] ?? 0
+                    const eff = effectiveStat(board, instance.iid, base, a)
+                    const diff = eff - base
+                    return (
+                      <span
+                        key={a}
+                        className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'}`}
+                      >
+                        {a}
+                        {diff >= 0 ? '+' : ''}
+                        {diff}
+                      </span>
+                    )
+                  })}
+                </div>
               )}
-                {mods.length > 0 && (
-                  <div className="mt-0.5 flex flex-wrap gap-0.5">
-                    {ATTRS.filter((a) => mods.some((m) => m.stat === a)).map((a) => {
-                      const base = card?.stats?.[a] ?? 0
-                      const eff = effectiveStat(board, instance.iid, base, a)
-                      const diff = eff - base
-                      return (
-                        <span
-                          key={a}
-                          className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'}`}
-                        >
-                          {a}
-                          {diff >= 0 ? '+' : ''}
-                          {diff}
-                        </span>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
             </div>
-          )}
+          </div>
+        )}
 
         <AttachBadge count={attachedCount} />
       </button>
 
-      {hovered && !isDragging && <HoverPreview instance={instance} card={card} imageUrl={imageUrl} faceUp={faceUp} />}
+      {hovered && !isDragging && (
+        <HoverPreview instance={instance} card={card} imageUrl={imageUrl} faceUp={faceUp} />
+      )}
     </div>
   )
 }

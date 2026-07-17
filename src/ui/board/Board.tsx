@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   closestCenter,
   DndContext,
@@ -17,12 +17,14 @@ import { ConnectionPanel } from './ConnectionPanel'
 import { DetailPanel } from './DetailPanel'
 import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
+import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
 
-// 盤面レイアウト（PHASE2.6.md §2。原本図 _local/reference/layout_sketch.png.png が正）。
-// 1画面に収める＝盤面には overflow-auto を使わない（§4・§10地雷）。
-// ログと詳細パネルだけが例外的にスクロールしてよい。
+// 盤面レイアウト（PHASE2.7.md。原本図 _local/reference/layout_sketch.png.png が正）。
+// 🚨 マスをflex-1で引き伸ばさない（PHASE2.6の元凶）。マスの大きさはrowHeightから計算した
+// 固定pxで決め、各行を「1fr auto 1fr」の3列グリッドにして中央のクラスタ/フィールドを
+// 盤面の水平中央に固定する（DESIGN.md §4.18.1・§4.18.2）。
 
 type DropTarget = { toZone: ZoneId; toOwner?: Seat; toIndex?: number }
 
@@ -32,6 +34,36 @@ function parseDropId(id: string): DropTarget | null {
   if (parts.length === 2) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId }
   if (parts.length === 3) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId, toIndex: Number(parts[2]) }
   return null
+}
+
+/**
+ * 行を「1fr auto 1fr」の3列にし、中央列(cluster/field)を盤面の水平中央に固定する（DESIGN.md §4.18.2）。
+ * 行自体の高さは自分では持たない（親の6行グリッドのfr配分に任せる）。h-fullで受け取るだけ。
+ * 🚨 ここで height を自分のstyleに設定すると、rowHeight計測用のrefと循環参照になり、
+ * 常に高さ0で固まる（実際に踏んだ。IMPLEMENTATION-NOTES.md参照）。
+ */
+function CenterRow({
+  left,
+  leftAlign = 'start',
+  center,
+  right,
+  rightAlign = 'start',
+  rowRef,
+}: {
+  left?: ReactNode
+  leftAlign?: 'start' | 'end'
+  center: ReactNode
+  right?: ReactNode
+  rightAlign?: 'start' | 'end'
+  rowRef?: React.Ref<HTMLDivElement>
+}) {
+  return (
+    <div ref={rowRef} className="grid h-full min-h-0 min-w-0" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
+      <div className={`flex min-w-0 items-center gap-1 ${leftAlign === 'end' ? 'justify-end' : 'justify-start'}`}>{left}</div>
+      <div className="flex min-w-0 items-center justify-center gap-1">{center}</div>
+      <div className={`flex min-w-0 items-center gap-1 ${rightAlign === 'end' ? 'justify-end' : 'justify-start'}`}>{right}</div>
+    </div>
+  )
 }
 
 export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<string, string> }) {
@@ -66,6 +98,13 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
   const imageUrlOf = (cardId: string) => imageUrls.get(cardId)
 
   const openMenu = (iid: string, x: number, y: number) => setMenuTarget({ iid, x, y })
+
+  // rows1-5は等高（1fr）なので1つ測れば足りる。row6(手札)だけ別に測る
+  const [rowRef, rowH] = useMeasuredHeight<HTMLDivElement>()
+  const [handRowRef, handRowH] = useMeasuredHeight<HTMLDivElement>()
+  const cellSquare = squareCell(rowH) // キャラ/リーダー/バトル（回転する＝正方形。DESIGN.md §4.18.1）
+  const cellPortrait = portraitCell(rowH) // デッキ/ゴミ箱/フィールド/相手手札の帯（回転しない＝縦長）
+  const handCardSize = portraitCell(handRowH)
 
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }))
@@ -119,34 +158,10 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     resetBoard()
   }
 
-  const charSlots = (owner: Seat, indices: number[]) => (
-    <>
-      {indices.map((i) => {
-        const inst = cardsInZone(board, owner, 'char').find((c) => c.index === i)
-        return (
-          <DroppableSlot key={`${owner}-char-${i}`} dropId={`${owner}:char:${i}`} label="キャラ">
-            {inst && (
-              <CardPiece
-                instance={inst}
-                card={cardOf(inst.cardId)}
-                imageUrl={imageUrlOf(inst.cardId)}
-                board={board}
-                dispatch={dispatch}
-                onClick={() => setSelectedIid(inst.iid)}
-                onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
-                selected={selectedIid === inst.iid}
-              />
-            )}
-          </DroppableSlot>
-        )
-      })}
-    </>
-  )
-
-  const leaderSlot = (owner: Seat) => {
-    const inst = cardsInZone(board, owner, 'leader')[0]
+  const charCell = (owner: Seat, index: number) => {
+    const inst = cardsInZone(board, owner, 'char').find((c) => c.index === index)
     return (
-      <DroppableSlot dropId={`${owner}:leader:0`} label="リーダー">
+      <DroppableSlot key={`${owner}-char-${index}`} dropId={`${owner}:char:${index}`} label="キャラ" size={cellSquare}>
         {inst && (
           <CardPiece
             instance={inst}
@@ -157,18 +172,40 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onClick={() => setSelectedIid(inst.iid)}
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
+            size={cellSquare}
           />
         )}
       </DroppableSlot>
     )
   }
 
-  const battleRow = (owner: Seat) => (
+  const leaderCell = (owner: Seat) => {
+    const inst = cardsInZone(board, owner, 'leader')[0]
+    return (
+      <DroppableSlot dropId={`${owner}:leader:0`} label="リーダー" size={cellSquare}>
+        {inst && (
+          <CardPiece
+            instance={inst}
+            card={cardOf(inst.cardId)}
+            imageUrl={imageUrlOf(inst.cardId)}
+            board={board}
+            dispatch={dispatch}
+            onClick={() => setSelectedIid(inst.iid)}
+            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
+            selected={selectedIid === inst.iid}
+            size={cellSquare}
+          />
+        )}
+      </DroppableSlot>
+    )
+  }
+
+  const battleGroup = (owner: Seat) => (
     <>
       {[0, 1, 2].map((i) => {
         const inst = cardsInZone(board, owner, 'battle').find((c) => c.index === i)
         return (
-          <DroppableSlot key={`${owner}-battle-${i}`} dropId={`${owner}:battle:${i}`} label="バトル">
+          <DroppableSlot key={`${owner}-battle-${i}`} dropId={`${owner}:battle:${i}`} label="バトル" size={cellSquare}>
             {inst && (
               <CardPiece
                 instance={inst}
@@ -179,6 +216,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
                 onClick={() => setSelectedIid(inst.iid)}
                 onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
                 selected={selectedIid === inst.iid}
+                size={cellSquare}
               />
             )}
           </DroppableSlot>
@@ -187,10 +225,10 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     </>
   )
 
-  const fieldSlot = () => {
+  const fieldCell = () => {
     const inst = fieldCard(board)
     return (
-      <DroppableSlot dropId="field" label="フィールド" emphasize>
+      <DroppableSlot dropId="field" label="フィールド" emphasize size={cellPortrait}>
         {inst && (
           <CardPiece
             instance={inst}
@@ -201,13 +239,18 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onClick={() => setSelectedIid(inst.iid)}
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
+            size={cellPortrait}
           />
         )}
       </DroppableSlot>
     )
   }
 
-  const zoneBundle = (owner: Seat, zone: 'deck' | 'hand' | 'trash', opts: { fanOut?: boolean; thin?: boolean; onShuffle?: () => void } = {}) => (
+  const zoneBundle = (
+    owner: Seat,
+    zone: 'deck' | 'hand' | 'trash',
+    opts: { fanOut?: boolean; thin?: boolean; onShuffle?: () => void } = {},
+  ) => (
     <ZoneBundle
       owner={owner}
       zone={zone}
@@ -221,6 +264,8 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
       fanOut={opts.fanOut}
       hideContents={zone === 'hand' && owner !== mySeat}
       thin={opts.thin}
+      size={cellPortrait}
+      handSize={handCardSize}
       selectedIid={selectedIid}
     />
   )
@@ -292,48 +337,82 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             <LogPanel log={log} />
           </div>
 
-          {/* 中央: 盤面。6行のCSS Grid（fr単位）。カードはaspect-ratioでセルに収まるよう自動で縮む */}
+          {/* 中央: 盤面。6行。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
           <div className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1fr 1.6fr' }}>
-            {/* 行1: 相手の外側列（手札極薄＋キャラ3＋ゴミ箱＋デッキ） */}
-            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
-              {zoneBundle(theirSeat, 'hand', { thin: true })}
-              {charSlots(theirSeat, [0, 1, 2])}
-              {zoneBundle(theirSeat, 'trash')}
-              {zoneBundle(theirSeat, 'deck')}
-            </div>
+            {/* 行1: 相手の外側列。中央=相手キャラ3枚のクラスタ、左=手札(帯)、右=ゴミ箱/デッキ */}
+            <CenterRow
+              rowRef={rowRef}
+              left={zoneBundle(theirSeat, 'hand', { thin: true })}
+              leftAlign="start"
+              center={
+                <>
+                  {charCell(theirSeat, 0)}
+                  {charCell(theirSeat, 1)}
+                  {charCell(theirSeat, 2)}
+                </>
+              }
+              right={
+                <>
+                  {zoneBundle(theirSeat, 'trash')}
+                  {zoneBundle(theirSeat, 'deck')}
+                </>
+              }
+              rightAlign="start"
+            />
 
-            {/* 行2: 相手の内側列（キャラ2＋リーダー、中央寄せ） */}
-            <div className="flex min-h-0 min-w-0 items-stretch justify-center gap-1">
-              <div className="flex w-3/5 min-w-0 items-stretch gap-1">
-                {charSlots(theirSeat, [3])}
-                {leaderSlot(theirSeat)}
-                {charSlots(theirSeat, [4])}
-              </div>
-            </div>
+            {/* 行2: 相手の内側列。中央=相手キャラ+リーダーのクラスタ */}
+            <CenterRow
+              center={
+                <>
+                  {charCell(theirSeat, 3)}
+                  {leaderCell(theirSeat)}
+                  {charCell(theirSeat, 4)}
+                </>
+              }
+            />
 
-            {/* 行3: 共有中央行（相手バトル3・フィールド共有1・自分バトル3） */}
-            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
-              {battleRow(theirSeat)}
-              {fieldSlot()}
-              {battleRow(mySeat)}
-            </div>
+            {/* 行3: 共有中央行。中央=フィールド共有1枚、左右にバトル×3ずつ */}
+            <CenterRow
+              left={battleGroup(theirSeat)}
+              leftAlign="end"
+              center={fieldCell()}
+              right={battleGroup(mySeat)}
+              rightAlign="start"
+            />
 
-            {/* 行4: 自分の内側列（キャラ3、中央寄せ） */}
-            <div className="flex min-h-0 min-w-0 items-stretch justify-center gap-1">
-              <div className="flex w-3/5 min-w-0 items-stretch gap-1">{charSlots(mySeat, [0, 1, 2])}</div>
-            </div>
+            {/* 行4: 自分の内側列。中央=自分キャラ3枚のクラスタ */}
+            <CenterRow
+              center={
+                <>
+                  {charCell(mySeat, 0)}
+                  {charCell(mySeat, 1)}
+                  {charCell(mySeat, 2)}
+                </>
+              }
+            />
 
-            {/* 行5: 自分の外側列（ゴミ箱＋デッキ＋キャラ2＋リーダー） */}
-            <div className="flex min-h-0 min-w-0 items-stretch gap-1">
-              {zoneBundle(mySeat, 'trash')}
-              {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
-              {charSlots(mySeat, [3])}
-              {leaderSlot(mySeat)}
-              {charSlots(mySeat, [4])}
-            </div>
+            {/* 行5: 自分の外側列。中央=自分キャラ+リーダーのクラスタ、左=ゴミ箱/デッキ、右=空き(スタック候補) */}
+            <CenterRow
+              left={
+                <>
+                  {zoneBundle(mySeat, 'trash')}
+                  {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
+                </>
+              }
+              leftAlign="end"
+              center={
+                <>
+                  {charCell(mySeat, 3)}
+                  {leaderCell(mySeat)}
+                  {charCell(mySeat, 4)}
+                </>
+              }
+            />
 
             {/* 行6: 自分の手札（大きく・扇状） */}
-            <div className="flex min-h-0 min-w-0 items-stretch">{zoneBundle(mySeat, 'hand', { fanOut: true })}</div>
+            <div ref={handRowRef} className="flex min-h-0 min-w-0 items-stretch">
+              {zoneBundle(mySeat, 'hand', { fanOut: true })}
+            </div>
           </div>
 
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
