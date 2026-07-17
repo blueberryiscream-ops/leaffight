@@ -61,7 +61,24 @@ wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: t
 
 ---
 
-## 3. PowerShell（データ生成スクリプト系）
+## 3. dnd-kitの罠
+
+### `closestCenter`単体は「広いドロップ領域の端」で誤爆する（P2.8で発見）
+手札のように「実際の占有幅より広いドロップ判定領域」を持つゾーンがあると、その領域の**端（見た目は空いているが実際はそのゾーンの内側）**にドロップしても、**中心座標が近いだけの別の（小さい）ゾーン**に奪われることがある。`closestCenter`は「ポインタがどの矩形の内側にいるか」ではなく「ドラッグ中の矩形の中心と各droppableの中心の距離」で決めるため、広いゾーンの端は自分自身の中心から遠く、隣の行の小さいゾーンの中心の方が近い、という逆転が起きる。
+
+**対策**: `pointerWithin`を先に試し、何もヒットしない時だけ`closestCenter`にフォールバックする合成戦略にする（`Board.tsx`の`collisionDetectionStrategy`）。
+```ts
+const collisionDetectionStrategy: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) return pointerCollisions
+  return closestCenter(args)
+}
+```
+新しいドロップゾーン（P3のスタック枠等）を足すときも、ゾーンの実際の占有幅とドロップ判定領域の大きさが違うなら同じ罠を踏む可能性がある。
+
+---
+
+## 4. PowerShell（データ生成スクリプト系）
 
 - **BOM付きUTF-8**で保存しないと日本語が壊れる（PowerShell 5.1）。Writeツールで書いた`.ps1`は`Get-Content -Raw -Encoding UTF8`→`Set-Content -Encoding UTF8`でBOM付きに直す。
 - **日本語パスを直書きしない**。`$PSScriptRoot`から導出する。
@@ -70,7 +87,7 @@ wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: t
 
 ---
 
-## 4. 設計上の禁止事項（破るとビルドや設計が壊れる）
+## 5. 設計上の禁止事項（破るとビルドや設計が壊れる）
 
 - 🚨 **`core/`に`ui/`・`net/`・`data/`・外部パッケージをimportしない。** `scripts/check-core-isolation.mjs`が`npm run build`の最初に走り、破るとビルドが落ちる（それが正しい）。
 - 🚨 **`localSeat`を`BoardState`に入れない。** `BoardState`は両クライアントに配信される共有物。`localSeat`（自分がどちらの座席か）はクライアントごとに違う値なので、入れた瞬間に配信で上書きされて壊れる（P2.5で確定した設計）。
@@ -81,7 +98,7 @@ wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: t
 
 ---
 
-## 5. フェーズをまたいだ経緯（要点だけ）
+## 6. フェーズをまたいだ経緯（要点だけ）
 
 - **P0**: データ基盤。`cards_v2.json`の`cost`フィールドは壊れている（レアリティ`R`を誤検出）。`cells`（生データ）から再導出すること。
 - **P1**: ローカル盤面。`core/board.ts`にBoardState/reducer、Undo/Redoはスナップショット方式。
@@ -89,5 +106,6 @@ wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: t
 - **P2.5**: 座席モデル。`Player('me'|'opp')`→`Seat('A'|'B')`。`core/`から視点依存語を排除。
 - **P2.6**: レイアウト刷新（1画面に収める）。`flex-1`で引き伸ばした結果、列が揃わなくなるバグを作った。
 - **P2.7**: レイアウト修正。マスのサイズをJS計測の固定pxに、中心線をリーダー-フィールド-リーダーで一致させた。
+- **P2.8**: カードの見た目（比率固定・表記法統一・デッキ出入りのfaceUp自動化・手札ドロップ判定・ホバー拡大）。
 
-各フェーズの詳細は `HANDOFF-P0.md`〜`HANDOFF-P2.7.md` を参照。設計の「正」は`DESIGN.md`。
+各フェーズの詳細は `HANDOFF-P0.md`〜`HANDOFF-P2.8.md` を参照。設計の「正」は`DESIGN.md`。

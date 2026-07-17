@@ -5,8 +5,9 @@ import type { BoardAction } from '../../core/actions'
 import type { CardInstance } from '../../core/board'
 import { effectiveStat, modifiersFor } from '../../core/board'
 import type { BoardState } from '../../core/board'
-import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
+import { ATTRS } from '../../core/types'
 import type { PoolCard } from '../../data/types'
+import { CardFace } from './CardFace'
 import { HoverPreview } from './HoverPreview'
 
 // 盤面上の1枚。操作の割り当ては DESIGN.md §4.17:
@@ -106,44 +107,35 @@ export function CardPiece({
           selected ? 'border-emerald-400 ring-2 ring-emerald-500/50' : 'border-slate-600'
         }`}
       >
-        {!faceUp ? (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-[9px] text-slate-500">
-            裏
-          </div>
-        ) : (
-          <div className="flex h-full w-full flex-col">
-            <div className="h-[55%] w-full shrink-0 bg-slate-950">
-              {imageUrl ? (
-                <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-center text-[9px] leading-tight text-slate-500">
-                  {card ? CARD_KIND_LABEL[card.kind] : '?'}
-                </div>
-              )}
-            </div>
-            <div className="flex-1 overflow-hidden px-1 py-0.5">
-              <div className="truncate text-[9px] font-semibold leading-tight text-slate-100">{name}</div>
-              {instance.kiryoku !== null && <div className="text-[8px] text-emerald-400">気{instance.kiryoku}</div>}
-              {mods.length > 0 && (
-                <div className="mt-0.5 flex flex-wrap gap-0.5">
-                  {ATTRS.filter((a) => mods.some((m) => m.stat === a)).map((a) => {
-                    const base = card?.stats?.[a] ?? 0
-                    const eff = effectiveStat(board, instance.iid, base, a)
-                    const diff = eff - base
-                    return (
-                      <span
-                        key={a}
-                        className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'}`}
-                      >
-                        {a}
-                        {diff >= 0 ? '+' : ''}
-                        {diff}
-                      </span>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+        <CardFace faceUp={faceUp} imageUrl={imageUrl} card={card} name={name} compact />
+
+        {/* オーバーレイ: 印刷されていない「今の状態」。画像/テキストどちらの上にも重ねる（PHASE2.8.md §2） */}
+        {faceUp && (instance.kiryoku !== null || mods.length > 0) && (
+          <div className="pointer-events-none absolute inset-x-0.5 bottom-0.5 flex flex-col items-start gap-0.5">
+            {instance.kiryoku !== null && (
+              <span className="rounded bg-slate-950/85 px-1 text-[8px] font-bold text-emerald-400">
+                気{instance.kiryoku}
+              </span>
+            )}
+            {mods.length > 0 && (
+              <div className="flex flex-wrap gap-0.5">
+                {ATTRS.filter((a) => mods.some((m) => m.stat === a)).map((a) => {
+                  const base = card?.stats?.[a] ?? 0
+                  const eff = effectiveStat(board, instance.iid, base, a)
+                  const diff = eff - base
+                  return (
+                    <span
+                      key={a}
+                      className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-emerald-900/90 text-emerald-300' : 'bg-red-900/90 text-red-300'}`}
+                    >
+                      {a}
+                      {diff >= 0 ? '+' : ''}
+                      {diff}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 

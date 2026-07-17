@@ -136,6 +136,16 @@ export function spawnCard(
   return { state: next, log: `${cardName} を ${ZONE_LABEL[zone]} に置いた` }
 }
 
+/**
+ * デッキへ入るときは裏、デッキから出るときは表にする（PHASE2.8.md §3「デッキから引いたカードが
+ * 裏のままなのは使い勝手が悪い」）。それ以外の移動では今の表裏を維持する（手動の裏返しは別途可能）。
+ */
+function resolveFaceUp(fromZone: ZoneId, toZone: ZoneId, current: boolean): boolean {
+  if (toZone === 'deck') return false
+  if (fromZone === 'deck') return true
+  return current
+}
+
 /** 占有スロットに移動するときは、既存の占有カードと入れ替える（実物マットの入れ替えと同じ挙動） */
 export function moveCard(
   state: BoardState,
@@ -147,6 +157,7 @@ export function moveCard(
   const fromZone = card.zone
   const fromOwner = card.owner
   const fromIndex = card.index
+  const faceUp = resolveFaceUp(fromZone, args.toZone, card.faceUp)
 
   let next = cloneBoard(state)
 
@@ -155,21 +166,33 @@ export function moveCard(
     // （P1のmoveCardの既存の入れ替え挙動そのまま。PHASE2.6.md §3「自動化はP4」）
     const occupant = fieldCard(next)
     const actualOccupant = occupant && occupant.iid !== card.iid ? occupant : undefined
-    next.cards[card.iid] = { ...card, owner: toOwner, zone: 'field', index: 0 }
+    next.cards[card.iid] = { ...card, owner: toOwner, zone: 'field', index: 0, faceUp }
     if (actualOccupant) {
-      next.cards[actualOccupant.iid] = { ...actualOccupant, owner: fromOwner, zone: fromZone, index: fromIndex }
+      next.cards[actualOccupant.iid] = {
+        ...actualOccupant,
+        owner: fromOwner,
+        zone: fromZone,
+        index: fromIndex,
+        faceUp: resolveFaceUp(args.toZone, fromZone, actualOccupant.faceUp),
+      }
     }
   } else if (isSlotted(args.toZone) && args.toIndex !== undefined) {
     const occupant = Object.values(next.cards).find(
       (c) => c.owner === toOwner && c.zone === args.toZone && c.index === args.toIndex && c.iid !== card.iid,
     )
-    next.cards[card.iid] = { ...card, owner: toOwner, zone: args.toZone, index: args.toIndex }
+    next.cards[card.iid] = { ...card, owner: toOwner, zone: args.toZone, index: args.toIndex, faceUp }
     if (occupant) {
-      next.cards[occupant.iid] = { ...occupant, owner: fromOwner, zone: fromZone, index: fromIndex }
+      next.cards[occupant.iid] = {
+        ...occupant,
+        owner: fromOwner,
+        zone: fromZone,
+        index: fromIndex,
+        faceUp: resolveFaceUp(args.toZone, fromZone, occupant.faceUp),
+      }
     }
   } else {
     const toIndex = args.toIndex ?? cardsInZone(next, toOwner, args.toZone).length
-    next.cards[card.iid] = { ...card, owner: toOwner, zone: args.toZone, index: toIndex }
+    next.cards[card.iid] = { ...card, owner: toOwner, zone: args.toZone, index: toIndex, faceUp }
     next = normalizeZone(next, toOwner, args.toZone)
     if (fromOwner !== toOwner || fromZone !== args.toZone) {
       next = normalizeZone(next, fromOwner, fromZone)

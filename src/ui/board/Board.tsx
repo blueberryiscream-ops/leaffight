@@ -3,8 +3,10 @@ import {
   closestCenter,
   DndContext,
   MouseSensor,
+  pointerWithin,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
@@ -34,6 +36,18 @@ function parseDropId(id: string): DropTarget | null {
   if (parts.length === 2) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId }
   if (parts.length === 3) return { toOwner: parts[0] as Seat, toZone: parts[1] as ZoneId, toIndex: Number(parts[2]) }
   return null
+}
+
+/**
+ * closestCenter単体だと、手札のような「実際に占有している幅より広いドロップ判定領域」を持つ
+ * ゾーンの端（空いて見える部分）にドロップしたとき、中心座標が近いだけの別の（小さい）ゾーンに
+ * 奪われる（PHASE2.8.md §4）。ポインタが実際に入っている領域を優先し、どこにも入っていない
+ * ときだけ最近傍にフォールバックする。
+ */
+const collisionDetectionStrategy: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) return pointerCollisions
+  return closestCenter(args)
 }
 
 /**
@@ -172,7 +186,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onClick={() => setSelectedIid(inst.iid)}
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
-            size={cellSquare}
+            size={cellPortrait}
           />
         )}
       </DroppableSlot>
@@ -193,7 +207,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onClick={() => setSelectedIid(inst.iid)}
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
-            size={cellSquare}
+            size={cellPortrait}
           />
         )}
       </DroppableSlot>
@@ -216,7 +230,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
                 onClick={() => setSelectedIid(inst.iid)}
                 onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
                 selected={selectedIid === inst.iid}
-                size={cellSquare}
+                size={cellPortrait}
               />
             )}
           </DroppableSlot>
@@ -271,7 +285,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
   )
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={collisionDetectionStrategy} onDragEnd={handleDragEnd}>
       <div className="flex h-full flex-col overflow-hidden bg-slate-950 text-slate-200">
         {/* 上部の薄いチロム。原本図には無いが、接続/追加/Undo等の操作をどこかに置く必要があるため
             盤面の外（chrome）にまとめた（PHASE2.6.mdはこの種の操作の置き場を指定していないための判断）。*/}
