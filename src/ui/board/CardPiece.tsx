@@ -36,6 +36,7 @@ export function CardPiece({
   dragDisabled,
   hidden,
   selected,
+  flipped,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
@@ -57,6 +58,11 @@ export function CardPiece({
   hidden?: boolean
   /** 詳細パネルで選択中のカードを軽く強調する */
   selected?: boolean
+  /**
+   * 相手が置いたカードを180°反転して見せる（PHASE2.9b.md §2-1）。owner!==mySeatをBoard側が渡す。
+   * 手札/デッキ/ゴミ箱（向きに意味がない束）には渡さない。
+   */
+  flipped?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: instance.iid,
@@ -64,7 +70,10 @@ export function CardPiece({
   })
   const [hovered, setHovered] = useState(false)
 
-  const rotate = instance.orientation === 'rested' ? 90 : 0
+  // 向き（PHASE2.9b.md §2-1）: 相手のカードは180°反転、消耗は上部が自分から見て左に来るよう-90°。
+  const base = flipped ? 180 : 0
+  const tap = instance.orientation === 'rested' ? -90 : 0
+  const rotate = base + tap
   const style = {
     width: size.w,
     height: size.h,

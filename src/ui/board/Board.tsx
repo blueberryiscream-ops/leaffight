@@ -187,6 +187,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
             size={cellPortrait}
+            flipped={owner !== mySeat}
           />
         )}
       </DroppableSlot>
@@ -208,6 +209,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
             size={cellPortrait}
+            flipped={owner !== mySeat}
           />
         )}
       </DroppableSlot>
@@ -231,6 +233,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
                 onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
                 selected={selectedIid === inst.iid}
                 size={cellPortrait}
+                flipped={owner !== mySeat}
               />
             )}
           </DroppableSlot>
@@ -254,6 +257,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
             selected={selectedIid === inst.iid}
             size={cellPortrait}
+            flipped={inst.owner !== mySeat}
           />
         )}
       </DroppableSlot>
