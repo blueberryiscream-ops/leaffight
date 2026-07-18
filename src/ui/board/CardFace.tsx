@@ -1,6 +1,15 @@
 import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
 import type { PoolCard } from '../../data/types'
 
+// 使用代償の表記（確定 2026-07-18・PHASE2.9a.md §2-1）: costとattrを連結してそのまま出す
+// （例 cost="WWW",attr="力" → "WWW力"）。両方空の時だけ行を出さない。
+// 将来アイコン化する可能性があるため、文字列生成をここに切り出しておく。
+// ⚠️ 一部カードはcost欄に解析ノイズ（「味方」「気」等）が混入している（データ側の掃除案件）。
+// 表示側では加工せずそのまま出す。
+function formatCost(card: PoolCard | undefined): string {
+  return (card?.cost ?? '') + (card?.attr ?? '')
+}
+
 /**
  * カード面の中身（表向き時）。PHASE2.8.md §2: 画像がある→全面画像、無い→全面テキスト
  * （能力文が主役）。上下分割しない。気力・修正等の「盤面上の状態」はここでは描かない
@@ -37,14 +46,18 @@ export function CardFace({
   const hasStats = !!card?.stats
   const hasBattle = !!(card?.battleAtk || card?.battleDef)
   const hasAbilities = !!card && card.abilities.length > 0
+  const cost = formatCost(card)
 
   return (
     <div
       className={`flex h-full w-full flex-col overflow-hidden bg-slate-950 ${compact ? 'gap-0.5 px-1 py-0.5' : 'gap-1.5 px-2.5 py-2'}`}
     >
-      <div className={`font-semibold leading-tight text-slate-100 ${compact ? 'text-[9px]' : 'text-sm'}`}>{name}</div>
+      <div className={`font-semibold leading-tight text-slate-100 ${compact ? 'text-[11px]' : 'text-sm'}`}>{name}</div>
+      {cost !== '' && (
+        <div className={`text-slate-400 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>{cost}</div>
+      )}
       {hasStats && (
-        <div className={`flex flex-wrap gap-x-1.5 text-slate-400 ${compact ? 'text-[7px]' : 'text-[11px]'}`}>
+        <div className={`flex flex-wrap gap-x-1.5 text-slate-400 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
           {ATTRS.map((a) => (
             <span key={a}>
               {a}
@@ -54,13 +67,13 @@ export function CardFace({
         </div>
       )}
       {hasBattle && (
-        <div className={`text-slate-300 ${compact ? 'text-[7px]' : 'text-[11px]'}`}>
+        <div className={`text-slate-300 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
           攻{card?.battleAtk} 防{card?.battleDef}
         </div>
       )}
       {hasAbilities ? (
         <div
-          className={`flex-1 overflow-hidden text-slate-300 ${compact ? 'text-[7px] leading-snug' : 'text-[11px] leading-snug'}`}
+          className={`flex-1 overflow-hidden text-slate-300 ${compact ? 'text-[9px] leading-snug' : 'text-[11px] leading-snug'}`}
         >
           {card!.abilities.map((ab, i) => (
             <div key={i} className={i > 0 ? 'mt-0.5' : ''}>
