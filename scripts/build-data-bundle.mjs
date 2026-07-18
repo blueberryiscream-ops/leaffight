@@ -104,6 +104,10 @@ function requireFile(p, what) {
 const wikiCards = readJson(requireFile(path.join(LOCAL, 'sources', 'cards_v2.json'), 'LFWIKI パース結果'))
 const tcgCards = readJson(requireFile(path.join(LOCAL, 'cards.json'), 'tcg-db（画像の対応表）'))
 const xCards = readCsv(requireFile(path.join(LOCAL, 'sources', 'x_cards.csv'), 'X @LEAFFIGHTTCG の対応表'))
+// 駿河屋: tcg-dbに無いカードだけを対象に、商品名でマッチ済みの対応表（scripts/../_local/sources/match_suruga.mjs が生成）
+// ファイルが無い場合は空扱い（未実行でもbundle生成自体は壊さない）
+const surugaMatchPath = path.join(LOCAL, 'sources', 'suruga_matched.csv')
+const surugaCards = fs.existsSync(surugaMatchPath) ? readCsv(surugaMatchPath) : []
 
 // ---------------------------------------------------------------------------
 // 1. プール抽出
@@ -192,7 +196,11 @@ for (const [id, printings] of groups) {
 cards.sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id, 'ja'))
 
 // ---------------------------------------------------------------------------
-// 4. 画像の紐付け（第1候補 tcg-db のスキャン画像、第2候補 X の実物写真）
+// 4. 画像の紐付け（第1候補 tcg-db のスキャン画像、第2候補 駿河屋の実物写真、第3候補 X の実物写真）
+//
+// 駿河屋はtcg-dbより解像度・撮影品質が安定して良いためXより優先する（ユーザー判断、2026-07-18）。
+// suruga_matched.csv の holeId は「tcg-dbに画像が無いカードだけ」を対象に事前突合済みなので、
+// ここでは card.id（= `${kind}_${norm(name)}`、holeIdと同じ形式）で引くだけでよい。
 // ---------------------------------------------------------------------------
 const CTYPE_TO_KIND = {
   'キャラ': 'c', 'リーダー': 'c', 'タッグキャラ': 't',
@@ -213,6 +221,12 @@ for (const r of xCards) {
   if (!n || !r.file) continue
   if (!xByName.has(n)) xByName.set(n, [])
   xByName.get(n).push(r)
+}
+
+const surugaByHoleId = new Map()
+for (const r of surugaCards) {
+  if (!r.holeId || !r.surugaId) continue
+  surugaByHoleId.set(r.holeId, r.surugaId)
 }
 
 /** 同名の画像が複数ある（tcg-db 73件 / X 78件）ので、決め方を固定して再現性を持たせる */
@@ -250,7 +264,7 @@ const safePath = (id) => `images/${id.replace(/[\\/:*?"<>|]/g, '_')}.jpg`
 
 const zipFiles = {}
 const usedPaths = new Set()
-const stats = { tcg: 0, x: 0, none: 0 }
+const stats = { tcg: 0, suruga: 0, x: 0, none: 0 }
 
 for (const card of cards) {
   const key = norm(card.name)
@@ -258,11 +272,16 @@ for (const card of cards) {
 
   const tcgHits = tcgByName.get(key)
   const xHits = xByName.get(key)
+  const surugaId = surugaByHoleId.get(card.id)
 
   if (tcgHits) {
     const hit = pickTcg(tcgHits, card.kind)
     const p = path.join(LOCAL, 'card_images', hit.setDir, `${hit.id}.jpg`)
     if (fs.existsSync(p)) { file = p; stats.tcg++ }
+  }
+  if (!file && surugaId) {
+    const p = path.join(LOCAL, 'suruga_card_images', `${surugaId.toLowerCase()}.jpg`)
+    if (fs.existsSync(p)) { file = p; stats.suruga++ }
   }
   if (!file && xHits) {
     const hit = pickX(xHits)
@@ -290,7 +309,7 @@ const meta = {
   generatedAt: new Date().toISOString(),
   poolSets: POOL_SETS.filter((s) => pool.some((c) => c.setVer === s)),
   cardCount: cards.length,
-  imageCount: stats.tcg + stats.x,
+  imageCount: stats.tcg + stats.suruga + stats.x,
 }
 
 const enc = new TextEncoder()
@@ -315,6 +334,7 @@ console.log(`  ユニーク名のみ    : ${new Set(cards.map((c) => norm(c.name
 console.log('')
 console.log(`画像: ${withImage} 種 / ${cards.length} 種 (${((withImage / cards.length) * 100).toFixed(1)}%)`)
 console.log(`  tcg-db 由来       : ${stats.tcg}`)
+console.log(`  駿河屋 由来       : ${stats.suruga}`)
 console.log(`  X 由来            : ${stats.x}`)
 console.log(`  画像なし          : ${stats.none}`)
 console.log('')
