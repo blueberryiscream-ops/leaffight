@@ -24,7 +24,7 @@ export function HoverPreview({
   faceUp: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -34,24 +34,27 @@ export function HoverPreview({
     const anchorRect = anchor.getBoundingClientRect()
     const gap = 8
     const vw = window.innerWidth
+    const vh = window.innerHeight
 
-    // 縦: 上に十分な余白が無ければ下に反転
+    // 縦: 上に十分な余白が無ければ下に配置。どちらの場合も画面内にクランプする
+    // （PHASE2.9c.md §2-5。以前はbottom反転のみで、上下どちらにも入らない小さい
+    // ビューポート＋盤面中段のカードで画面下端をはみ出していた）。
     const spaceAbove = anchorRect.top
     const placeBelow = spaceAbove < previewRect.height + gap
+    let top = placeBelow ? anchorRect.bottom + gap : anchorRect.top - previewRect.height - gap
+    top = Math.max(gap, Math.min(top, vh - previewRect.height - gap))
+    const topRelativeToAnchor = top - anchorRect.top
 
     // 横: アンカー中心に合わせつつ、ビューポート内にクランプ
     let left = anchorRect.left + anchorRect.width / 2 - previewRect.width / 2
     left = Math.max(gap, Math.min(left, vw - previewRect.width - gap))
     const leftRelativeToAnchor = left - anchorRect.left
 
-    const top = placeBelow ? anchorRect.height + gap : undefined
-    const bottom = placeBelow ? undefined : anchorRect.height + gap
-
-    setPos({ left: leftRelativeToAnchor, top, bottom })
+    setPos({ left: leftRelativeToAnchor, top: topRelativeToAnchor })
   }, [])
 
   const style: React.CSSProperties = pos
-    ? { position: 'absolute', left: pos.left, top: pos.top, bottom: pos.bottom, visibility: 'visible' }
+    ? { position: 'absolute', left: pos.left, top: pos.top, visibility: 'visible' }
     : { position: 'absolute', left: 0, top: '100%', visibility: 'hidden' }
 
   return (
