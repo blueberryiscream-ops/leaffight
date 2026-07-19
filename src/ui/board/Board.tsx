@@ -104,6 +104,16 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
+  // レイアウトA(現行・6行)/B(段数削減・4行)の実行時切替（PHASE2.10.md）。localStorageで保持、既定はA。
+  const [layout, setLayout] = useState<'A' | 'B'>(
+    () => (localStorage.getItem('lf.layout') as 'A' | 'B' | null) ?? 'A',
+  )
+  const toggleLayout = () => {
+    const next = layout === 'A' ? 'B' : 'A'
+    setLayout(next)
+    localStorage.setItem('lf.layout', next)
+  }
+
   const mySeat: Seat = localSeat
   const theirSeat: Seat = otherSeat(localSeat)
 
@@ -298,6 +308,167 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     />
   )
 
+  // レイアウトA: 現行6行構成（PHASE2.7.md）。中身は無変更（PHASE2.10.md §0「Aの見た目・挙動を壊さない」）。
+  const renderLayoutA = () => (
+    // 🚨 key必須: A⇄B切替時にDOMノードを強制的に作り直させる。同じ位置に同じ要素型(div)が
+    // 並ぶだけだとReactが既存ノードを再利用し、rowRef(useMeasuredHeight)のコールバックrefが
+    // 再発火せず、切替後もrowHが古いレイアウトの値のまま固まる（実機で発覚）。
+    <div key="A" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1fr 1.6fr' }}>
+      {/* 行1: 相手の外側列。中央=相手キャラ3枚のクラスタ、左=手札(帯)、右=ゴミ箱/デッキ */}
+      <CenterRow
+        rowRef={rowRef}
+        left={zoneBundle(theirSeat, 'hand', { thin: true })}
+        leftAlign="start"
+        center={
+          <>
+            {charCell(theirSeat, 0)}
+            {charCell(theirSeat, 1)}
+            {charCell(theirSeat, 2)}
+          </>
+        }
+        right={
+          <>
+            {zoneBundle(theirSeat, 'trash')}
+            {zoneBundle(theirSeat, 'deck')}
+          </>
+        }
+        rightAlign="start"
+      />
+
+      {/* 行2: 相手の内側列。中央=相手キャラ+リーダーのクラスタ */}
+      <CenterRow
+        center={
+          <>
+            {charCell(theirSeat, 3)}
+            {leaderCell(theirSeat)}
+            {charCell(theirSeat, 4)}
+          </>
+        }
+      />
+
+      {/* 行3: 共有中央行。中央=フィールド共有1枚、左右にバトル×3ずつ */}
+      <CenterRow
+        left={battleGroup(theirSeat)}
+        leftAlign="end"
+        center={fieldCell()}
+        right={battleGroup(mySeat)}
+        rightAlign="start"
+      />
+
+      {/* 行4: 自分の内側列。中央=自分キャラ3枚のクラスタ */}
+      <CenterRow
+        center={
+          <>
+            {charCell(mySeat, 0)}
+            {charCell(mySeat, 1)}
+            {charCell(mySeat, 2)}
+          </>
+        }
+      />
+
+      {/* 行5: 自分の外側列。中央=自分キャラ+リーダーのクラスタ、左=ゴミ箱/デッキ、右=空き(スタック候補) */}
+      <CenterRow
+        left={
+          <>
+            {zoneBundle(mySeat, 'trash')}
+            {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
+          </>
+        }
+        leftAlign="end"
+        center={
+          <>
+            {charCell(mySeat, 3)}
+            {leaderCell(mySeat)}
+            {charCell(mySeat, 4)}
+          </>
+        }
+      />
+
+      {/* 行6: 自分の手札（大きく・扇状） */}
+      <div ref={handRowRef} className="flex min-h-0 min-w-0 items-stretch">
+        {zoneBundle(mySeat, 'hand', { fanOut: true })}
+      </div>
+    </div>
+  )
+
+  // レイアウトB: 段数削減版（PHASE2.10.md）。各プレイヤー2行（外側=ゴミ箱/デッキ/フィールドorハンド帯
+  // +キャラ3・リーダー・キャラ4、内側=バトル×3+キャラ0/1/2）。共有だったバトル行を廃止し、
+  // 各プレイヤー自身のバトルを内側行の左へ寄せる。向き(P2.9b)・アイテム重ね(P2.9c)は
+  // charCell等のヘルパーが担うのでAと共通のまま自動的に効く。
+  const renderLayoutB = () => (
+    <div key="B" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1.6fr' }}>
+      {/* 行1: 相手の外側列。中央=相手キャラ3・リーダー・キャラ4、左=ゴミ箱/デッキ/手札(帯) */}
+      <CenterRow
+        rowRef={rowRef}
+        left={
+          <>
+            {zoneBundle(theirSeat, 'trash')}
+            {zoneBundle(theirSeat, 'deck')}
+            {zoneBundle(theirSeat, 'hand', { thin: true })}
+          </>
+        }
+        leftAlign="end"
+        center={
+          <>
+            {charCell(theirSeat, 3)}
+            {leaderCell(theirSeat)}
+            {charCell(theirSeat, 4)}
+          </>
+        }
+      />
+
+      {/* 行2: 相手の内側列。左=相手バトル×3、中央=相手キャラ0/1/2 */}
+      <CenterRow
+        left={battleGroup(theirSeat)}
+        leftAlign="end"
+        center={
+          <>
+            {charCell(theirSeat, 0)}
+            {charCell(theirSeat, 1)}
+            {charCell(theirSeat, 2)}
+          </>
+        }
+      />
+
+      {/* 行3: 自分の内側列。左=自分バトル×3、中央=自分キャラ0/1/2 */}
+      <CenterRow
+        left={battleGroup(mySeat)}
+        leftAlign="end"
+        center={
+          <>
+            {charCell(mySeat, 0)}
+            {charCell(mySeat, 1)}
+            {charCell(mySeat, 2)}
+          </>
+        }
+      />
+
+      {/* 行4: 自分の外側列。中央=自分キャラ3・リーダー・キャラ4、左=ゴミ箱/デッキ/フィールド(共有1枚) */}
+      <CenterRow
+        left={
+          <>
+            {zoneBundle(mySeat, 'trash')}
+            {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
+            {fieldCell()}
+          </>
+        }
+        leftAlign="end"
+        center={
+          <>
+            {charCell(mySeat, 3)}
+            {leaderCell(mySeat)}
+            {charCell(mySeat, 4)}
+          </>
+        }
+      />
+
+      {/* 行5: 自分の手札（大きく・扇状） */}
+      <div ref={handRowRef} className="flex min-h-0 min-w-0 items-stretch">
+        {zoneBundle(mySeat, 'hand', { fanOut: true })}
+      </div>
+    </div>
+  )
+
   return (
     <DndContext sensors={sensors} collisionDetection={collisionDetectionStrategy} onDragEnd={handleDragEnd}>
       <div className="flex h-full flex-col overflow-hidden bg-slate-950 text-slate-200">
@@ -321,6 +492,14 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             className="rounded border border-emerald-700 px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
           >
             ＋ カードを追加
+          </button>
+          <button
+            type="button"
+            onClick={toggleLayout}
+            title="盤面レイアウトを見比べる（PHASE2.10.md。localStorageに保存）"
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+          >
+            レイアウト: {layout} ⇄
           </button>
           {mode !== 'guest' && (
             <>
@@ -352,8 +531,11 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           </div>
         </div>
 
-        {/* 本体: 左(システム+ログ) / 中央(盤面) / 右(詳細+割り込み枠) の3カラム。スクロールなし */}
-        <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr_300px] gap-1.5 p-1.5">
+        {/* 本体: 左(システム+ログ) / 中央(盤面) / [Bのみ]スタック置き場 / 右(詳細+割り込み枠)。スクロールなし */}
+        <div
+          className="grid min-h-0 flex-1 gap-1.5 p-1.5"
+          style={{ gridTemplateColumns: layout === 'B' ? '180px 1fr 140px 300px' : '180px 1fr 300px' }}
+        >
           {/* 左列 */}
           <div className="flex min-h-0 flex-col gap-1.5">
             <div className="shrink-0 rounded border border-slate-800 bg-slate-900/60 p-2 text-[10px] text-slate-500">
@@ -365,83 +547,21 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
             <LogPanel log={log} />
           </div>
 
-          {/* 中央: 盤面。6行。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
-          <div className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1fr 1.6fr' }}>
-            {/* 行1: 相手の外側列。中央=相手キャラ3枚のクラスタ、左=手札(帯)、右=ゴミ箱/デッキ */}
-            <CenterRow
-              rowRef={rowRef}
-              left={zoneBundle(theirSeat, 'hand', { thin: true })}
-              leftAlign="start"
-              center={
-                <>
-                  {charCell(theirSeat, 0)}
-                  {charCell(theirSeat, 1)}
-                  {charCell(theirSeat, 2)}
-                </>
-              }
-              right={
-                <>
-                  {zoneBundle(theirSeat, 'trash')}
-                  {zoneBundle(theirSeat, 'deck')}
-                </>
-              }
-              rightAlign="start"
-            />
+          {/* 中央: 盤面。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
+          {layout === 'A' ? renderLayoutA() : renderLayoutB()}
 
-            {/* 行2: 相手の内側列。中央=相手キャラ+リーダーのクラスタ */}
-            <CenterRow
-              center={
-                <>
-                  {charCell(theirSeat, 3)}
-                  {leaderCell(theirSeat)}
-                  {charCell(theirSeat, 4)}
-                </>
-              }
-            />
-
-            {/* 行3: 共有中央行。中央=フィールド共有1枚、左右にバトル×3ずつ */}
-            <CenterRow
-              left={battleGroup(theirSeat)}
-              leftAlign="end"
-              center={fieldCell()}
-              right={battleGroup(mySeat)}
-              rightAlign="start"
-            />
-
-            {/* 行4: 自分の内側列。中央=自分キャラ3枚のクラスタ */}
-            <CenterRow
-              center={
-                <>
-                  {charCell(mySeat, 0)}
-                  {charCell(mySeat, 1)}
-                  {charCell(mySeat, 2)}
-                </>
-              }
-            />
-
-            {/* 行5: 自分の外側列。中央=自分キャラ+リーダーのクラスタ、左=ゴミ箱/デッキ、右=空き(スタック候補) */}
-            <CenterRow
-              left={
-                <>
-                  {zoneBundle(mySeat, 'trash')}
-                  {zoneBundle(mySeat, 'deck', { onShuffle: () => handleShuffle(mySeat) })}
-                </>
-              }
-              leftAlign="end"
-              center={
-                <>
-                  {charCell(mySeat, 3)}
-                  {leaderCell(mySeat)}
-                  {charCell(mySeat, 4)}
-                </>
-              }
-            />
-
-            {/* 行6: 自分の手札（大きく・扇状） */}
-            <div ref={handRowRef} className="flex min-h-0 min-w-0 items-stretch">
-              {zoneBundle(mySeat, 'hand', { fanOut: true })}
+          {/* Bのみ: スタック処理中置き場（P3の割り込み/優先権スタックの予約枠。PHASE2.10.md §1） */}
+          {layout === 'B' && (
+            <div className="flex min-h-0 flex-col items-center justify-center rounded border border-dashed border-slate-700 bg-slate-950/30 p-2 text-center text-[10px] text-slate-600">
+              スタック
+              <br />
+              処理中
+              <br />
+              置き場
+              <br />
+              (P3で実装)
             </div>
-          </div>
+          )}
 
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
