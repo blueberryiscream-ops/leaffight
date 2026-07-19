@@ -14,11 +14,11 @@ import { cardsInZone, fieldCard } from '../../core/board'
 import type { PoolCard } from '../../data/types'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
-import { CardPiece } from './CardPiece'
 import { ConnectionPanel } from './ConnectionPanel'
 import { DetailPanel } from './DetailPanel'
 import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
+import { StackedCardSlot } from './StackedCardSlot'
 import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
@@ -172,20 +172,27 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     resetBoard()
   }
 
+  // 対象に付与されているアイテム（StackedCardSlotへ渡す。PHASE2.9c.md §2-2）。安定した並びにするためindex順。
+  const attachedItemsOf = (targetIid: string) =>
+    Object.values(board.cards)
+      .filter((c) => c.attachedTo === targetIid)
+      .sort((a, b) => a.index - b.index)
+
   const charCell = (owner: Seat, index: number) => {
     const inst = cardsInZone(board, owner, 'char').find((c) => c.index === index)
     return (
       <DroppableSlot key={`${owner}-char-${index}`} dropId={`${owner}:char:${index}`} label="キャラ" size={cellSquare}>
         {inst && (
-          <CardPiece
-            instance={inst}
-            card={cardOf(inst.cardId)}
-            imageUrl={imageUrlOf(inst.cardId)}
+          <StackedCardSlot
+            target={inst}
+            items={attachedItemsOf(inst.iid)}
+            cardOf={cardOf}
+            imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onClick={() => setSelectedIid(inst.iid)}
-            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
-            selected={selectedIid === inst.iid}
+            onCardClick={setSelectedIid}
+            onCardContextMenu={openMenu}
+            selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
           />
@@ -199,15 +206,16 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     return (
       <DroppableSlot dropId={`${owner}:leader:0`} label="リーダー" size={cellSquare}>
         {inst && (
-          <CardPiece
-            instance={inst}
-            card={cardOf(inst.cardId)}
-            imageUrl={imageUrlOf(inst.cardId)}
+          <StackedCardSlot
+            target={inst}
+            items={attachedItemsOf(inst.iid)}
+            cardOf={cardOf}
+            imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onClick={() => setSelectedIid(inst.iid)}
-            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
-            selected={selectedIid === inst.iid}
+            onCardClick={setSelectedIid}
+            onCardContextMenu={openMenu}
+            selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
           />
@@ -223,15 +231,16 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
         return (
           <DroppableSlot key={`${owner}-battle-${i}`} dropId={`${owner}:battle:${i}`} label="バトル" size={cellSquare}>
             {inst && (
-              <CardPiece
-                instance={inst}
-                card={cardOf(inst.cardId)}
-                imageUrl={imageUrlOf(inst.cardId)}
+              <StackedCardSlot
+                target={inst}
+                items={attachedItemsOf(inst.iid)}
+                cardOf={cardOf}
+                imageUrlOf={imageUrlOf}
                 board={board}
                 dispatch={dispatch}
-                onClick={() => setSelectedIid(inst.iid)}
-                onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
-                selected={selectedIid === inst.iid}
+                onCardClick={setSelectedIid}
+                onCardContextMenu={openMenu}
+                selectedIid={selectedIid}
                 size={cellPortrait}
                 flipped={owner !== mySeat}
               />
@@ -247,15 +256,16 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
     return (
       <DroppableSlot dropId="field" label="フィールド" emphasize size={cellPortrait}>
         {inst && (
-          <CardPiece
-            instance={inst}
-            card={cardOf(inst.cardId)}
-            imageUrl={imageUrlOf(inst.cardId)}
+          <StackedCardSlot
+            target={inst}
+            items={attachedItemsOf(inst.iid)}
+            cardOf={cardOf}
+            imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onClick={() => setSelectedIid(inst.iid)}
-            onContextMenu={(x, y) => openMenu(inst.iid, x, y)}
-            selected={selectedIid === inst.iid}
+            onCardClick={setSelectedIid}
+            onCardContextMenu={openMenu}
+            selectedIid={selectedIid}
             size={cellPortrait}
             flipped={inst.owner !== mySeat}
           />

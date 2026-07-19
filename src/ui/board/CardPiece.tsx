@@ -37,6 +37,8 @@ export function CardPiece({
   hidden,
   selected,
   flipped,
+  groupRotate,
+  attachBadgeOverride,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
@@ -63,6 +65,20 @@ export function CardPiece({
    * 手札/デッキ/ゴミ箱（向きに意味がない束）には渡さない。
    */
   flipped?: boolean
+  /**
+   * アイテムを重ねたスタック内で使う（PHASE2.9c.md §2-4）。指定時は instance.orientation/flipped を
+   * 見ず、この角度・原点で回転する（対象＋付随アイテムが同じ軸で1つの剛体として回るようにするため）。
+   * origin は各カード自身の左上を基準にしたCSS transform-origin値（例 "23px 40px"）。
+   * ここを起点にすることで、スタック全体を包む要素自体は回転させずに済み、
+   * HoverPreview（回転しない兄弟要素）が親の回転を巻き込まれる問題を避けられる。
+   */
+  groupRotate?: { deg: number; origin: string }
+  /**
+   * 🔗バッジの件数を上書きする（PHASE2.9c.md §1-5）。スタック内の対象カードは重ね表示自体で
+   * 付随数が見えるためバッジは冗長＝0を渡して隠す。付与数が多く重ねが窮屈な時だけ
+   * `StackedCardSlot`側から実数を渡して「+N」相当として出す。未指定時は自分で数える（従来通り）。
+   */
+  attachBadgeOverride?: number
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: instance.iid,
@@ -71,20 +87,23 @@ export function CardPiece({
   const [hovered, setHovered] = useState(false)
 
   // 向き（PHASE2.9b.md §2-1）: 相手のカードは180°反転、消耗は上部が自分から見て左に来るよう-90°。
+  // グループ回転中（PHASE2.9c.md §2-4）は外から角度・原点を指定されるので自分では計算しない。
   const base = flipped ? 180 : 0
   const tap = instance.orientation === 'rested' ? -90 : 0
-  const rotate = base + tap
+  const rotate = groupRotate ? groupRotate.deg : base + tap
   const style = {
     width: size.w,
     height: size.h,
     transform: transform
       ? `${CSS.Translate.toString(transform)} rotate(${rotate}deg)`
       : `rotate(${rotate}deg)`,
+    transformOrigin: groupRotate?.origin,
     opacity: isDragging ? 0.35 : 1,
   }
 
   const mods = modifiersFor(board, instance.iid)
-  const attachedCount = Object.values(board.cards).filter((c) => c.attachedTo === instance.iid).length
+  const attachedCount =
+    attachBadgeOverride ?? Object.values(board.cards).filter((c) => c.attachedTo === instance.iid).length
   const faceUp = hidden ? false : instance.faceUp
   const name = card?.name ?? instance.cardId
 

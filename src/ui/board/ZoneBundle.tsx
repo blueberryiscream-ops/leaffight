@@ -57,7 +57,9 @@ export function ZoneBundle({
 }) {
   const dropId = `${owner}:${zone}`
   const { setNodeRef, isOver } = useDroppable({ id: dropId })
-  const list = cardsInZone(board, owner, zone)
+  // 付与済みアイテムは対象カードの上に重ねて描く（StackedCardSlot、PHASE2.9c.md §2-1）ので、
+  // 元のゾーン（主に手札）にダブって出さない。
+  const list = cardsInZone(board, owner, zone).filter((c) => c.attachedTo === null)
 
   if (thin) {
     return (
