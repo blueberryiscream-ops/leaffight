@@ -19,6 +19,7 @@ import { DetailPanel } from './DetailPanel'
 import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
 import { StackedCardSlot } from './StackedCardSlot'
+import { StackPanel } from './StackPanel'
 import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
@@ -501,6 +502,14 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           >
             レイアウト: {layout} ⇄
           </button>
+          <button
+            type="button"
+            onClick={() => dispatch({ type: 'setMode', mode: board.mode === 'assist' ? 'free' : 'assist' })}
+            title="アシスト=優先権/スタックが働く。フリー=優先権オフで自由操作（DESIGN.md §5.1・共有・同期される）"
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+          >
+            モード: {board.mode === 'assist' ? 'アシスト' : 'フリー'} ⇄
+          </button>
           {mode !== 'guest' && (
             <>
               <button type="button" onClick={undo} disabled={!canUndo} className="rounded border border-slate-600 px-2 py-1 text-xs disabled:opacity-30">
@@ -550,30 +559,21 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           {/* 中央: 盤面。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
           {layout === 'A' ? renderLayoutA() : renderLayoutB()}
 
-          {/* Bのみ: スタック処理中置き場（P3の割り込み/優先権スタックの予約枠。PHASE2.10.md §1） */}
-          {layout === 'B' && (
-            <div className="flex min-h-0 flex-col items-center justify-center rounded border border-dashed border-slate-700 bg-slate-950/30 p-2 text-center text-[10px] text-slate-600">
-              スタック
-              <br />
-              処理中
-              <br />
-              置き場
-              <br />
-              (P3で実装)
-            </div>
-          )}
+          {/* Bのみ: スタック処理中置き場（PHASE2.10.md §1の予約枠。P3a-2aで実装） */}
+          {layout === 'B' && <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} />}
 
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
             <div className="min-h-0 flex-1 rounded border border-slate-800 bg-slate-900/60">
               <DetailPanel iid={selectedIid} board={board} mySeat={mySeat} cardOf={cardOf} imageUrlOf={imageUrlOf} />
             </div>
-            <div className="flex shrink-0 gap-1.5">
-              <div className="flex-1 rounded border border-dashed border-slate-700 bg-slate-950/40 p-2 text-center text-[10px] text-slate-600">
-                割り込み関係
-                <br />
-                (P3で実装)
-              </div>
+            <div className="flex h-40 shrink-0 gap-1.5">
+              {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}
+              {layout === 'A' && (
+                <div className="flex-1 min-h-0">
+                  <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} />
+                </div>
+              )}
               <button
                 type="button"
                 disabled

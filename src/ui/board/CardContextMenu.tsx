@@ -96,6 +96,23 @@ export function CardContextMenu({
           </button>
         </div>
 
+        {board.mode === 'assist' && (
+          <button
+            type="button"
+            onClick={() => {
+              dispatch({
+                type: 'declareAction',
+                item: { id: newIid(), by: mySeat, kind: '能力', sourceIid: iid, label: name },
+              })
+              onClose()
+            }}
+            title="汎用の宣言口（合法性は判定しない）。起動型能力だけの正式ボタンはP3a-2bで詳細パネルに作る（PHASE3a-2a.md §2-5）"
+            className="rounded border border-sky-700 py-1.5 text-sky-400 hover:bg-sky-950"
+          >
+            ⚡ スタックに宣言
+          </button>
+        )}
+
         {baseMax !== null && (
           <section className="rounded border border-slate-700 p-2">
             <div className="mb-1 flex items-center justify-between">
