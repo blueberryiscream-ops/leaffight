@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "node scripts/check-core-isolation.mjs && tsc && vite build",
     "preview": "vite preview",
-    "data:bundle": "node scripts/build-data-bundle.mjs"
+    "data:bundle": "node scripts/build-data-bundle.mjs",
+    "test:core-priority": "node --import ./scripts/register-ts-loader.mjs scripts/test-core-priority.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

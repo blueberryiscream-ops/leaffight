@@ -4,6 +4,7 @@
 // （P2でホストの操作をそのまま再生できるようにするため。PHASE1.md §6地雷）。
 
 import type { Attr } from './types'
+import type { Mode, PriorityState } from './priority'
 
 // 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
 // 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
@@ -43,9 +44,13 @@ export interface Modifier {
 export interface BoardState {
   cards: Record<string, CardInstance>
   modifiers: Record<string, Modifier>
+  /** 優先権/スタックの窓。null＝窓が開いていない（自由操作中）。DESIGN.md §5.1 */
+  priority: PriorityState | null
+  /** free＝優先権オフ（このengineを使わない）。DESIGN.md §5.1 */
+  mode: Mode
 }
 
-export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {} }
+export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {}, priority: null, mode: 'assist' }
 
 /**
  * フィールド系ゾーンの固定スロット数（座席ごと）。DESIGN.md §4.13。ルール強制ではなくUIの置き場。
@@ -90,7 +95,7 @@ export function effectiveStat(state: BoardState, iid: string, base: number, stat
 }
 
 function cloneBoard(state: BoardState): BoardState {
-  return { cards: { ...state.cards }, modifiers: { ...state.modifiers } }
+  return { cards: { ...state.cards }, modifiers: { ...state.modifiers }, priority: state.priority, mode: state.mode }
 }
 
 /** ゾーン内の index を 0..n-1 の連番に詰め直す（DESIGN.md §2.2「正規化して1箇所で管理」） */

@@ -4,6 +4,8 @@
 
 import * as board from './board'
 import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
+import * as priorityEngine from './priority'
+import type { Mode, StackItem } from './priority'
 
 export type BoardAction =
   | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId }
@@ -23,6 +25,9 @@ export type BoardAction =
   | { type: 'removeCard'; iid: string; cardName: string }
   | { type: 'shuffleDeck'; owner: Seat; orderedIids: string[] }
   | { type: 'clearBoard' }
+  | { type: 'declareAction'; item: StackItem }
+  | { type: 'passPriority'; by: Seat }
+  | { type: 'setMode'; mode: Mode }
 
 export function applyAction(state: BoardState, action: BoardAction): board.Result {
   switch (action.type) {
@@ -60,5 +65,17 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       return board.shuffleDeck(state, action)
     case 'clearBoard':
       return board.clearBoard()
+    case 'declareAction': {
+      const { priority, log } = priorityEngine.declareAction(state.priority, action.item)
+      return { state: { ...state, priority }, log }
+    }
+    case 'passPriority': {
+      const { priority, log } = priorityEngine.passPriority(state.priority, action.by)
+      return { state: { ...state, priority }, log }
+    }
+    case 'setMode': {
+      const { priority, mode, log } = priorityEngine.setMode(state.priority, action.mode)
+      return { state: { ...state, priority, mode }, log }
+    }
   }
 }
