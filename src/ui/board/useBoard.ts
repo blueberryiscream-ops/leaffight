@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
-import type { Seat } from '../../core/board'
+import { EMPTY_BOARD, type Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
@@ -53,7 +53,10 @@ export function useBoard() {
     void (async () => {
       const saved = await readBoardState()
       if (saved) {
-        setHistory((h) => ({ ...h, present: saved }))
+        // 旧バージョンで保存された盤面には priority / mode が無い（P3a-1以前）。
+        // EMPTY_BOARD のデフォルト（priority:null, mode:'assist'）で補完してから復元する。
+        // これをしないと StackPanel が undefined な priority を読んでクラッシュする。
+        setHistory((h) => ({ ...h, present: { ...EMPTY_BOARD, ...saved } }))
       }
       loaded.current = true
     })()

@@ -63,8 +63,9 @@ export function StackPanel({
   const priority = board.priority
   // 末尾＝最上段。表示は最上段を先頭（目立つ位置）にする（PHASE3a-2a.md §2-1）
   const stackTopFirst = priority ? [...priority.stack].reverse() : []
-  const isMyTurn = priority !== null && priority.awaitingConsentFrom === localSeat
-  const isTheirTurn = priority !== null && priority.awaitingConsentFrom !== localSeat
+  // priority は null だけでなく（旧盤面では）undefined もありうるので truthy 判定にする
+  const isMyTurn = !!priority && priority.awaitingConsentFrom === localSeat
+  const isTheirTurn = !!priority && priority.awaitingConsentFrom !== localSeat
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 rounded border border-slate-700 bg-slate-950/40 p-2 text-[10px]">
