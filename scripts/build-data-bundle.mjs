@@ -319,9 +319,27 @@ const meta = {
   imageCount: stats.tcg + stats.suruga + stats.x,
 }
 
+// ---------------------------------------------------------------------------
+// 4.5. 起動能力の注釈（ユーザー校正済み。PHASE3a-2b.md §3-1）
+//
+// _local/ability-annotations.json（無ければ空で続行＝旧ZIPと互換）を
+// card.id（= `${kind}_${norm(name)}`）キーのオブジェクトに変換する。
+// pool.json/images はそのまま、annotations.json を別ファイルで足すだけ。
+// ---------------------------------------------------------------------------
+const annotationsPath = path.join(LOCAL, 'ability-annotations.json')
+const annotations = {}
+if (fs.existsSync(annotationsPath)) {
+  const raw = readJson(annotationsPath)
+  for (const entry of raw) {
+    const id = `${entry.kind}_${norm(entry.name)}`
+    annotations[id] = entry.abilities ?? []
+  }
+}
+
 const enc = new TextEncoder()
 zipFiles['pool.json'] = [enc.encode(JSON.stringify(cards)), { level: 9 }]
 zipFiles['meta.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 9 }]
+zipFiles['annotations.json'] = [enc.encode(JSON.stringify(annotations)), { level: 9 }]
 
 fs.mkdirSync(OUT_DIR, { recursive: true })
 const outPath = path.join(OUT_DIR, 'leaffight-data.zip')
@@ -351,5 +369,10 @@ for (const kind of ['c', 't', 'b', 'i', 'e', 'f']) {
   const hit = ks.filter((c) => c.image).length
   console.log(`  ${KIND_LABEL[kind].padEnd(6, '　')} ${String(ks.length).padStart(3)} 種  画像 ${String(hit).padStart(3)} (${pct(hit, ks.length)})`)
 }
+console.log('')
+console.log(
+  `起動能力の注釈: ${Object.keys(annotations).length} カード / ${Object.values(annotations).reduce((n, a) => n + a.length, 0)} 能力` +
+    (fs.existsSync(annotationsPath) ? '' : '（_local/ability-annotations.json が無いため空）'),
+)
 console.log('')
 console.log(`出力: ${path.relative(ROOT, outPath)}  (${(fs.statSync(outPath).size / 1048576).toFixed(1)} MB)`)

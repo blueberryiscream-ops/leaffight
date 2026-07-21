@@ -1,12 +1,14 @@
+import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat } from '../../core/board'
 import { effectiveStat, modifiersFor } from '../../core/board'
 import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
-import type { PoolCard } from '../../data/types'
+import type { AbilityAnnotation, PoolCard } from '../../data/types'
+import { newIid } from './useBoard'
 
 // 右パネル＝詳細＋能力/カードのアクショントリガー（DESIGN.md §4.18・4.17）。
-// 左クリックで選ぶ。読み取り専用（状態変化は右クリックメニューの役目）。
-// 「能力トリガー」は abilities[] を一覧表示するところまで（P2.6の範囲）。押しても何もしない
-// （スタックに乗るのはP3。DESIGN.md §5.1）。
+// 左クリックで選ぶ。読み取り専用（気力・修正等の状態変化は右クリックメニューの役目）。
+// 「起動」ボタンはユーザー校正済みの注釈（起動型/常時＋コスト）を見せているだけで、
+// 効果の解決・合法性は判定しない（DESIGN.md §5.1「あえて作らない」）。
 
 export function DetailPanel({
   iid,
@@ -14,12 +16,16 @@ export function DetailPanel({
   mySeat,
   cardOf,
   imageUrlOf,
+  annotationsOf,
+  dispatch,
 }: {
   iid: string | null
   board: BoardState
   mySeat: Seat
   cardOf: (cardId: string) => PoolCard | undefined
   imageUrlOf: (cardId: string) => string | undefined
+  annotationsOf: (cardId: string) => AbilityAnnotation[] | undefined
+  dispatch: (action: BoardAction) => void
 }) {
   const instance = iid ? board.cards[iid] : undefined
 
@@ -37,6 +43,15 @@ export function DetailPanel({
   const name = card?.name ?? instance.cardId
   const mods = modifiersFor(board, instance.iid)
   const hiddenFromMe = instance.owner !== mySeat && instance.zone === 'hand'
+  // キャラ/タッグの attr は「本人の属性」（DESIGN.md §4.8）。i/e/f/b の attr はコスト側の
+  // 属性要求なので、ここでは別扱いにしない（従来通りコスト行にまとめる。PHASE3a-2b.md §3-4）
+  const isCharLike = card?.kind === 'c' || card?.kind === 't'
+
+  const annotations = annotationsOf(instance.cardId) ?? []
+  const annotationByName = new Map(annotations.map((a) => [a.name, a]))
+  // 「自分のターン」で出し分けない（原典§11-2/§4.15。PHASE3a-2b.md §1）。
+  // 自分の所有カードなら常に押せる。合法性・タイミングの判定は人間がやる
+  const triggerable = instance.owner === mySeat && board.mode === 'assist' ? annotations.filter((a) => a.type !== '常時') : []
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-3 text-xs">
@@ -56,6 +71,11 @@ export function DetailPanel({
               <div className="mt-0.5 text-[10px] text-slate-400">
                 {card ? CARD_KIND_LABEL[card.kind] : ''} ・ {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
               </div>
+              {/* 属性(attr)とコスト(cost)は別物・混ぜない（DESIGN.md §4.8。PHASE3a-2b.md §3-4） */}
+              {isCharLike && card?.attr && (
+                <div className="mt-0.5 text-[10px] text-slate-400">属性: {card.attr}</div>
+              )}
+              {card?.cost && <div className="mt-0.5 text-[10px] text-slate-400">召喚コスト: {card.cost}</div>}
             </div>
           </div>
 
@@ -98,16 +118,54 @@ export function DetailPanel({
             </div>
           )}
 
+          {triggerable.length > 0 && (
+            <div className="mb-2">
+              <div className="mb-1 font-semibold text-slate-400">起動</div>
+              <div className="flex flex-wrap gap-1.5">
+                {triggerable.map((a) => (
+                  <button
+                    key={a.name}
+                    type="button"
+                    onClick={() =>
+                      dispatch({
+                        type: 'declareAction',
+                        item: {
+                          id: newIid(),
+                          by: mySeat,
+                          kind: '能力',
+                          sourceIid: instance.iid,
+                          label: a.name,
+                          detail: a.cost,
+                        },
+                      })
+                    }
+                    className="rounded border border-sky-700 px-2 py-1 text-sky-400 hover:bg-sky-950"
+                  >
+                    {a.name}（{a.cost}）
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {card && card.abilities.length > 0 && (
             <div>
-              <div className="mb-1 font-semibold text-slate-400">能力（P3でトリガー実装予定）</div>
+              <div className="mb-1 font-semibold text-slate-400">能力</div>
               <ul className="flex flex-col gap-1.5">
-                {card.abilities.map((ab, i) => (
+                {card.abilities.map((ab, i) => {
+                  const anno = ab.header ? annotationByName.get(ab.header) : undefined
+                  return (
                   <li key={i} className="rounded border border-slate-700 bg-slate-800/60 p-1.5">
-                    {ab.header && <div className="font-semibold text-slate-200">{ab.header}</div>}
+                    {ab.header && (
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                        {ab.header}
+                        {anno && <span className="rounded bg-slate-700 px-1 py-0.5 text-[9px] font-normal text-slate-400">{anno.type}</span>}
+                      </div>
+                    )}
                     <div className="text-[10px] leading-snug text-slate-400">{ab.text}</div>
                   </li>
-                ))}
+                  )
+                })}
               </ul>
             </div>
           )}

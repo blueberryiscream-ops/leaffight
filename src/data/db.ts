@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { BoardState } from '../core/board'
-import type { BundleMeta, PoolCard, StoredImage } from './types'
+import type { AnnotationsMap, BundleMeta, PoolCard, StoredImage } from './types'
 
 // カードデータと画像はリポジトリに入れない（権利面。DESIGN.md §7.5）。
 // ユーザーがローカルのZIPを読み込み、その中身をこの IndexedDB に保存して以後使う。
@@ -42,6 +42,7 @@ export const db = new LeafFightDb()
 
 const META_KEY = 'bundle'
 const BOARD_KEY = 'board'
+const ANNOTATIONS_KEY = 'annotations'
 
 export async function readBundleMeta(): Promise<BundleMeta | null> {
   const row = await db.meta.get(META_KEY)
@@ -50,6 +51,16 @@ export async function readBundleMeta(): Promise<BundleMeta | null> {
 
 export async function writeBundleMeta(meta: BundleMeta): Promise<void> {
   await db.meta.put({ key: META_KEY, value: meta })
+}
+
+/** 起動能力の注釈（PHASE3a-2b.md §3-2）。annotations.json が無いzip（旧バンドル）では空のまま */
+export async function readAnnotations(): Promise<AnnotationsMap> {
+  const row = await db.meta.get(ANNOTATIONS_KEY)
+  return (row?.value as AnnotationsMap | undefined) ?? {}
+}
+
+export async function writeAnnotations(annotations: AnnotationsMap): Promise<void> {
+  await db.meta.put({ key: ANNOTATIONS_KEY, value: annotations })
 }
 
 /** 「データを削除して読み込み直す」用。カード定義が消えるので、それを参照する盤面も一緒に消す */

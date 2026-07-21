@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
-import type { PoolCard } from '../../data/types'
+import type { AnnotationsMap, PoolCard } from '../../data/types'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -81,7 +81,15 @@ function CenterRow({
   )
 }
 
-export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<string, string> }) {
+export function Board({
+  cards,
+  imageUrls,
+  annotations,
+}: {
+  cards: PoolCard[]
+  imageUrls: Map<string, string>
+  annotations: AnnotationsMap
+}) {
   const {
     board,
     log,
@@ -121,6 +129,7 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
   const cardOf = (cardId: string) => cardMap.get(cardId)
   const imageUrlOf = (cardId: string) => imageUrls.get(cardId)
+  const annotationsOf = (cardId: string) => annotations[cardId]
 
   const openMenu = (iid: string, x: number, y: number) => setMenuTarget({ iid, x, y })
 
@@ -565,7 +574,15 @@ export function Board({ cards, imageUrls }: { cards: PoolCard[]; imageUrls: Map<
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
             <div className="min-h-0 flex-1 rounded border border-slate-800 bg-slate-900/60">
-              <DetailPanel iid={selectedIid} board={board} mySeat={mySeat} cardOf={cardOf} imageUrlOf={imageUrlOf} />
+              <DetailPanel
+                iid={selectedIid}
+                board={board}
+                mySeat={mySeat}
+                cardOf={cardOf}
+                imageUrlOf={imageUrlOf}
+                annotationsOf={annotationsOf}
+                dispatch={dispatch}
+              />
             </div>
             <div className="flex h-40 shrink-0 gap-1.5">
               {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}

@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
-import { db, writeBundleMeta } from './db'
-import type { BundleMeta, PoolCard, StoredImage } from './types'
+import { db, readAnnotations, writeAnnotations, writeBundleMeta } from './db'
+import type { AnnotationsMap, BundleMeta, PoolCard, StoredImage } from './types'
 
 // ZIP展開はブラウザ内で行う（サーバーを持たないため）。fflate は軽くて依存ゼロ。
 
@@ -46,6 +46,10 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
         imageCount: 0,
       }
 
+  // 起動能力の注釈（PHASE3a-2b.md §3-1/§3-2）。旧バンドル（annotations.json未収載）では空扱い
+  const annotationsRaw = entries['annotations.json']
+  const annotations: AnnotationsMap = annotationsRaw ? (JSON.parse(strFromU8(annotationsRaw)) as AnnotationsMap) : {}
+
   onProgress?.(`カード ${cards.length} 種を保存しています…`)
   const images: StoredImage[] = []
   for (const card of cards) {
@@ -62,13 +66,14 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     await db.cards.bulkPut(cards)
     await db.images.bulkPut(images)
     await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: images.length })
+    await writeAnnotations(annotations)
   })
 
   return { ...meta, cardCount: cards.length, imageCount: images.length }
 }
 
-/** 一覧描画用に、カードと画像のURLをまとめて取り出す。URLは呼び出し側が revoke する */
-export async function loadLibrary(): Promise<{ cards: PoolCard[]; imageUrls: Map<string, string> }> {
+/** 一覧描画用に、カードと画像のURL・起動能力の注釈をまとめて取り出す。URLは呼び出し側が revoke する */
+export async function loadLibrary(): Promise<{ cards: PoolCard[]; imageUrls: Map<string, string>; annotations: AnnotationsMap }> {
   const cards = await db.cards.toArray()
   cards.sort((a, b) => a.kind.localeCompare(b.kind) || a.kana.localeCompare(b.kana, 'ja'))
 
@@ -76,5 +81,6 @@ export async function loadLibrary(): Promise<{ cards: PoolCard[]; imageUrls: Map
   for (const img of await db.images.toArray()) {
     imageUrls.set(img.id, URL.createObjectURL(img.blob))
   }
-  return { cards, imageUrls }
+  const annotations = await readAnnotations()
+  return { cards, imageUrls, annotations }
 }
