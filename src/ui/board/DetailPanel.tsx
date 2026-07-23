@@ -1,9 +1,15 @@
 import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat } from '../../core/board'
 import { effectiveStat, modifiersFor } from '../../core/board'
+import type { ActionTiming } from '../../core/priority'
 import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
 import type { AbilityAnnotation, PoolCard } from '../../data/types'
-import { newIid } from './useBoard'
+
+// 起動型能力の注釈type → 優先権エンジンのactionType。複合型（通常起動+割込起動）は
+// より許容的な「割込型」に寄せる（coreはactionTypeの中身で分岐しないので表示・記録用の割り切り）。
+function toActionTiming(annotationType: AbilityAnnotation['type']): ActionTiming {
+  return annotationType === '通常起動' ? '通常型' : '割込型'
+}
 
 // 右パネル＝詳細＋能力/カードのアクショントリガー（DESIGN.md §4.18・4.17）。
 // 左クリックで選ぶ。読み取り専用（気力・修正等の状態変化は右クリックメニューの役目）。
@@ -129,10 +135,10 @@ export function DetailPanel({
                     onClick={() =>
                       dispatch({
                         type: 'declareAction',
-                        item: {
-                          id: newIid(),
+                        action: {
                           by: mySeat,
                           kind: '能力',
+                          actionType: toActionTiming(a.type),
                           sourceIid: instance.iid,
                           label: a.name,
                           detail: a.cost,

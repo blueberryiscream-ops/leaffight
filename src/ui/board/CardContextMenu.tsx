@@ -102,7 +102,7 @@ export function CardContextMenu({
             onClick={() => {
               dispatch({
                 type: 'declareAction',
-                item: { id: newIid(), by: mySeat, kind: '能力', sourceIid: iid, label: name },
+                action: { by: mySeat, kind: '能力', actionType: '通常型', sourceIid: iid, label: name },
               })
               onClose()
             }}

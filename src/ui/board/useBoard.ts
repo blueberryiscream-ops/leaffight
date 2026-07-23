@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
-import { EMPTY_BOARD, type Seat } from '../../core/board'
+import { EMPTY_BOARD, type BoardState, type Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
@@ -13,6 +13,20 @@ export type ConnMode = 'solo' | 'host' | 'guest'
 export type ConnStatus = 'idle' | 'connecting' | 'waiting' | 'connected' | 'disconnected' | 'error'
 
 export const otherSeat = (s: Seat): Seat => (s === 'A' ? 'B' : 'A')
+
+/**
+ * 旧盤面の priority は形が違う（P3a-1r以前: `stack`ベースのflatモデル。
+ * 新モデルは `frames` ベース）。読込時に `frames` を持たない priority は null に正規化する。
+ * これをしないと StackPanel が旧shapeを新shapeとして読んで真っ暗クラッシュする
+ * （PHASE3a-1r.md §6。P3a-1導入直後に一度実際に踏んだ事故の再発防止）。
+ */
+function normalizePriority(board: BoardState): BoardState {
+  const p = board.priority as unknown
+  if (p !== null && (typeof p !== 'object' || !('frames' in p))) {
+    return { ...board, priority: null }
+  }
+  return board
+}
 
 /**
  * 盤面の状態を管理する。IndexedDBに自動保存しリロードで復元する（P1）のに加えて、
@@ -56,7 +70,8 @@ export function useBoard() {
         // 旧バージョンで保存された盤面には priority / mode が無い（P3a-1以前）。
         // EMPTY_BOARD のデフォルト（priority:null, mode:'assist'）で補完してから復元する。
         // これをしないと StackPanel が undefined な priority を読んでクラッシュする。
-        setHistory((h) => ({ ...h, present: { ...EMPTY_BOARD, ...saved } }))
+        // さらに priority があっても旧shape（frames無し）のことがあるので正規化する（上記コメント参照）。
+        setHistory((h) => ({ ...h, present: normalizePriority({ ...EMPTY_BOARD, ...saved }) }))
       }
       loaded.current = true
     })()

@@ -5,7 +5,7 @@
 import * as board from './board'
 import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 import * as priorityEngine from './priority'
-import type { Mode, StackItem } from './priority'
+import type { DeclaredAction, Mode } from './priority'
 
 export type BoardAction =
   | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId }
@@ -25,8 +25,9 @@ export type BoardAction =
   | { type: 'removeCard'; iid: string; cardName: string }
   | { type: 'shuffleDeck'; owner: Seat; orderedIids: string[] }
   | { type: 'clearBoard' }
-  | { type: 'declareAction'; item: StackItem }
+  | { type: 'declareAction'; action: DeclaredAction }
   | { type: 'passPriority'; by: Seat }
+  | { type: 'resolveStep' }
   | { type: 'setMode'; mode: Mode }
 
 export function applyAction(state: BoardState, action: BoardAction): board.Result {
@@ -66,11 +67,15 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
     case 'clearBoard':
       return board.clearBoard()
     case 'declareAction': {
-      const { priority, log } = priorityEngine.declareAction(state.priority, action.item)
+      const { priority, log } = priorityEngine.declareAction(state.priority, action.action)
       return { state: { ...state, priority }, log }
     }
     case 'passPriority': {
       const { priority, log } = priorityEngine.passPriority(state.priority, action.by)
+      return { state: { ...state, priority }, log }
+    }
+    case 'resolveStep': {
+      const { priority, log } = priorityEngine.resolveStep(state.priority)
       return { state: { ...state, priority }, log }
     }
     case 'setMode': {

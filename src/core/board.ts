@@ -4,7 +4,7 @@
 // （P2でホストの操作をそのまま再生できるようにするため。PHASE1.md §6地雷）。
 
 import type { Attr } from './types'
-import type { Mode, PriorityState } from './priority'
+import type { Mode, Priority } from './priority'
 
 // 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
 // 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
@@ -44,8 +44,8 @@ export interface Modifier {
 export interface BoardState {
   cards: Record<string, CardInstance>
   modifiers: Record<string, Modifier>
-  /** 優先権/スタックの窓。null＝窓が開いていない（自由操作中）。DESIGN.md §5.1 */
-  priority: PriorityState | null
+  /** 優先権の窓（アクティブ/非アクティブの2枠＋入れ子フレーム）。null＝窓が開いていない（自由操作中）。DESIGN.md §5.1 */
+  priority: Priority | null
   /** free＝優先権オフ（このengineを使わない）。DESIGN.md §5.1 */
   mode: Mode
 }
