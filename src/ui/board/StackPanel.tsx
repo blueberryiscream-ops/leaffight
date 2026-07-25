@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat } from '../../core/board'
 import { awaitingSeat, resolvingSeat, type ActionWindow, type DeclaredAction, type Priority } from '../../core/priority'
+import type { InterruptCandidate } from '../../data/interrupt'
+import type { InterruptsMap, PoolCard } from '../../data/types'
+import { useInterruptNotices, type InterruptNotice } from './useInterruptNotices'
 import { otherSeat } from './useBoard'
 
 // 優先権パネル（DESIGN.md §5.1「2026-07-19 モデルの訂正」/ PHASE3a-1r.md §4）。
@@ -35,16 +38,85 @@ function ActionSlot({ label, action }: { label: string; action: DeclaredAction |
   )
 }
 
+/**
+ * 割り込み候補の通知（PHASE3c.md §4）。候補が1件以上ある側にだけ出る。
+ * カード名クリック → 既存の declareAction（割込型）を発行し、通常の優先権フローに乗せる。
+ * 合法性・追加条件は判定しない（候補を出すだけ。人間判断のフォールバック）。
+ */
+function InterruptBanner({
+  notices,
+  cardOf,
+  onDeclare,
+  onDismiss,
+}: {
+  notices: InterruptNotice[]
+  cardOf: (cardId: string) => PoolCard | undefined
+  onDeclare: (notice: InterruptNotice, candidate: InterruptCandidate) => void
+  onDismiss: (id: string) => void
+}) {
+  if (notices.length === 0) return null
+  return (
+    <div className="flex shrink-0 flex-col gap-1">
+      {notices.map((n) => (
+        <div key={n.id} className="rounded border border-amber-600 bg-amber-950/40 p-1.5">
+          <div className="flex items-start justify-between gap-1">
+            <span className="text-amber-300">
+              《{n.timing}》— 割り込める札があります
+            </span>
+            <button type="button" onClick={() => onDismiss(n.id)} className="shrink-0 text-slate-500 hover:text-slate-200">
+              ✕
+            </button>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {n.candidates.map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onDeclare(n, c)}
+                className="rounded border border-sky-700 px-1.5 py-0.5 text-sky-400 hover:bg-sky-950"
+              >
+                {c.annotation.ability}（{cardOf(c.cardId)?.name ?? c.cardId}/{c.annotation.cost}）
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function StackPanel({
   board,
   localSeat,
   dispatch,
+  cardOf,
+  interrupts,
 }: {
   board: BoardState
   /** 「自分が応答待ちか」の表示判定にのみ使う。共有状態(priority)には混ぜない（PHASE3a-2a.md §1） */
   localSeat: Seat
   dispatch: (action: BoardAction) => void
+  cardOf: (cardId: string) => PoolCard | undefined
+  interrupts: InterruptsMap
 }) {
+  const { notices, dismiss } = useInterruptNotices(board, localSeat, cardOf, interrupts)
+
+  const declareInterrupt = (notice: InterruptNotice, candidate: InterruptCandidate) => {
+    const kind = cardOf(candidate.cardId)?.kind === 'e' ? 'プレイ' : '能力'
+    dispatch({
+      type: 'declareAction',
+      action: {
+        by: localSeat,
+        sourceIid: candidate.cardIid,
+        kind,
+        actionType: '割込型',
+        label: candidate.annotation.ability,
+        detail: candidate.annotation.cost,
+      },
+    })
+    dismiss(notice.id)
+  }
+
   // 自動パスは個人の操作設定（相手を信頼して自動で通す）であり、共有状態ではない。
   // クライアントローカルのuseStateで持つ（DESIGN.md §4.19「相手を信頼して自動で通す個人トグル」）。
   const [autoPass, setAutoPass] = useState(false)
@@ -97,6 +169,7 @@ export function StackPanel({
             自動パス
           </label>
         </div>
+        <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
         <div className="flex flex-1 items-center justify-center text-slate-600">（割り込みなし）</div>
       </div>
     )
@@ -124,6 +197,8 @@ export function StackPanel({
           割り込み処理中（{depth}段）
         </div>
       )}
+
+      <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
 
       <div className="flex min-h-0 flex-1 flex-col gap-1.5">
         <ActionSlot label="自分の宣言" action={mine} />

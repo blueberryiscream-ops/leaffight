@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
-import type { AnnotationsMap, PoolCard } from '../../data/types'
+import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -85,10 +85,12 @@ export function Board({
   cards,
   imageUrls,
   annotations,
+  interrupts,
 }: {
   cards: PoolCard[]
   imageUrls: Map<string, string>
   annotations: AnnotationsMap
+  interrupts: InterruptsMap
 }) {
   const {
     board,
@@ -569,7 +571,9 @@ export function Board({
           {layout === 'A' ? renderLayoutA() : renderLayoutB()}
 
           {/* Bのみ: スタック処理中置き場（PHASE2.10.md §1の予約枠。P3a-2aで実装） */}
-          {layout === 'B' && <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} />}
+          {layout === 'B' && (
+            <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} interrupts={interrupts} />
+          )}
 
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
@@ -588,7 +592,13 @@ export function Board({
               {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}
               {layout === 'A' && (
                 <div className="flex-1 min-h-0">
-                  <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} />
+                  <StackPanel
+                    board={board}
+                    localSeat={localSeat}
+                    dispatch={dispatch}
+                    cardOf={cardOf}
+                    interrupts={interrupts}
+                  />
                 </div>
               )}
               <button

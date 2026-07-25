@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
-import { db, readAnnotations, writeAnnotations, writeBundleMeta } from './db'
-import type { AnnotationsMap, BundleMeta, PoolCard, StoredImage } from './types'
+import { db, readAnnotations, readInterrupts, writeAnnotations, writeBundleMeta, writeInterrupts } from './db'
+import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
 
 // ZIP展開はブラウザ内で行う（サーバーを持たないため）。fflate は軽くて依存ゼロ。
 
@@ -50,6 +50,10 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   const annotationsRaw = entries['annotations.json']
   const annotations: AnnotationsMap = annotationsRaw ? (JSON.parse(strFromU8(annotationsRaw)) as AnnotationsMap) : {}
 
+  // 割り込みの注釈（PHASE3c.md §1）。旧バンドル（interrupts.json未収載）では空扱い
+  const interruptsRaw = entries['interrupts.json']
+  const interrupts: InterruptsMap = interruptsRaw ? (JSON.parse(strFromU8(interruptsRaw)) as InterruptsMap) : {}
+
   onProgress?.(`カード ${cards.length} 種を保存しています…`)
   const images: StoredImage[] = []
   for (const card of cards) {
@@ -67,13 +71,19 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     await db.images.bulkPut(images)
     await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: images.length })
     await writeAnnotations(annotations)
+    await writeInterrupts(interrupts)
   })
 
   return { ...meta, cardCount: cards.length, imageCount: images.length }
 }
 
-/** 一覧描画用に、カードと画像のURL・起動能力の注釈をまとめて取り出す。URLは呼び出し側が revoke する */
-export async function loadLibrary(): Promise<{ cards: PoolCard[]; imageUrls: Map<string, string>; annotations: AnnotationsMap }> {
+/** 一覧描画用に、カードと画像のURL・起動能力/割り込みの注釈をまとめて取り出す。URLは呼び出し側が revoke する */
+export async function loadLibrary(): Promise<{
+  cards: PoolCard[]
+  imageUrls: Map<string, string>
+  annotations: AnnotationsMap
+  interrupts: InterruptsMap
+}> {
   const cards = await db.cards.toArray()
   cards.sort((a, b) => a.kind.localeCompare(b.kind) || a.kana.localeCompare(b.kana, 'ja'))
 
@@ -82,5 +92,6 @@ export async function loadLibrary(): Promise<{ cards: PoolCard[]; imageUrls: Map
     imageUrls.set(img.id, URL.createObjectURL(img.blob))
   }
   const annotations = await readAnnotations()
-  return { cards, imageUrls, annotations }
+  const interrupts = await readInterrupts()
+  return { cards, imageUrls, annotations, interrupts }
 }

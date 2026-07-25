@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadLibrary } from '../data/bundle'
 import { clearBundle, readBundleMeta } from '../data/db'
-import type { AnnotationsMap, BundleMeta, PoolCard } from '../data/types'
+import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard } from '../data/types'
 import { Board } from './board/Board'
 import { CardList } from './CardList'
 import { DataGate } from './DataGate'
@@ -14,6 +14,7 @@ export function App() {
   const [cards, setCards] = useState<PoolCard[]>([])
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map())
   const [annotations, setAnnotations] = useState<AnnotationsMap>({})
+  const [interrupts, setInterrupts] = useState<InterruptsMap>({})
   const [meta, setMeta] = useState<BundleMeta | null>(null)
   const [view, setView] = useState<View>('board')
 
@@ -45,6 +46,7 @@ export function App() {
     setImageUrls(lib.imageUrls)
     setCards(lib.cards)
     setAnnotations(lib.annotations)
+    setInterrupts(lib.interrupts)
     setMeta(saved)
     setPhase('ready')
   }, [])
@@ -67,6 +69,7 @@ export function App() {
     setImageUrls(new Map())
     setCards([])
     setAnnotations({})
+    setInterrupts({})
     setMeta(null)
     setPhase('empty')
   }, [])
@@ -95,7 +98,7 @@ export function App() {
       </nav>
       <div className="min-h-0 flex-1">
         {view === 'board' ? (
-          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} />
+          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} interrupts={interrupts} />
         ) : (
           <CardList cards={cards} imageUrls={imageUrls} meta={meta} onReset={() => void reset()} />
         )}

@@ -336,10 +336,33 @@ if (fs.existsSync(annotationsPath)) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 4.6. 割り込み（トリガー）の注釈（ユーザー校正済み54件。PHASE3c.md §1。annotations.jsonと同じ流儀）
+//
+// _local/interrupt-annotations.json（無ければ空で続行）を card.id キーのオブジェクトに変換する。
+// 1カードが複数の割り込み能力を持ちうるので配列で束ねる（例: 蝉丸＆光岡は2件）。
+// ---------------------------------------------------------------------------
+const interruptAnnotationsPath = path.join(LOCAL, 'interrupt-annotations.json')
+const interrupts = {}
+if (fs.existsSync(interruptAnnotationsPath)) {
+  const raw = readJson(interruptAnnotationsPath)
+  for (const entry of raw) {
+    const id = `${entry.kind}_${norm(entry.card)}`
+    if (!interrupts[id]) interrupts[id] = []
+    interrupts[id].push({
+      ability: entry.ability,
+      cost: entry.cost,
+      subject: entry.subject,
+      timings: entry.timings ?? [],
+    })
+  }
+}
+
 const enc = new TextEncoder()
 zipFiles['pool.json'] = [enc.encode(JSON.stringify(cards)), { level: 9 }]
 zipFiles['meta.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 9 }]
 zipFiles['annotations.json'] = [enc.encode(JSON.stringify(annotations)), { level: 9 }]
+zipFiles['interrupts.json'] = [enc.encode(JSON.stringify(interrupts)), { level: 9 }]
 
 fs.mkdirSync(OUT_DIR, { recursive: true })
 const outPath = path.join(OUT_DIR, 'leaffight-data.zip')
@@ -373,6 +396,10 @@ console.log('')
 console.log(
   `起動能力の注釈: ${Object.keys(annotations).length} カード / ${Object.values(annotations).reduce((n, a) => n + a.length, 0)} 能力` +
     (fs.existsSync(annotationsPath) ? '' : '（_local/ability-annotations.json が無いため空）'),
+)
+console.log(
+  `割り込みの注釈: ${Object.keys(interrupts).length} カード / ${Object.values(interrupts).reduce((n, a) => n + a.length, 0)} 件` +
+    (fs.existsSync(interruptAnnotationsPath) ? '' : '（_local/interrupt-annotations.json が無いため空）'),
 )
 console.log('')
 console.log(`出力: ${path.relative(ROOT, outPath)}  (${(fs.statSync(outPath).size / 1048576).toFixed(1)} MB)`)

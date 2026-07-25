@@ -37,3 +37,18 @@ export interface AbilityAnnotation {
 
 /** card.id をキーにした起動能力注釈のマップ */
 export type AnnotationsMap = Record<string, AbilityAnnotation[]>
+
+/**
+ * 割り込み（トリガー）の注釈（ユーザー校正済み。DESIGN.md §5.1「割り込み自動検出」）。
+ * `timings` は原典60種の正規タイミング名（_local/interrupt-timings.md）そのまま。
+ * `subject` は主語スコープの生テキスト（PHASE3c.md §3の表で解釈する。'相手が'/'味方キャラが' 等）。
+ */
+export interface InterruptAnnotation {
+  ability: string
+  cost: string
+  subject: string
+  timings: string[]
+}
+
+/** card.id をキーにした割り込み注釈のマップ */
+export type InterruptsMap = Record<string, InterruptAnnotation[]>
