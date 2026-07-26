@@ -19,7 +19,17 @@ function slotFor(current: ActionWindow, seat: Seat): DeclaredAction | null {
   return null
 }
 
-function ActionSlot({ label, action }: { label: string; action: DeclaredAction | null }) {
+function ActionSlot({
+  label,
+  action,
+  onSelectCard,
+}: {
+  label: string
+  action: DeclaredAction | null
+  /** 宣言中カード(pending)は盤面に描画されないので、名前クリックで詳細パネルに呼び出す
+   * （PHASE3a-3.md §3-2(a)。相手はこれで中身を見て打ち消すか判断する） */
+  onSelectCard?: (iid: string) => void
+}) {
   return (
     <div className="min-h-0 flex-1 rounded border border-slate-700 bg-slate-900/60 p-1.5">
       <div className="mb-0.5 font-semibold text-slate-400">{label}</div>
@@ -28,7 +38,17 @@ function ActionSlot({ label, action }: { label: string; action: DeclaredAction |
           <div className="text-slate-500">
             {action.kind} ・ {action.actionType}
           </div>
-          <div className="truncate font-semibold text-slate-200">{action.label}</div>
+          {action.sourceIid && onSelectCard ? (
+            <button
+              type="button"
+              onClick={() => onSelectCard(action.sourceIid!)}
+              className="truncate text-left font-semibold text-sky-300 underline decoration-dotted hover:text-sky-200"
+            >
+              {action.label}
+            </button>
+          ) : (
+            <div className="truncate font-semibold text-slate-200">{action.label}</div>
+          )}
           {action.detail && <div className="truncate text-slate-500">{action.detail}</div>}
         </>
       ) : (
@@ -91,6 +111,7 @@ export function StackPanel({
   dispatch,
   cardOf,
   interrupts,
+  onSelectCard,
 }: {
   board: BoardState
   /** 「自分が応答待ちか」の表示判定にのみ使う。共有状態(priority)には混ぜない（PHASE3a-2a.md §1） */
@@ -98,6 +119,8 @@ export function StackPanel({
   dispatch: (action: BoardAction) => void
   cardOf: (cardId: string) => PoolCard | undefined
   interrupts: InterruptsMap
+  /** 宣言中カード(pending)の詳細を見るための導線（PHASE3a-3.md §3-2(a)） */
+  onSelectCard?: (iid: string) => void
 }) {
   const { notices, dismiss } = useInterruptNotices(board, localSeat, cardOf, interrupts)
 
@@ -181,6 +204,12 @@ export function StackPanel({
   const theirs = slotFor(current, otherSeat(localSeat))
   const awaiting = awaitingSeat(priority)
   const resolving = resolvingSeat(priority)
+  // 今まさに解決される宣言（resolvingSeatと同じ判定。resolvingActionは核心ロジックの複製を
+  // 避けるためcore/actions.tsのprivateヘルパーと同じ式をここでも直接書く。読み取り専用の表示判定
+  // なのでcore/priority.tsに公開APIを増やすまでもない）。placeがある宣言だけ「取り消し」を出す
+  // （PHASE3a-3.md §3-2(b)）。
+  const resolvingActionObj =
+    current.step === 'processActive' ? current.active : current.step === 'processNonActive' ? current.nonActive : null
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 rounded border border-slate-700 bg-slate-950/40 p-2 text-[10px]">
@@ -201,8 +230,8 @@ export function StackPanel({
       <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
 
       <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-        <ActionSlot label="自分の宣言" action={mine} />
-        <ActionSlot label="相手の宣言" action={theirs} />
+        <ActionSlot label="自分の宣言" action={mine} onSelectCard={onSelectCard} />
+        <ActionSlot label="相手の宣言" action={theirs} onSelectCard={onSelectCard} />
       </div>
 
       <div className="shrink-0">
@@ -220,13 +249,27 @@ export function StackPanel({
           ))}
         {resolving !== null &&
           (resolving === localSeat ? (
-            <button
-              type="button"
-              onClick={() => dispatch({ type: 'resolveStep' })}
-              className="w-full rounded border border-sky-700 py-1 text-sky-400 hover:bg-sky-950"
-            >
-              解決（完了）
-            </button>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => dispatch({ type: 'resolveStep' })}
+                className="flex-1 rounded border border-sky-700 py-1 text-sky-400 hover:bg-sky-950"
+              >
+                解決（完了）
+              </button>
+              {/* placeがある宣言（手札プレイ）だけ「取り消し」を出す。起動型能力等には出さない
+                  （PHASE3a-3.md §3-2(b)）。打ち消されたイベントがゴミ箱行きか手札戻りかはルール解釈で
+                  ありツールは判定しない（§5.1「あえて作らない」）。中立に手札へ戻し、以降は人間がドラッグで処理する */}
+              {resolvingActionObj?.place && (
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: 'resolveStep', cancel: true })}
+                  className="flex-1 rounded border border-red-800 py-1 text-red-300 hover:bg-red-950"
+                >
+                  取り消し（手札に戻す）
+                </button>
+              )}
+            </div>
           ) : (
             <div className="text-center text-slate-500">相手が処理中…</div>
           ))}

@@ -10,7 +10,8 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
-import { cardsInZone, fieldCard } from '../../core/board'
+import { cardsInZone, fieldCard, ZONE_LABEL } from '../../core/board'
+import { canDeclare, type ActionTiming } from '../../core/priority'
 import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
@@ -114,6 +115,14 @@ export function Board({
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // ドラッグ拒否の一言（PHASE3a-3.md §3-1「黙って何も起きないのは不可」）。共有ログではなく
+  // このクライアントだけのローカルな失敗通知（「何も起きなかった」試みを両者のログに残す
+  // 必要は無い）。数秒で自動的に消す。
+  const [dragNotice, setDragNotice] = useState<string | null>(null)
+  const notifyDragRejected = (text: string) => {
+    setDragNotice(text)
+    window.setTimeout(() => setDragNotice((cur) => (cur === text ? null : cur)), 2500)
+  }
 
   // レイアウトA(現行・6行)/B(段数削減・4行)の実行時切替（PHASE2.10.md）。localStorageで保持、既定はA。
   const [layout, setLayout] = useState<'A' | 'B'>(
@@ -145,6 +154,10 @@ export function Board({
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }))
 
+  // 手札→場/ゴミ箱のドラッグは「プレイ宣言」に変える先の候補ゾーン（PHASE3a-3.md §3-1）。
+  // 'deck'は含めない（手札をデッキに戻すのは雑務）。'trash'は含める（イベント使用に一致する動き）。
+  const PLAY_DECLARE_TARGET_ZONES = new Set<ZoneId>(['char', 'leader', 'battle', 'field', 'trash'])
+
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e
     if (!over) return
@@ -161,6 +174,35 @@ export function Board({
     if (samePlace) return
 
     const cardName = cardOf(instance.cardId)?.name ?? instance.cardId
+
+    const isPlayDeclare =
+      board.mode === 'assist' && instance.zone === 'hand' && PLAY_DECLARE_TARGET_ZONES.has(target.toZone)
+
+    if (isPlayDeclare) {
+      if (!canDeclare(board.priority, localSeat)) {
+        // engineが受理しない状況（相手の応答待ち中等）。カードは動かさず、黙って終わらせない
+        // （PHASE3a-3.md §3-1「黙って何も起きないのは不可」）。
+        notifyDragRejected(`今は「${cardName}」を宣言できません（相手の応答待ち）`)
+        return
+      }
+      const current = board.priority?.frames[board.priority.frames.length - 1]
+      const actionType: ActionTiming =
+        current && (current.step === 'processActive' || current.step === 'processNonActive') ? '割込型' : '通常型'
+      dispatch({
+        type: 'declareAction',
+        action: {
+          by: localSeat,
+          sourceIid: iid,
+          kind: 'プレイ',
+          actionType,
+          label: cardName,
+          detail: `${ZONE_LABEL[target.toZone]}へ`,
+          place: { toOwner: target.toOwner, toZone: target.toZone, toIndex: target.toIndex },
+        },
+      })
+      return
+    }
+
     dispatch({
       type: 'moveCard',
       iid,
@@ -551,6 +593,12 @@ export function Board({
           </div>
         </div>
 
+        {dragNotice && (
+          <div className="shrink-0 border-b border-amber-800 bg-amber-950/60 px-3 py-1 text-center text-xs text-amber-300">
+            {dragNotice}
+          </div>
+        )}
+
         {/* 本体: 左(システム+ログ) / 中央(盤面) / [Bのみ]スタック置き場 / 右(詳細+割り込み枠)。スクロールなし */}
         <div
           className="grid min-h-0 flex-1 gap-1.5 p-1.5"
@@ -572,7 +620,14 @@ export function Board({
 
           {/* Bのみ: スタック処理中置き場（PHASE2.10.md §1の予約枠。P3a-2aで実装） */}
           {layout === 'B' && (
-            <StackPanel board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} interrupts={interrupts} />
+            <StackPanel
+              board={board}
+              localSeat={localSeat}
+              dispatch={dispatch}
+              cardOf={cardOf}
+              interrupts={interrupts}
+              onSelectCard={setSelectedIid}
+            />
           )}
 
           {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
@@ -598,6 +653,7 @@ export function Board({
                     dispatch={dispatch}
                     cardOf={cardOf}
                     interrupts={interrupts}
+                    onSelectCard={setSelectedIid}
                   />
                 </div>
               )}

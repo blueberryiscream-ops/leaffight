@@ -5,10 +5,20 @@
 // （DESIGN.md §5.1「🚨 モデルの訂正」）。効果の解決内容・合法性判定・コストは一切扱わない。
 // 乱数・時刻は持たない。
 
-import type { Seat } from './board'
+import type { Seat, ZoneId } from './board'
 
 export type DeclaredActionKind = 'プレイ' | '能力' | 'バトル' | 'その他'
 export type ActionTiming = '通常型' | '割込型'
+
+/**
+ * 宣言中のカードを解決時にどこへ着地させるか（PHASE3a-3.md §2-2）。
+ * engineはこれを一切解釈しない（ただの運搬物。ゾーン名を運ぶだけなのでカード知識ゼロは保たれる）。
+ */
+export interface PlayPlacement {
+  toOwner?: Seat
+  toZone: ZoneId
+  toIndex?: number
+}
 
 export interface DeclaredAction {
   by: Seat
@@ -17,6 +27,8 @@ export interface DeclaredAction {
   actionType: ActionTiming
   label: string
   detail?: string
+  /** 手札プレイ宣言のときだけ入る。engineの状態遷移ロジックはこれを読まない（素通し） */
+  place?: PlayPlacement | null
 }
 
 /**
@@ -160,6 +172,20 @@ export function resolveStep(priority: Priority | null): PriorityResult {
 
   // 宣言フェーズ中（awaitActive/awaitNonActive）にresolveStepは無効。何もしない
   return { priority, log: '' }
+}
+
+/**
+ * その席が今「宣言」を通せるか（declareActionが受理するか）の事前判定。表示・入力ガード用。
+ * declareAction本体の受理条件と完全に同じ式にしてある（PHASE3a-3.md §2-3）。
+ */
+export function canDeclare(priority: Priority | null, seat: Seat): boolean {
+  if (priority === null) return true
+  const current = priority.frames[priority.frames.length - 1]
+  if (!current) return false
+  const ref = referenceSeat(priority, current)
+  if (current.step === 'awaitActive') return seat === ref
+  if (current.step === 'awaitNonActive') return seat === other(ref)
+  return true // processActive | processNonActive: 入れ子の割り込みとして常に受理
 }
 
 /**

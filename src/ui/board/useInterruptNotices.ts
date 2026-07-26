@@ -34,7 +34,15 @@ export function useInterruptNotices(
     // mode==='free'では出さない（PHASE3c.md §4）
     if (board.mode === 'free') return
 
-    const events = deriveTimingEvents(prev, board, (cardId) => cardOf(cardId)?.kind)
+    // 🚨 core/timing.ts の cardKindOf は引数名こそ cardId だが、実際に渡ってくるのは
+    // DeclaredAction.sourceIid（CardInstanceのiid。PHASE3a-3.md §7で確認された既知の紛らわしさ）。
+    // iidからPoolCardの種別を引くには一段挟んでcardIdに変換する必要がある（P3a-3以前はkind='プレイ'の
+    // 宣言経路自体が存在せず、この変換漏れは実害が無かった。手札プレイの自動宣言でここが初めて生きる）。
+    const cardKindOf = (iid: string) => {
+      const inst = board.cards[iid] ?? prev.cards[iid]
+      return inst ? cardOf(inst.cardId)?.kind : undefined
+    }
+    const events = deriveTimingEvents(prev, board, cardKindOf)
     const found: InterruptNotice[] = []
     for (const event of events) {
       const candidates = findInterruptCandidates(event, localSeat, board, interrupts)

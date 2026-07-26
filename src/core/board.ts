@@ -10,7 +10,7 @@ import type { Mode, Priority } from './priority'
 // 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
 export type Seat = 'A' | 'B'
 
-export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field'
+export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field' | 'pending'
 
 export type Orientation = 'ready' | 'rested'
 
@@ -353,4 +353,5 @@ export const ZONE_LABEL: Record<ZoneId, string> = {
   char: 'キャラ',
   battle: 'バトル',
   field: 'フィールド',
+  pending: '宣言中',
 }
