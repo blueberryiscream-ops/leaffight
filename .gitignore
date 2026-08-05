@@ -5,3 +5,9 @@ public/cards/
 *.zip
 node_modules/
 dist/
+
+# Windows専用の個人用ランチャ（デスクトップのショートカットから呼ばれる）
+start-leaffight.cmd
+
+# Obsidian のワークスペース設定（個人環境）
+.obsidian/
