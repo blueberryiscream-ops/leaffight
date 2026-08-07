@@ -5,21 +5,17 @@
 // （DESIGN.md §5.1「🚨 モデルの訂正」）。効果の解決内容・合法性判定・コストは一切扱わない。
 // 乱数・時刻は持たない。
 
-import type { Seat, ZoneId } from './board'
+import type { Seat } from './board'
 
 export type DeclaredActionKind = 'プレイ' | '能力' | 'バトル' | 'その他'
 export type ActionTiming = '通常型' | '割込型'
 
 /**
- * 宣言中のカードを解決時にどこへ着地させるか（PHASE3a-3.md §2-2）。
- * engineはこれを一切解釈しない（ただの運搬物。ゾーン名を運ぶだけなのでカード知識ゼロは保たれる）。
+ * 🚨 「着地先(place)」はPHASE3a-4で撤回した。プレイしたカードの行き先はカードの種別とルールが
+ * 一意に決めており、プレイヤーがどのマスにドロップしたかは一切関係しない
+ * （oldrule.txt:834 イベント→ゴミ箱 / 935 フィールド→フィールド枠 / 887 アイテム→装備対象）。
+ * 行き先は「解決するとき」に呼び出し側（ui）が種別から決めて resolveStep に渡す。
  */
-export interface PlayPlacement {
-  toOwner?: Seat
-  toZone: ZoneId
-  toIndex?: number
-}
-
 export interface DeclaredAction {
   by: Seat
   sourceIid: string | null
@@ -27,8 +23,6 @@ export interface DeclaredAction {
   actionType: ActionTiming
   label: string
   detail?: string
-  /** 手札プレイ宣言のときだけ入る。engineの状態遷移ロジックはこれを読まない（素通し） */
-  place?: PlayPlacement | null
 }
 
 /**

@@ -27,8 +27,20 @@ export type BoardAction =
   | { type: 'clearBoard' }
   | { type: 'declareAction'; action: DeclaredAction }
   | { type: 'passPriority'; by: Seat }
-  | { type: 'resolveStep'; cancel?: boolean }
+  | { type: 'resolveStep'; to?: ResolveDestination }
   | { type: 'setMode'; mode: Mode }
+
+/**
+ * 解決された宣言のカードを、どのゾーンへ送るか（PHASE3a-4.md §1-3）。
+ * 🚨 core はカード種別を知らない。「イベントだからゴミ箱」という判断は ui 側（cardOf）が行い、
+ * core が受け取るのは結果のゾーンだけ（P3c の cardKindOf と同じ流儀）。
+ * 未指定（undefined）＝行き先がルールで一意に決まらない＝カードは pending に残し、人間が置く。
+ */
+export interface ResolveDestination {
+  toOwner?: Seat
+  toZone: ZoneId
+  toIndex?: number
+}
 
 /**
  * 現在の窓で「今まさに解決される」DeclaredAction を取り出す（PHASE3a-3.md §2-4）。
@@ -89,11 +101,15 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       if (!log) return { state, log: '' }
 
       let next: BoardState = { ...state, priority }
-      const place = action.action.place
-      if (place && action.action.sourceIid) {
+      // 手札から「プレイ」を宣言したカードは提示エリア(pending)へ上げる。提示した時点で
+      // 使用したと見なされる（oldrule.txt:828）ので手札には残さない。
+      // 🚨 判定材料はゾーン（core の知識）と宣言の種別だけ。カード種別は見ない。
+      // 盤面のカードの起動型能力（kind:'能力'）や、既に場に出ている札は動かさない。
+      const src = action.action.sourceIid ? state.cards[action.action.sourceIid] : undefined
+      if (action.action.kind === 'プレイ' && src && src.zone === 'hand') {
         const moved = board.moveCard(next, {
-          iid: action.action.sourceIid,
-          toOwner: action.action.by,
+          iid: src.iid,
+          toOwner: src.owner,
           toZone: 'pending',
           cardName: action.action.label,
         })
@@ -112,31 +128,41 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       if (!log) return { state, log: '' }
 
       let next: BoardState = { ...state, priority }
-      if (resolved?.place && resolved.sourceIid) {
+      let moveLog = ''
+      // 行き先が指定されているものだけ自動で送る（PHASE3a-4.md §1-3）。指定が無ければ
+      // カードは提示エリアに残り、人間がドラッグで置く（キャラ/タッグ/アイテム/バトル）。
+      if (action.to && resolved?.sourceIid) {
         const card = next.cards[resolved.sourceIid]
         if (card && card.zone === 'pending') {
-          const moved = action.cancel
-            ? board.moveCard(next, { iid: resolved.sourceIid, toOwner: resolved.by, toZone: 'hand', cardName: resolved.label })
-            : board.moveCard(next, {
-                iid: resolved.sourceIid,
-                toOwner: resolved.place.toOwner ?? resolved.by,
-                toZone: resolved.place.toZone,
-                toIndex: resolved.place.toIndex,
-                cardName: resolved.label,
-              })
+          // フィールドは盤面共有の1枠。既に出ているフィールドカードはゴミ箱送り（oldrule.txt:935）。
+          // 🚨 moveCard の汎用「押し出し」は追い出した側を移動元へ入れ替えるため、移動元が
+          // pending だと押し出された古いフィールドカードが提示エリアへ迷い込む。先に片付ける。
+          if (action.to.toZone === 'field') {
+            const occupant = board.fieldCard(next)
+            if (occupant && occupant.iid !== card.iid) {
+              next = board.toTrash(next, { iid: occupant.iid, cardName: occupant.cardId }).state
+            }
+          }
+          const moved = board.moveCard(next, {
+            iid: resolved.sourceIid,
+            toOwner: action.to.toOwner,
+            toZone: action.to.toZone,
+            toIndex: action.to.toIndex,
+            cardName: resolved.label,
+          })
           next = moved.state
+          moveLog = moved.log
         }
       }
-      // engineのlogは常に「〜を解決」形式。取り消し時は文言を差し替える（PHASE3a-3.md §2-4）
-      const resolveLog = action.cancel ? log.replace('を解決', 'を取り消した（手札に戻した）') : log
-      return { state: next, log: resolveLog }
+      return { state: next, log: moveLog ? `${log}／${moveLog}` : log }
     }
     case 'setMode': {
       const { priority, mode, log } = priorityEngine.setMode(state.priority, action.mode)
       let next: BoardState = { ...state, priority, mode }
-      // 🚨 freeに切り替えるとpriorityがnullになり、pendingに残ったカードは行き場を失って
-      // 盤面から消える（pendingはどこにも描画されないため）。free化のタイミングで
-      // pendingのカードを全て持ち主の手札に戻す（PHASE3a-3.md §2-4「見落とし厳禁」）。
+      // 🚨 freeに切り替えると優先権UI（StackPanel＝提示エリアの描画場所）ごと消えるため、
+      // pendingに残ったカードは行き場を失って盤面から見えなくなる。free化のタイミングで
+      // pendingのカードを全て持ち主の手札に戻す（PHASE3a-3.md §2-4「見落とし厳禁」・
+      // PHASE3a-4.md §1-5でも「この処理は残す」と明示されている）。
       if (action.mode === 'free') {
         for (const card of Object.values(state.cards)) {
           if (card.zone !== 'pending') continue

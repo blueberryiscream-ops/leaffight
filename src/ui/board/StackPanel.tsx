@@ -1,11 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
-import type { BoardAction } from '../../core/actions'
-import type { BoardState, Seat } from '../../core/board'
+import type { BoardAction, ResolveDestination } from '../../core/actions'
+import type { BoardState, CardInstance, Seat } from '../../core/board'
 import { awaitingSeat, resolvingSeat, type ActionWindow, type DeclaredAction, type Priority } from '../../core/priority'
 import type { InterruptCandidate } from '../../data/interrupt'
 import type { InterruptsMap, PoolCard } from '../../data/types'
+import { CardPiece } from './CardPiece'
 import { useInterruptNotices, type InterruptNotice } from './useInterruptNotices'
 import { otherSeat } from './useBoard'
+
+/**
+ * 解決された「プレイ」宣言のカードの行き先（PHASE3a-4.md §1-3）。
+ * 🚨 種別判定はここ（ui）の責務。core が受け取るのは行き先のゾーンだけで、
+ * 「なぜそこへ行くのか」は知らない（P3c の cardKindOf と同じ流儀）。
+ *
+ *   e イベント → ゴミ箱（oldrule.txt:834 16-1[6]「その後そのカードをごみ箱送りにする」）
+ *   f フィールド → フィールド枠（oldrule.txt:935 18-2。既存の1枚はゴミ箱送り＝coreが処理）
+ *   c/t キャラ・タッグ → 動かさない（スロット位置にルール上の意味は無い＝人間が置く）
+ *   i アイテム → 動かさない（装備対象の指定はP3a-5。行き先は「指定した装備対象」17-3[11]）
+ *   b バトル → 動かさない
+ *   kind:'能力' → カード自体は動かさない（15-13-1にカード移動の記述なし）
+ */
+function resolveDestinationOf(
+  action: DeclaredAction | null,
+  board: BoardState,
+  cardOf: (cardId: string) => PoolCard | undefined,
+): ResolveDestination | undefined {
+  if (!action || action.kind !== 'プレイ' || !action.sourceIid) return undefined
+  const inst = board.cards[action.sourceIid]
+  if (!inst || inst.zone !== 'pending') return undefined
+  const kind = cardOf(inst.cardId)?.kind
+  if (kind === 'e') return { toZone: 'trash' }
+  if (kind === 'f') return { toZone: 'field' }
+  return undefined
+}
+
+/** 提示エリアのカード1枚分の大きさ(px)。カード比63:88（DESIGN.md §4.18.1）。
+ *  盤面のマスと違い回転しないうえ、パネル幅が狭い（レイアウトBで140px）ので小さめの固定値にする。 */
+const PENDING_CARD_SIZE = { w: 42, h: 59 }
 
 // 優先権パネル（DESIGN.md §5.1「2026-07-19 モデルの訂正」/ PHASE3a-1r.md §4）。
 // 旧「縦長のスタック置き場」は撤回。基本2枠（自分の宣言／相手の宣言）＋現在のstepで
@@ -54,6 +85,55 @@ function ActionSlot({
       ) : (
         <p className="text-slate-600">（宣言なし）</p>
       )}
+    </div>
+  )
+}
+
+/**
+ * 提示エリア（PHASE3a-4.md §1-4）。宣言して pending にいるカードを「実際のカード」として描画し、
+ * ここからドラッグで盤面のスロットへ置けるようにする（dnd-kit の draggable は CardPiece が持つ）。
+ * 🚨 窓が閉じた後（priority===null）でもキャラ/アイテムはここに残る。置き忘れに気づけるよう、
+ * 1枚でもあれば常に表示する（PHASE3a-4.md §1-5 で不変条件を明示的に変更した）。
+ */
+function PendingArea({
+  cards,
+  board,
+  cardOf,
+  imageUrlOf,
+  dispatch,
+  onSelectCard,
+  onCardContextMenu,
+  selectedIid,
+}: {
+  cards: CardInstance[]
+  board: BoardState
+  cardOf: (cardId: string) => PoolCard | undefined
+  imageUrlOf?: (cardId: string) => string | undefined
+  dispatch: (action: BoardAction) => void
+  onSelectCard?: (iid: string) => void
+  onCardContextMenu?: (iid: string, x: number, y: number) => void
+  selectedIid?: string | null
+}) {
+  if (cards.length === 0) return null
+  return (
+    <div data-pending-area className="shrink-0 rounded border border-sky-800 bg-sky-950/20 p-1">
+      <div className="mb-0.5 font-semibold text-sky-400">提示エリア（ドラッグで置く）</div>
+      <div className="flex flex-wrap gap-1">
+        {cards.map((inst) => (
+          <CardPiece
+            key={inst.iid}
+            instance={inst}
+            card={cardOf(inst.cardId)}
+            imageUrl={imageUrlOf?.(inst.cardId)}
+            board={board}
+            dispatch={dispatch}
+            onClick={() => onSelectCard?.(inst.iid)}
+            onContextMenu={(x, y) => onCardContextMenu?.(inst.iid, x, y)}
+            selected={selectedIid === inst.iid}
+            size={PENDING_CARD_SIZE}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -112,6 +192,9 @@ export function StackPanel({
   cardOf,
   interrupts,
   onSelectCard,
+  imageUrlOf,
+  onCardContextMenu,
+  selectedIid,
 }: {
   board: BoardState
   /** 「自分が応答待ちか」の表示判定にのみ使う。共有状態(priority)には混ぜない（PHASE3a-2a.md §1） */
@@ -121,8 +204,30 @@ export function StackPanel({
   interrupts: InterruptsMap
   /** 宣言中カード(pending)の詳細を見るための導線（PHASE3a-3.md §3-2(a)） */
   onSelectCard?: (iid: string) => void
+  /** 提示エリアのカード描画用（PHASE3a-4.md §1-4） */
+  imageUrlOf?: (cardId: string) => string | undefined
+  onCardContextMenu?: (iid: string, x: number, y: number) => void
+  selectedIid?: string | null
 }) {
   const { notices, dismiss } = useInterruptNotices(board, localSeat, cardOf, interrupts)
+
+  // 提示エリアの中身。座席で絞らない（相手が提示したカードも「提示」＝公開情報）。
+  const pendingCards = Object.values(board.cards)
+    .filter((c) => c.zone === 'pending')
+    .sort((a, b) => (a.owner === b.owner ? a.index - b.index : a.owner < b.owner ? -1 : 1))
+
+  const pendingArea = (
+    <PendingArea
+      cards={pendingCards}
+      board={board}
+      cardOf={cardOf}
+      imageUrlOf={imageUrlOf}
+      dispatch={dispatch}
+      onSelectCard={onSelectCard}
+      onCardContextMenu={onCardContextMenu}
+      selectedIid={selectedIid}
+    />
+  )
 
   const declareInterrupt = (notice: InterruptNotice, candidate: InterruptCandidate) => {
     const kind = cardOf(candidate.cardId)?.kind === 'e' ? 'プレイ' : '能力'
@@ -193,7 +298,11 @@ export function StackPanel({
           </label>
         </div>
         <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
-        <div className="flex flex-1 items-center justify-center text-slate-600">（割り込みなし）</div>
+        {/* 窓が閉じていても提示エリアにカードが残ることがある（PHASE3a-4.md §1-5） */}
+        {pendingArea}
+        <div className="flex flex-1 items-center justify-center text-slate-600">
+          {pendingCards.length > 0 ? '（提示エリアに未配置のカードがあります）' : '（割り込みなし）'}
+        </div>
       </div>
     )
   }
@@ -206,10 +315,11 @@ export function StackPanel({
   const resolving = resolvingSeat(priority)
   // 今まさに解決される宣言（resolvingSeatと同じ判定。resolvingActionは核心ロジックの複製を
   // 避けるためcore/actions.tsのprivateヘルパーと同じ式をここでも直接書く。読み取り専用の表示判定
-  // なのでcore/priority.tsに公開APIを増やすまでもない）。placeがある宣言だけ「取り消し」を出す
-  // （PHASE3a-3.md §3-2(b)）。
+  // なのでcore/priority.tsに公開APIを増やすまでもない）。
   const resolvingActionObj =
     current.step === 'processActive' ? current.active : current.step === 'processNonActive' ? current.nonActive : null
+  // 解決を押したときの行き先。ルールで一意に決まるものだけ（PHASE3a-4.md §1-3）
+  const resolveTo = resolveDestinationOf(resolvingActionObj, board, cardOf)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 rounded border border-slate-700 bg-slate-950/40 p-2 text-[10px]">
@@ -228,6 +338,8 @@ export function StackPanel({
       )}
 
       <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
+
+      {pendingArea}
 
       <div className="flex min-h-0 flex-1 flex-col gap-1.5">
         <ActionSlot label="自分の宣言" action={mine} onSelectCard={onSelectCard} />
@@ -249,27 +361,16 @@ export function StackPanel({
           ))}
         {resolving !== null &&
           (resolving === localSeat ? (
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => dispatch({ type: 'resolveStep' })}
-                className="flex-1 rounded border border-sky-700 py-1 text-sky-400 hover:bg-sky-950"
-              >
-                解決（完了）
-              </button>
-              {/* placeがある宣言（手札プレイ）だけ「取り消し」を出す。起動型能力等には出さない
-                  （PHASE3a-3.md §3-2(b)）。打ち消されたイベントがゴミ箱行きか手札戻りかはルール解釈で
-                  ありツールは判定しない（§5.1「あえて作らない」）。中立に手札へ戻し、以降は人間がドラッグで処理する */}
-              {resolvingActionObj?.place && (
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: 'resolveStep', cancel: true })}
-                  className="flex-1 rounded border border-red-800 py-1 text-red-300 hover:bg-red-950"
-                >
-                  取り消し（手札に戻す）
-                </button>
-              )}
-            </div>
+            // 🚨「取り消し（手札に戻す）」はPHASE3a-4で削除した。提示した時点で使用したと見なされ
+            // （oldrule.txt:828）、処理を行う前に巻き戻すことはできない（oldrule.txt:528）。
+            // 打ち消された場合は人間がそのカードをゴミ箱へドラッグする（盤面の雑務）。
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'resolveStep', to: resolveTo })}
+              className="w-full rounded border border-sky-700 py-1 text-sky-400 hover:bg-sky-950"
+            >
+              解決（完了）
+            </button>
           ) : (
             <div className="text-center text-slate-500">相手が処理中…</div>
           ))}

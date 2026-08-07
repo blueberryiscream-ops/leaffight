@@ -10,7 +10,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
-import { cardsInZone, fieldCard, ZONE_LABEL } from '../../core/board'
+import { cardsInZone, fieldCard } from '../../core/board'
 import { canDeclare, type ActionTiming } from '../../core/priority'
 import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
 import { CardContextMenu } from './CardContextMenu'
@@ -154,8 +154,10 @@ export function Board({
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }))
 
-  // 手札→場/ゴミ箱のドラッグは「プレイ宣言」に変える先の候補ゾーン（PHASE3a-3.md §3-1）。
+  // 手札→場/ゴミ箱のドラッグは「プレイ宣言」に変える（PHASE3a-3.md §3-1）。
   // 'deck'は含めない（手札をデッキに戻すのは雑務）。'trash'は含める（イベント使用に一致する動き）。
+  // 🚨 PHASE3a-4: ここは「宣言のきっかけになるか」を決めるだけで、着地先には一切影響しない。
+  // プレイしたカードの行き先はカードの種別とルールが一意に決める（解決時にStackPanelが決める）。
   const PLAY_DECLARE_TARGET_ZONES = new Set<ZoneId>(['char', 'leader', 'battle', 'field', 'trash'])
 
   function handleDragEnd(e: DragEndEvent) {
@@ -188,17 +190,12 @@ export function Board({
       const current = board.priority?.frames[board.priority.frames.length - 1]
       const actionType: ActionTiming =
         current && (current.step === 'processActive' || current.step === 'processNonActive') ? '割込型' : '通常型'
+      // 🚨 どのマスに落としたかは記録しない（PHASE3a-4.md §1-1）。ドラッグの意味は
+      // 「このカードをプレイすると宣言する」だけ。detailに「〜へ」と書くと着地先があるかの
+      // ような誤解を生むので書かない。
       dispatch({
         type: 'declareAction',
-        action: {
-          by: localSeat,
-          sourceIid: iid,
-          kind: 'プレイ',
-          actionType,
-          label: cardName,
-          detail: `${ZONE_LABEL[target.toZone]}へ`,
-          place: { toOwner: target.toOwner, toZone: target.toZone, toIndex: target.toIndex },
-        },
+        action: { by: localSeat, sourceIid: iid, kind: 'プレイ', actionType, label: cardName },
       })
       return
     }
@@ -627,6 +624,9 @@ export function Board({
               cardOf={cardOf}
               interrupts={interrupts}
               onSelectCard={setSelectedIid}
+              imageUrlOf={imageUrlOf}
+              onCardContextMenu={openMenu}
+              selectedIid={selectedIid}
             />
           )}
 
@@ -643,7 +643,9 @@ export function Board({
                 dispatch={dispatch}
               />
             </div>
-            <div className="flex h-40 shrink-0 gap-1.5">
+            {/* h-56: 提示エリア（PHASE3a-4.md §1-4）のカード1枚分＋ラベルを足したぶん高くした。
+                上のDetailPanel（flex-1・内部でoverflow-y-auto）が縮むだけでページのスクロールは増えない */}
+            <div className="flex h-56 shrink-0 gap-1.5">
               {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}
               {layout === 'A' && (
                 <div className="flex-1 min-h-0">
@@ -654,6 +656,9 @@ export function Board({
                     cardOf={cardOf}
                     interrupts={interrupts}
                     onSelectCard={setSelectedIid}
+                    imageUrlOf={imageUrlOf}
+                    onCardContextMenu={openMenu}
+                    selectedIid={selectedIid}
                   />
                 </div>
               )}
