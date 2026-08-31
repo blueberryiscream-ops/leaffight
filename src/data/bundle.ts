@@ -10,6 +10,13 @@ export type ImportProgress = (message: string) => void
 // そのままでは BlobPart に渡せない。実体は必ず通常の ArrayBuffer なので絞り込む。
 const toBlobPart = (data: Uint8Array): BlobPart => data as Uint8Array<ArrayBuffer>
 
+/** zip内のパスの拡張子から MIME を決める。発見画像に webp が混じるため jpeg 固定にはできない
+ *  （PHASE: 手動発見画像の配線・2026-08-06）。未知の拡張子は jpeg 扱いで従来どおり。 */
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+}
+const mimeOf = (p: string): string => MIME_BY_EXT[p.slice(p.lastIndexOf('.') + 1).toLowerCase()] ?? 'image/jpeg'
+
 /**
  * ローカルの leaffight-data.zip を読み込み、IndexedDB に保存する。
  * 既存のデータは置き換える。
@@ -59,7 +66,7 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   for (const card of cards) {
     if (!card.image) continue
     const data = entries[card.image]
-    if (data) images.push({ id: card.id, blob: new Blob([toBlobPart(data)], { type: 'image/jpeg' }) })
+    if (data) images.push({ id: card.id, blob: new Blob([toBlobPart(data)], { type: mimeOf(card.image) }) })
   }
 
   // 入れ替えは1つのトランザクションで行う。途中で失敗しても、前のデータが消えたまま残らない。

@@ -115,6 +115,11 @@ const xCards = readCsv(requireFile(path.join(LOCAL, 'sources', 'x_cards.csv'), '
 // ファイルが無い場合は空扱い（未実行でもbundle生成自体は壊さない）
 const surugaMatchPath = path.join(LOCAL, 'sources', 'suruga_matched.csv')
 const surugaCards = fs.existsSync(surugaMatchPath) ? readCsv(surugaMatchPath) : []
+// 第4ソース「手動発見画像」: ユーザーが個別に見つけてきた画像。tcg-db/駿河屋/X のどれにも
+// 無い穴を埋めるためのものなので優先度は最下位。対応表 manual_images.csv は
+// cardId（= `${kind}_${norm(name)}`）で引ける形式。webp が混じるので拡張子はファイル名から取る。
+const manualMapPath = path.join(LOCAL, 'manual_images.csv')
+const manualCards = fs.existsSync(manualMapPath) ? readCsv(manualMapPath) : []
 
 // ---------------------------------------------------------------------------
 // 1. プール抽出
@@ -230,6 +235,11 @@ for (const r of xCards) {
   xByName.get(n).push(r)
 }
 
+const manualById = new Map()
+for (const r of manualCards) {
+  if (r.cardId && r.file) manualById.set(r.cardId, r.file)
+}
+
 const surugaByHoleId = new Map()
 for (const r of surugaCards) {
   if (!r.holeId || !r.surugaId) continue
@@ -267,11 +277,12 @@ function pickX(candidates) {
 }
 
 /** ZIP内のパス。id には '?' 等が入りうるので、ファイル名としては潰しておく */
-const safePath = (id) => `images/${id.replace(/[\\/:*?"<>|]/g, '_')}.jpg`
+// 拡張子は元ファイルのものを使う（webp混在。読み込み側は MIME を拡張子から決める）
+const safePath = (id, ext) => `images/${id.replace(/[\\/:*?"<>|]/g, '_')}.${ext}`
 
 const zipFiles = {}
 const usedPaths = new Set()
-const stats = { tcg: 0, suruga: 0, x: 0, none: 0 }
+const stats = { tcg: 0, suruga: 0, x: 0, manual: 0, none: 0 }
 
 for (const card of cards) {
   const key = norm(card.name)
@@ -295,9 +306,17 @@ for (const card of cards) {
     const p = path.join(LOCAL, 'x_card_images', hit.file)
     if (fs.existsSync(p)) { file = p; stats.x++ }
   }
+  if (!file) {
+    const manualFile = manualById.get(card.id)
+    if (manualFile) {
+      const p = path.join(LOCAL, 'manual_card_images', manualFile)
+      if (fs.existsSync(p)) { file = p; stats.manual++ }
+    }
+  }
   if (!file) { stats.none++; continue }
 
-  const zipPath = safePath(card.id)
+  const ext = (path.extname(file).slice(1) || 'jpg').toLowerCase()
+  const zipPath = safePath(card.id, ext)
   if (usedPaths.has(zipPath)) {
     console.error(`画像パスが衝突しました: ${zipPath}（id=${card.id}）`)
     process.exit(1)
@@ -383,6 +402,7 @@ console.log('')
 console.log(`画像: ${withImage} 種 / ${cards.length} 種 (${((withImage / cards.length) * 100).toFixed(1)}%)`)
 console.log(`  tcg-db 由来       : ${stats.tcg}`)
 console.log(`  駿河屋 由来       : ${stats.suruga}`)
+console.log(`  手動発見 由来     : ${stats.manual}`)
 console.log(`  X 由来            : ${stats.x}`)
 console.log(`  画像なし          : ${stats.none}`)
 console.log('')
