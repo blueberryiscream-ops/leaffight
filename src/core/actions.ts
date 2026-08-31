@@ -134,15 +134,9 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       if (action.to && resolved?.sourceIid) {
         const card = next.cards[resolved.sourceIid]
         if (card && card.zone === 'pending') {
-          // フィールドは盤面共有の1枠。既に出ているフィールドカードはゴミ箱送り（oldrule.txt:935）。
-          // 🚨 moveCard の汎用「押し出し」は追い出した側を移動元へ入れ替えるため、移動元が
-          // pending だと押し出された古いフィールドカードが提示エリアへ迷い込む。先に片付ける。
-          if (action.to.toZone === 'field') {
-            const occupant = board.fieldCard(next)
-            if (occupant && occupant.iid !== card.iid) {
-              next = board.toTrash(next, { iid: occupant.iid, cardName: occupant.cardId }).state
-            }
-          }
+          // フィールドの入れ替え（旧カードのゴミ箱送り・oldrule.txt:935）は core/board.ts の
+          // moveCard 側で行う。P3a-4 ではここで先回りしていたが、moveCard 本体を原典どおりに
+          // 訂正したため不要になった（2026-08-06）。
           const moved = board.moveCard(next, {
             iid: resolved.sourceIid,
             toOwner: action.to.toOwner,

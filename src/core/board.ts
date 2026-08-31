@@ -167,19 +167,25 @@ export function moveCard(
   let next = cloneBoard(state)
 
   if (args.toZone === 'field') {
-    // 共有1枚（座席を問わない）。既存の1枚があれば、移動元カードの元の場所へ追い出す
-    // （P1のmoveCardの既存の入れ替え挙動そのまま。PHASE2.6.md §3「自動化はP4」）
+    // 共有1枚（座席を問わない）。既にフィールドカードが出ていた場合、出ていたカードは
+    // 「ゴミ箱送りになります」（oldrule.txt:935 ／ 18-2[11] は oldrule.txt:958）。
+    // 🚨 P1以来ここは「追い出した側を移動元へ入れ替える」実装だったが、原典に反する誤りだった。
+    //    PHASE3a-4 の統括検証で、移動元が pending のとき旧フィールドカードが提示エリアへ
+    //    迷い込むことから発覚し、逐語引用に合わせて訂正した（2026-08-06）。
     const occupant = fieldCard(next)
     const actualOccupant = occupant && occupant.iid !== card.iid ? occupant : undefined
     next.cards[card.iid] = { ...card, owner: toOwner, zone: 'field', index: 0, faceUp }
     if (actualOccupant) {
       next.cards[actualOccupant.iid] = {
         ...actualOccupant,
-        owner: fromOwner,
-        zone: fromZone,
-        index: fromIndex,
-        faceUp: resolveFaceUp(args.toZone, fromZone, actualOccupant.faceUp),
+        zone: 'trash',
+        index: cardsInZone(next, actualOccupant.owner, 'trash').length,
+        faceUp: resolveFaceUp('field', 'trash', actualOccupant.faceUp),
       }
+      next = normalizeZone(next, actualOccupant.owner, 'trash')
+    }
+    if (fromOwner !== toOwner || fromZone !== args.toZone) {
+      next = normalizeZone(next, fromOwner, fromZone)
     }
   } else if (isSlotted(args.toZone) && args.toIndex !== undefined) {
     const occupant = Object.values(next.cards).find(

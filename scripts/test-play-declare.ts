@@ -221,5 +221,17 @@ function playDeclareAction(by: 'A' | 'B', sourceIid: string): DeclaredAction {
   checkParity(awaitingActive, 'B', 'awaitActive・誤った側')
 }
 
+
+// --- ケース11: 手でドラッグしてフィールドを入れ替えた場合も、旧カードはゴミ箱へ ---
+// （oldrule.txt:935 / 18-2[11]。P1以来「移動元へ入れ替え」だった誤りを2026-08-06に訂正）
+{
+  let state = applyAction(EMPTY_BOARD, { type: 'spawnCard', iid: 'old', cardId: 'f1', cardName: '旧', owner: 'A', zone: 'field' }).state
+  state = applyAction(state, { type: 'spawnCard', iid: 'new', cardId: 'f2', cardName: '新', owner: 'B', zone: 'hand' }).state
+  state = applyAction(state, { type: 'moveCard', iid: 'new', toOwner: 'B', toZone: 'field', cardName: '新' }).state
+  assertEqual(state.cards['new'].zone, 'field', 'ケース11: 新しいフィールドカードが場に出る')
+  assertEqual(state.cards['old'].zone, 'trash', 'ケース11: 旧フィールドカードはゴミ箱（手札へ入れ替わらない）')
+  assertEqual(state.cards['old'].owner, 'A', 'ケース11: 持ち主は変わらない')
+}
+
 console.log(failures === 0 ? `\n✅ 全ケース成功` : `\n❌ ${failures}件失敗`)
 process.exit(failures === 0 ? 0 : 1)
