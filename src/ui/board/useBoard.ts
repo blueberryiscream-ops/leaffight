@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
+import { isValidBattleShape } from '../../core/battle'
 import { EMPTY_BOARD, type BoardState, type Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
@@ -24,6 +25,18 @@ function normalizePriority(board: BoardState): BoardState {
   const p = board.priority as unknown
   if (p !== null && (typeof p !== 'object' || !('frames' in p))) {
     return { ...board, priority: null }
+  }
+  return board
+}
+
+/**
+ * 旧盤面の battle は `at` を持たない（P3d-1の形。PHASE3d-2a導入前）。読込時に `at` を
+ * 持たない battle は null に正規化する（normalizePriority と同じ流儀・PHASE3d-2a.md §6）。
+ * P3d-1にはUIが無かったので実データには存在しないはずだが、念のため。
+ */
+export function normalizeBattle(board: BoardState): BoardState {
+  if (board.battle !== null && !isValidBattleShape(board.battle)) {
+    return { ...board, battle: null }
   }
   return board
 }
@@ -71,7 +84,7 @@ export function useBoard() {
         // EMPTY_BOARD のデフォルト（priority:null, mode:'assist'）で補完してから復元する。
         // これをしないと StackPanel が undefined な priority を読んでクラッシュする。
         // さらに priority があっても旧shape（frames無し）のことがあるので正規化する（上記コメント参照）。
-        setHistory((h) => ({ ...h, present: normalizePriority({ ...EMPTY_BOARD, ...saved }) }))
+        setHistory((h) => ({ ...h, present: normalizeBattle(normalizePriority({ ...EMPTY_BOARD, ...saved })) }))
       }
       loaded.current = true
     })()

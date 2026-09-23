@@ -48,6 +48,19 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
   return { ...EMPTY_BOARD, cards: map, battle }
 }
 
+// PHASE3d-2a: advanceStepは`at`を1点ずつ進める純関数になった（窓/行動の区別を見ない）。
+// 旧テスト（7段単位で1回のadvanceStepを呼んでいた）をatベースに書き直すための踏み台。
+// 前提未達で詰まったら（at が変わらなければ）そこで止める。
+function advanceTo(battle: Battle, targetAt: number): Battle {
+  let b = battle
+  for (let i = 0; i < 30 && b.at !== targetAt; i++) {
+    const next = battleEngine.advanceStep(b).battle
+    if (next.at === b.at) break // 前提未達で進めない
+    b = next
+  }
+  return b
+}
+
 // =============================================================================
 // 1. 宣言 → 7段を順に進めて『終了』に到達する
 // =============================================================================
@@ -62,32 +75,33 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
 
   let { battle } = battleEngine.declareBattle('A')
   assertEqual(battle.step, '宣言', '1: declareBattleでstep=宣言')
+  assertEqual(battle.at, 2, '1: declareBattleでat=2')
 
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, '挑んだ側キャラ指定', '1: 宣言→挑んだ側キャラ指定')
+  battle = advanceTo(battle, 6)
+  assertEqual(battle.step, '挑んだ側キャラ指定', '1: 宣言→挑んだ側キャラ指定（at=6まで進む）')
 
   battle = battleEngine.setParticipants(battle, 'A', ['charA1']).battle
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, '挑まれた側キャラ指定', '1: 参加キャラ指定後、挑まれた側キャラ指定へ')
+  battle = advanceTo(battle, 10)
+  assertEqual(battle.step, '挑まれた側キャラ指定', '1: 参加キャラ指定後、挑まれた側キャラ指定へ（at=10まで進む）')
 
   battle = battleEngine.setParticipants(battle, 'B', ['charB1']).battle
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, '種目決定', '1: 挑まれた側指定後、種目決定へ')
+  battle = advanceTo(battle, 15)
+  assertEqual(battle.step, '種目決定', '1: 挑まれた側指定後、種目決定へ（at=15まで進む）')
 
   const setCardResult = battleEngine.setBattleCard(board, battle, 'bcard')
   battle = setCardResult.battle
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, 'バトル中アクション', '1: 種目決定後、バトル中アクションへ')
+  battle = advanceTo(battle, 19)
+  assertEqual(battle.step, 'バトル中アクション', '1: 種目決定後、バトル中アクションへ（at=19まで進む）')
 
   battle = battleEngine.setValue(battle, 'A', 'atk', 5).battle
   battle = battleEngine.setValue(battle, 'A', 'def', 3).battle
   battle = battleEngine.setValue(battle, 'B', 'atk', 4).battle
   battle = battleEngine.setValue(battle, 'B', 'def', 2).battle
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, '結果', '1: バトル中アクション後、結果へ')
+  battle = advanceTo(battle, 25)
+  assertEqual(battle.step, '結果', '1: バトル中アクション後、結果へ（at=25まで進む）')
 
-  battle = battleEngine.advanceStep(battle).battle
-  assertEqual(battle.step, '終了', '1: 結果後、終了へ（7段完走）')
+  battle = advanceTo(battle, 28)
+  assertEqual(battle.step, '終了', '1: 結果後、終了へ（7段完走・at=28）')
 }
 
 // =============================================================================
@@ -95,11 +109,11 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
 // =============================================================================
 {
   let { battle } = battleEngine.declareBattle('A')
-  battle = battleEngine.advanceStep(battle).battle // 宣言→挑んだ側キャラ指定
-  assertEqual(battle.step, '挑んだ側キャラ指定', '2: 前提: 挑んだ側キャラ指定にいる')
+  battle = advanceTo(battle, 7) // 宣言→挑んだ側キャラ指定（at=7, 参加キャラ指定の行動点）
+  assertEqual(battle.step, '挑んだ側キャラ指定', '2: 前提: at=7（挑んだ側キャラ指定）にいる')
 
   const before = battle
-  const result = battleEngine.advanceStep(battle) // participants['A']が空のまま進めようとする
+  const result = battleEngine.advanceStep(battle) // participants['A']が空のまま進めようとする（at=7を出る前提未達）
   assertEqual(result.log, '', '2: 参加キャラ0のまま advanceStep → logが空')
   assertEqual(result.battle, before, '2: 参加キャラ0のまま advanceStep → 状態が変わらない')
 }
@@ -156,12 +170,16 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
 // 6. [21]のループ: loopBack で step が『バトル中アクション』のまま loopCount が増える
 // =============================================================================
 {
+  // loopBackは at=21（[21]バトルを挑んだプレイヤーが[19]に戻るか選ぶ点）でだけ有効。
+  // oldrule.txt:1111「バトルを挑んだプレイヤーは手順[19]に戻るか、次の手順に進むかを選択する」
   let { battle } = battleEngine.declareBattle('A')
-  battle = { ...battle, step: 'バトル中アクション' }
+  battle = { ...battle, at: 21, step: battleEngine.stepForAt(21) }
   assertEqual(battle.loopCount, 0, '6: 初期loopCountは0')
   battle = battleEngine.loopBack(battle).battle
+  assertEqual(battle.at, 19, '6: loopBack後はat=19に戻る')
   assertEqual(battle.step, 'バトル中アクション', '6: loopBack後もstepはバトル中アクションのまま')
   assertEqual(battle.loopCount, 1, '6: loopCountが1に増える')
+  battle = { ...battle, at: 21 } // 次の周でまた[21]に到達した想定
   battle = battleEngine.loopBack(battle).battle
   assertEqual(battle.loopCount, 2, '6: 繰り返すたびloopCountが増える（2回目）')
 }
@@ -340,6 +358,7 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
   // battle=nullの状態でBoardAction相当の操作（advanceBattleStep等）を呼んでも壊れない
   const noBattleResult = battleEngine.advanceStep({
     challenger: 'A' as Seat,
+    at: 2,
     step: '宣言',
     participants: { A: [], B: [] },
     autoLeader: { A: false, B: false },
@@ -351,7 +370,7 @@ function boardWith(cards: CardInstance[], battle: Battle | null = null): BoardSt
     aborted: false,
     abortReason: null,
   })
-  assertTrue(noBattleResult.battle.step === '挑んだ側キャラ指定', '11: battle:nullな旧盤面と無関係に、battle.ts自体は単独でも動く')
+  assertTrue(noBattleResult.battle.at === 4 && noBattleResult.battle.step === '宣言', '11: battle:nullな旧盤面と無関係に、battle.ts自体は単独でも動く（atが1点進む）')
 }
 
 console.log(failures === 0 ? `\n✅ 全ケース成功` : `\n❌ ${failures}件失敗`)

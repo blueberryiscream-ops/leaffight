@@ -79,6 +79,26 @@ function popFrame(priority: Priority): Priority | null {
   return { ...priority, frames }
 }
 
+/**
+ * openWindow: 空の窓を開く（バトルの段が開く窓。誰も宣言していない状態から始まる）。
+ * PHASE3d-2a.md §2-1。priority が null のときだけ有効（既に窓があるなら何もしない＝log空）。
+ * nonActiveOnly（at=2用）: 挑んだ側はすでにバトルを宣言済みで、相手だけが同時アクションを宣言できる窓
+ * （'awaitNonActive' で開く）。その後の遷移は既存の declareAction/passPriority/resolveStep がそのまま扱う。
+ */
+export function openWindow(
+  priority: Priority | null,
+  activePlayer: Seat,
+  opts?: { nonActiveOnly?: boolean },
+): PriorityResult {
+  if (priority !== null) return { priority, log: '' }
+  const frame: ActionWindow = {
+    active: null,
+    nonActive: null,
+    step: opts?.nonActiveOnly ? 'awaitNonActive' : 'awaitActive',
+  }
+  return { priority: { frames: [frame], activePlayer }, log: '窓を開いた' }
+}
+
 /** declareAction: 宣言（窓を開く／枠を埋める／処理中への割り込みで入れ子の窓をpush） */
 export function declareAction(priority: Priority | null, action: DeclaredAction): PriorityResult {
   if (priority === null) {

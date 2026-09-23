@@ -3,6 +3,7 @@
 // ここでも乱数・時刻は持たない。呼び出し側が iid・並び順を決めて渡す。
 
 import * as battleEngine from './battle'
+import * as battleFlow from './battleFlow'
 import * as board from './board'
 import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 import * as priorityEngine from './priority'
@@ -34,9 +35,11 @@ export type BoardAction =
   | { type: 'advanceBattleStep' }
   | { type: 'setBattleParticipants'; seat: Seat; iids: string[] }
   | { type: 'autoAssignBattleLeader'; seat: Seat }
+  | { type: 'forceAutoLeaderBattle'; seat: Seat }
   | { type: 'setBattleCard'; iid: string; cardName?: string }
   | { type: 'setBattleValue'; seat: Seat; stat: 'atk' | 'def'; value: number }
   | { type: 'loopBackBattle' }
+  | { type: 'applyBattleDamage'; damages: battleEngine.DamageInput[] }
   | { type: 'abortBattle'; reason: string }
 
 /**
@@ -66,7 +69,19 @@ function resolvingAction(priority: Priority | null): DeclaredAction | null {
   return null
 }
 
+/**
+ * applyAction: 全アクションの入口。既存の switch（applyActionCore）を実行した後、必ず
+ * battleFlow.afterAction を通す（PHASE3d-2a §2-2「applyAction の最後で呼ぶ後処理」）。
+ * battle が無ければ afterAction はほぼ何もしない（既存のテスト・通信経路への非回帰）。
+ */
 export function applyAction(state: BoardState, action: BoardAction): board.Result {
+  const core = applyActionCore(state, action)
+  const flow = battleFlow.afterAction(state, core.state, action)
+  if (!flow.log) return core
+  return { state: flow.state, log: core.log ? `${core.log}／${flow.log}` : flow.log }
+}
+
+function applyActionCore(state: BoardState, action: BoardAction): board.Result {
   switch (action.type) {
     case 'spawnCard':
       return board.spawnCard(state, action)
@@ -176,25 +191,75 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       return { state: next, log }
     }
     case 'declareBattle': {
+      // 🚨 受理条件（20-3・battle===null・priority===null）は canDeclareBattle が判定する
+      // （PHASE3d-2a §6）。満たさなければ log 空で state 不変。
+      const reason = battleEngine.canDeclareBattle(state, action.challenger)
+      if (reason) return { state, log: '' }
       const { battle, log } = battleEngine.declareBattle(action.challenger)
       return { state: { ...state, battle }, log }
     }
     case 'advanceBattleStep': {
       if (!state.battle) return { state, log: '' }
-      const { battle, log } = battleEngine.advanceStep(state.battle)
-      if (!log) return { state, log: '' }
-      return { state: { ...state, battle }, log }
+      // assist では行動の点でだけ有効。かつ priority===null（宣言が処理中なら進めない）。
+      // free では at の種類を問わず1つずつ進める（PHASE3d-2a §2-3）。
+      if (state.mode === 'assist' && (!battleEngine.isActionAt(state.battle.at) || state.priority !== null)) {
+        return { state, log: '' }
+      }
+      // at=28 を出る: 中断していれば at=29 へ行かず battle=null（20-6-1 oldrule.txt:1138-1139）
+      if (state.battle.at === 28 && state.battle.aborted) {
+        return { state: { ...state, battle: null }, log: 'バトル終了（中断のため[29]は行わない・20-6-1）' }
+      }
+      // at=29 を出る（freeのみ到達。assistでは窓なので上で弾かれ、窓が閉じたらbattleFlowが終える）
+      if (state.battle.at === 29) {
+        return { state: { ...state, battle: null }, log: 'バトル終了' }
+      }
+
+      let working = state
+      let preLog = ''
+      // at=11 を出る前提: participants[挑まれた側] が空なら、先に autoAssignLeader を試す（PHASE3d-2a §3）
+      if (working.battle && working.battle.at === 11) {
+        const receiver = battleEngine.other(working.battle.challenger)
+        if (working.battle.participants[receiver].length === 0) {
+          const auto = battleEngine.autoAssignLeader(working, working.battle, receiver)
+          if (auto.log) {
+            working = { ...auto.state, battle: auto.battle }
+            preLog = auto.log
+          }
+        }
+      }
+
+      const { battle, log } = battleEngine.advanceStep(working.battle!)
+      if (!log) return { state: preLog ? working : state, log: preLog }
+      return { state: { ...working, battle }, log: preLog ? `${preLog}／${log}` : log }
     }
     case 'setBattleParticipants': {
       if (!state.battle) return { state, log: '' }
-      const { battle, log } = battleEngine.setParticipants(state.battle, action.seat, action.iids)
-      return { state: { ...state, battle }, log }
+      // 待機（ready）のものを消耗（rested）にする（20-4[7][11] oldrule.txt:1075-1076,1084-1085）。
+      // 「1タップで戻す」は既存の setOrientation で足りる（PHASE3d-2a §3）。
+      let working = state
+      const restLogs: string[] = []
+      for (const iid of action.iids) {
+        const c = working.cards[iid]
+        if (c && c.orientation === 'ready') {
+          const rested = board.setOrientation(working, { iid, orientation: 'rested', cardName: c.cardId })
+          working = rested.state
+          if (rested.log) restLogs.push(rested.log)
+        }
+      }
+      const { battle, log } = battleEngine.setParticipants(working.battle!, action.seat, action.iids)
+      return { state: { ...working, battle }, log: restLogs.length ? `${log}／${restLogs.join('／')}` : log }
     }
     case 'autoAssignBattleLeader': {
       if (!state.battle) return { state, log: '' }
-      const { battle, log } = battleEngine.autoAssignLeader(state, state.battle, action.seat)
-      if (!log) return { state, log: '' }
-      return { state: { ...state, battle }, log }
+      const result = battleEngine.autoAssignLeader(state, state.battle, action.seat)
+      if (!result.log) return { state, log: '' }
+      return { state: { ...result.state, battle: result.battle }, log: result.log }
+    }
+    case 'forceAutoLeaderBattle': {
+      if (!state.battle) return { state, log: '' }
+      const result = battleEngine.forceAutoLeader(state, state.battle, action.seat)
+      if (!result.log) return { state, log: '' }
+      return { state: { ...result.state, battle: result.battle }, log: result.log }
     }
     case 'setBattleCard': {
       if (!state.battle) return { state, log: '' }
@@ -212,6 +277,12 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
       const { battle, log } = battleEngine.loopBack(state.battle)
       if (!log) return { state, log: '' }
       return { state: { ...state, battle }, log }
+    }
+    case 'applyBattleDamage': {
+      if (!state.battle) return { state, log: '' }
+      const result = battleEngine.applyDamage(state, state.battle, action.damages)
+      if (!result.log) return { state, log: '' }
+      return { state: { ...result.state, battle: result.battle }, log: result.log }
     }
     case 'abortBattle': {
       if (!state.battle) return { state, log: '' }
