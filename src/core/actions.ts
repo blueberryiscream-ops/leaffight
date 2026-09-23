@@ -2,6 +2,7 @@
 // （DESIGN.md §6「ゲストの操作は Action としてホストへ送信」）。
 // ここでも乱数・時刻は持たない。呼び出し側が iid・並び順を決めて渡す。
 
+import * as battleEngine from './battle'
 import * as board from './board'
 import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 import * as priorityEngine from './priority'
@@ -29,6 +30,14 @@ export type BoardAction =
   | { type: 'passPriority'; by: Seat }
   | { type: 'resolveStep'; to?: ResolveDestination }
   | { type: 'setMode'; mode: Mode }
+  | { type: 'declareBattle'; challenger: Seat }
+  | { type: 'advanceBattleStep' }
+  | { type: 'setBattleParticipants'; seat: Seat; iids: string[] }
+  | { type: 'autoAssignBattleLeader'; seat: Seat }
+  | { type: 'setBattleCard'; iid: string; cardName?: string }
+  | { type: 'setBattleValue'; seat: Seat; stat: 'atk' | 'def'; value: number }
+  | { type: 'loopBackBattle' }
+  | { type: 'abortBattle'; reason: string }
 
 /**
  * 解決された宣言のカードを、どのゾーンへ送るか（PHASE3a-4.md §1-3）。
@@ -165,6 +174,49 @@ export function applyAction(state: BoardState, action: BoardAction): board.Resul
         }
       }
       return { state: next, log }
+    }
+    case 'declareBattle': {
+      const { battle, log } = battleEngine.declareBattle(action.challenger)
+      return { state: { ...state, battle }, log }
+    }
+    case 'advanceBattleStep': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.advanceStep(state.battle)
+      if (!log) return { state, log: '' }
+      return { state: { ...state, battle }, log }
+    }
+    case 'setBattleParticipants': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.setParticipants(state.battle, action.seat, action.iids)
+      return { state: { ...state, battle }, log }
+    }
+    case 'autoAssignBattleLeader': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.autoAssignLeader(state, state.battle, action.seat)
+      if (!log) return { state, log: '' }
+      return { state: { ...state, battle }, log }
+    }
+    case 'setBattleCard': {
+      if (!state.battle) return { state, log: '' }
+      const result = battleEngine.setBattleCard(state, state.battle, action.iid, action.cardName)
+      if (!result.log) return { state, log: '' }
+      return { state: { ...result.state, battle: result.battle }, log: result.log }
+    }
+    case 'setBattleValue': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.setValue(state.battle, action.seat, action.stat, action.value)
+      return { state: { ...state, battle }, log }
+    }
+    case 'loopBackBattle': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.loopBack(state.battle)
+      if (!log) return { state, log: '' }
+      return { state: { ...state, battle }, log }
+    }
+    case 'abortBattle': {
+      if (!state.battle) return { state, log: '' }
+      const { battle, log } = battleEngine.abortBattle(state.battle, action.reason)
+      return { state: { ...state, battle }, log }
     }
   }
 }

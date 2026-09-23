@@ -4,6 +4,7 @@
 // （P2でホストの操作をそのまま再生できるようにするため。PHASE1.md §6地雷）。
 
 import type { Attr } from './types'
+import type { Battle } from './battle'
 import type { Mode, Priority } from './priority'
 
 // 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
@@ -26,6 +27,9 @@ export interface CardInstance {
   kiryoku: number | null
   /** アイテム等がキャラに付いている場合、対象キャラの iid（DESIGN.md §4.14） */
   attachedTo: string | null
+  /** バトルカードの未使用/使用済み（19-3）。待機/消耗(orientation)とは別の概念。
+   *  🚨 プレイヤーが自由に変えられない。ルールと効果でのみ変わる（oldrule.txt:1016-1017） */
+  used?: boolean
 }
 
 /** 修正の切れ方の目印。自動消滅はしない（DESIGN.md §4.16）。人間が見て判断・削除する */
@@ -48,9 +52,11 @@ export interface BoardState {
   priority: Priority | null
   /** free＝優先権オフ（このengineを使わない）。DESIGN.md §5.1 */
   mode: Mode
+  /** 進行中のバトル。null＝バトル中でない。DESIGN.md §5.2 / PHASE3d-1.md */
+  battle: Battle | null
 }
 
-export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {}, priority: null, mode: 'assist' }
+export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {}, priority: null, mode: 'assist', battle: null }
 
 /**
  * フィールド系ゾーンの固定スロット数（座席ごと）。DESIGN.md §4.13。ルール強制ではなくUIの置き場。
@@ -95,7 +101,13 @@ export function effectiveStat(state: BoardState, iid: string, base: number, stat
 }
 
 function cloneBoard(state: BoardState): BoardState {
-  return { cards: { ...state.cards }, modifiers: { ...state.modifiers }, priority: state.priority, mode: state.mode }
+  return {
+    cards: { ...state.cards },
+    modifiers: { ...state.modifiers },
+    priority: state.priority,
+    mode: state.mode,
+    battle: state.battle,
+  }
 }
 
 /** ゾーン内の index を 0..n-1 の連番に詰め直す（DESIGN.md §2.2「正規化して1箇所で管理」） */
@@ -265,6 +277,16 @@ export function setFaceUp(state: BoardState, args: { iid: string; faceUp: boolea
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, faceUp: args.faceUp }
   return { state: next, log: `${args.cardName} を ${args.faceUp ? '表' : '裏'} にした` }
+}
+
+/** バトルカードの未使用/使用済み（19-3）。PHASE3d-1.md §2。プレイヤーが直接叩く想定のsetterではなく、
+ *  core/battle.ts の setBattleCard から呼ばれる（種目決定で used=true にする用途） */
+export function setUsed(state: BoardState, args: { iid: string; used: boolean; cardName: string }): Result {
+  const card = state.cards[args.iid]
+  if (!card) return { state, log: '' }
+  const next = cloneBoard(state)
+  next.cards[card.iid] = { ...card, used: args.used }
+  return { state: next, log: `${args.cardName} を ${args.used ? '使用済み' : '未使用'} にした` }
 }
 
 export function flip(state: BoardState, args: { iid: string; cardName: string }): Result {

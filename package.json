@@ -12,7 +12,8 @@
     "test:core-priority": "node --import ./scripts/register-ts-loader.mjs scripts/test-core-priority.ts",
     "test:timing": "node --import ./scripts/register-ts-loader.mjs scripts/test-timing.ts",
     "test:play-declare": "node --import ./scripts/register-ts-loader.mjs scripts/test-play-declare.ts",
-    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare",
+    "test:battle": "node --import ./scripts/register-ts-loader.mjs scripts/test-battle.ts",
+    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare && npm run test:battle",
     "verify": "npm run build && npm run test"
   },
   "dependencies": {
