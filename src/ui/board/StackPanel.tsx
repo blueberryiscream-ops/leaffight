@@ -253,20 +253,24 @@ export function StackPanel({
   // （coreは純粋関数なので、状態が進むたびに新しいオブジェクトが返る。同じ参照の間は連打しない）。
   const autoPassHandledRef = useRef<Priority | null>(null)
 
+  // バトルが始まったとき（board.battleがnull→非nullになった瞬間）に自動パスをオフにする
+  // （PHASE3d-2b §4。旧実装は「現在の窓にkind==='バトル'の宣言があれば」だったが、P3d-2aで
+  // バトル宣言は優先権の窓に載らなくなった（HANDOFF-P3d-2a.md）ためもう成立しない。
+  // 元の意図＝相手のバトル宣言という大きな出来事は自動で流さず一度止める、を保つための置き換え）。
+  const battleActiveRef = useRef(board.battle !== null)
+  useEffect(() => {
+    const wasActive = battleActiveRef.current
+    const isActive = board.battle !== null
+    battleActiveRef.current = isActive
+    if (!wasActive && isActive) {
+      setAutoPass(false)
+    }
+  }, [board.battle])
+
   useEffect(() => {
     const p = board.priority
     if (!p) return
-    const current = p.frames[p.frames.length - 1]
-    // 現在の窓にバトル宣言があれば、暴発防止のため自動パスを自動オフにする（PHASE3a-2a §2-3の踏襲。
-    // 新モデルではLIFOの「最上段」でなく「現在の窓」に置き換わる）。resolveStepは自動化しない
-    const hasBattle = !!current && (current.active?.kind === 'バトル' || current.nonActive?.kind === 'バトル')
-
     if (!autoPass || board.mode !== 'assist') return
-
-    if (hasBattle) {
-      setAutoPass(false)
-      return
-    }
 
     const seat = awaitingSeat(p)
     if (seat !== localSeat) return

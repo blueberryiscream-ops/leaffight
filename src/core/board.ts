@@ -100,6 +100,15 @@ export function effectiveStat(state: BoardState, iid: string, base: number, stat
   return base + delta
 }
 
+/**
+ * 気力の上限（リーダーゾーンなら×2）。PHASE3d-2b §3: CardContextMenu.tsx と
+ * BattlePanel.tsx（ダメージ確認表のmax）が同じ計算を2か所に複製しないよう、ここに切り出した。
+ * 挙動はCardContextMenu.tsx旧実装（`baseMax * 2`）から変更していない。
+ */
+export function maxKiryokuFor(zone: ZoneId, baseMax: number | null): number | null {
+  return zone === 'leader' && baseMax !== null ? baseMax * 2 : baseMax
+}
+
 function cloneBoard(state: BoardState): BoardState {
   return {
     cards: { ...state.cards },

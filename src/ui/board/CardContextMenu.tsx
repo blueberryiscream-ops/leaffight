@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat } from '../../core/board'
-import { cardsInZone, modifiersFor } from '../../core/board'
+import { cardsInZone, maxKiryokuFor, modifiersFor } from '../../core/board'
 import { ATTRS, type Attr } from '../../core/types'
 import type { PoolCard } from '../../data/types'
 import { newIid } from './useBoard'
@@ -46,7 +46,7 @@ export function CardContextMenu({
   const name = card?.name ?? instance.cardId
   const mods = modifiersFor(board, iid)
   const baseMax = card?.kiryoku ?? null
-  const max = instance.zone === 'leader' && baseMax !== null ? baseMax * 2 : baseMax
+  const max = maxKiryokuFor(instance.zone, baseMax)
 
   const attachedItems = Object.values(board.cards).filter((c) => c.attachedTo === iid)
   // 相手の手札は伏せる対象なので、相手のカードに付ける操作はここでは出さない

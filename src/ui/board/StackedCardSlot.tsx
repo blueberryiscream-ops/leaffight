@@ -36,6 +36,7 @@ export function StackedCardSlot({
   selectedIid,
   size,
   flipped,
+  battleBadge,
 }: {
   target: CardInstance
   /** targetに付与されているカード（attachedTo===target.iid）。呼び出し側でindex順にソート済みを渡す */
@@ -51,6 +52,8 @@ export function StackedCardSlot({
   size: { w: number; h: number }
   /** 相手が置いたカードを180°反転（PHASE2.9b.md §2-1）。targetのownerを見て呼び出し側が渡す */
   flipped?: boolean
+  /** targetが参加キャラ/バトル種目カードのとき⚔バッジを出す（PHASE3d-2b §1）。付随アイテムには出さない */
+  battleBadge?: boolean
 }) {
   const n = items.length
 
@@ -67,6 +70,7 @@ export function StackedCardSlot({
         selected={selectedIid === target.iid}
         size={size}
         flipped={flipped}
+        battleBadge={battleBadge}
       />
     )
   }
@@ -122,6 +126,7 @@ export function StackedCardSlot({
           size={size}
           groupRotate={{ deg: rotate, origin: pivotOrigin(targetLeft) }}
           attachBadgeOverride={targetBadgeOverride}
+          battleBadge={battleBadge}
         />
       </div>
     </div>

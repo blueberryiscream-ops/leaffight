@@ -39,6 +39,31 @@ wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: t
 ### `tabs_create` で作った新規タブは 0×0 viewport から始まる
 `resize_window`で明示的にリサイズするまで `innerWidth`/`innerHeight` が0になる。2タブ検証（P2以降）で必ず両方リサイズすること。
 
+### `preview_start` が `.claude/launch.json` の設定を見つけられないことがある（P3d-2bで発見）
+サブエージェント実行環境によっては、`.claude/launch.json`にちゃんと`leaffight-dev`の設定があっても
+`preview_start`が「No server named "leaffight-dev" found」を返し、他プロジェクトのサーバー名しか
+見えないことがある（ツールの解決先プロジェクトルートが実行時のcwdと一致しないケースと推測）。
+**代替手順**: `npm run dev`をBashで`run_in_background`起動 → `navigate`で`http://localhost:5300`を
+直接開く（`preview_start`を経由せず`navigate`だけでBrowserペインが開く）。
+
+### データ未読込（leaffight-data.zip）を手作業のファイル選択なしで読ませる方法
+`DataGate.tsx`は`<input type="file">`でZIPを受け取る作りなので、自動化ではファイル選択ダイアログを
+操作できない。代わりに、vite dev serverがプロジェクトルート配下を静的配信していることを利用し、
+`javascript_tool`で以下を実行する（`dist-data/leaffight-data.zip`が存在する前提）。
+```js
+const res = await fetch('/dist-data/leaffight-data.zip');
+const blob = await res.blob();
+const file = new File([blob], 'leaffight-data.zip', { type: 'application/zip' });
+const dt = new DataTransfer();
+dt.items.add(file);
+const input = document.querySelector('input[type=file]');
+input.files = dt.files;
+input.dispatchEvent(new Event('change', { bubbles: true }));
+```
+2タブ検証では、P3d-2b の実装サブは両方のタブで実行する必要があったと報告している（理由は未確認。
+同一オリジンの IndexedDB は通常タブ間で共有されるので、ブラウザペインのタブごとに保存領域が分かれている可能性がある）。
+統括5の検証時は、既に両タブともデータ読込済みだった。
+
 ### `javascript_tool` が時々30秒タイムアウトする
 複数カードを連続で追加するような長めのループ処理で、原因不明のタイムアウトが繰り返し発生した。ページ自体は生きており、タイムアウト時点までの操作は正常に反映されている。**対策: 1〜2枚ずつ、短いスクリプトに分けて実行する。**
 

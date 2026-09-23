@@ -13,6 +13,7 @@ import type { Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
 import { canDeclare, type ActionTiming } from '../../core/priority'
 import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
+import { BattlePanel } from './BattlePanel'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -239,6 +240,14 @@ export function Board({
       .filter((c) => c.attachedTo === targetIid)
       .sort((a, b) => a.index - b.index)
 
+  // 参加キャラ／バトル種目カードに⚔バッジを出す（PHASE3d-2b §1）。付随アイテムには出さない
+  // （StackedCardSlotのtargetにだけ渡す）。バトルが無ければ常にfalse。
+  const isBattleMarked = (iid: string) => {
+    const b = board.battle
+    if (!b) return false
+    return b.participants.A.includes(iid) || b.participants.B.includes(iid) || b.battleCardIid === iid
+  }
+
   const charCell = (owner: Seat, index: number) => {
     const inst = cardsInZone(board, owner, 'char').find((c) => c.index === index)
     return (
@@ -256,6 +265,7 @@ export function Board({
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
+            battleBadge={isBattleMarked(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -279,6 +289,7 @@ export function Board({
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
+            battleBadge={isBattleMarked(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -304,6 +315,7 @@ export function Board({
                 selectedIid={selectedIid}
                 size={cellPortrait}
                 flipped={owner !== mySeat}
+                battleBadge={isBattleMarked(inst.iid)}
               />
             )}
           </DroppableSlot>
@@ -630,8 +642,15 @@ export function Board({
             />
           )}
 
-          {/* 右列: 詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
+          {/* 右列: バトルパネル＋詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
+            <BattlePanel
+              board={board}
+              localSeat={localSeat}
+              dispatch={dispatch}
+              cardOf={cardOf}
+              onSelectCard={setSelectedIid}
+            />
             <div className="min-h-0 flex-1 rounded border border-slate-800 bg-slate-900/60">
               <DetailPanel
                 iid={selectedIid}

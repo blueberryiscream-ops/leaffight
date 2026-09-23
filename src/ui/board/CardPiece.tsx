@@ -39,6 +39,7 @@ export function CardPiece({
   flipped,
   groupRotate,
   attachBadgeOverride,
+  battleBadge,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
@@ -79,6 +80,11 @@ export function CardPiece({
    * `StackedCardSlot`側から実数を渡して「+N」相当として出す。未指定時は自分で数える（従来通り）。
    */
   attachBadgeOverride?: number
+  /**
+   * バトル中の参加キャラ／バトル種目カードの目印（PHASE3d-2b §1）。盤面上でひと目分かるよう
+   * ⚔バッジを出す。判定（誰が参加中か等）はBoard.tsx側（board.battleを見て）が行う。
+   */
+  battleBadge?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: instance.iid,
@@ -168,6 +174,11 @@ export function CardPiece({
         )}
 
         <AttachBadge count={attachedCount} />
+        {battleBadge && (
+          <span className="absolute left-0.5 top-0.5 rounded-full bg-red-700 px-1 text-[8px] font-bold text-white">
+            ⚔
+          </span>
+        )}
       </button>
 
       {hovered && !isDragging && (
