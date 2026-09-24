@@ -383,6 +383,16 @@ zipFiles['meta.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 9 }
 zipFiles['annotations.json'] = [enc.encode(JSON.stringify(annotations)), { level: 9 }]
 zipFiles['interrupts.json'] = [enc.encode(JSON.stringify(interrupts)), { level: 9 }]
 
+// ---------------------------------------------------------------------------
+// 4.7. カード裏面（PHASE2.11.md §4）。_local/card-back.jpg（利用者提供・権利物）が
+// あれば back.jpg として同梱する。無ければ入れずに続行（annotations.json と同じ流儀＝旧ZIP互換）。
+// ---------------------------------------------------------------------------
+const cardBackPath = path.join(LOCAL, 'card-back.jpg')
+const hasCardBack = fs.existsSync(cardBackPath)
+if (hasCardBack) {
+  zipFiles['back.jpg'] = [new Uint8Array(fs.readFileSync(cardBackPath)), { level: 0 }]
+}
+
 fs.mkdirSync(OUT_DIR, { recursive: true })
 const outPath = path.join(OUT_DIR, 'leaffight-data.zip')
 fs.writeFileSync(outPath, zipSync(zipFiles))
@@ -423,3 +433,6 @@ console.log(
 )
 console.log('')
 console.log(`出力: ${path.relative(ROOT, outPath)}  (${(fs.statSync(outPath).size / 1048576).toFixed(1)} MB)`)
+console.log(
+  `カード裏面: ${hasCardBack ? 'back.jpg を同梱' : '無し（_local/card-back.jpg が見つからないため未同梱）'}`,
+)

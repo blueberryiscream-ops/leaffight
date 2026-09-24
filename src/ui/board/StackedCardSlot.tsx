@@ -1,5 +1,6 @@
 import type { BoardAction } from '../../core/actions'
 import type { BoardState, CardInstance } from '../../core/board'
+import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
 
@@ -63,6 +64,7 @@ export function StackedCardSlot({
         instance={target}
         card={cardOf(target.cardId)}
         imageUrl={imageUrlOf(target.cardId)}
+        backImageUrl={imageUrlOf(CARD_BACK_IMAGE_ID)}
         board={board}
         dispatch={dispatch}
         onClick={() => onCardClick(target.iid)}
@@ -98,6 +100,7 @@ export function StackedCardSlot({
               instance={item}
               card={cardOf(item.cardId)}
               imageUrl={imageUrlOf(item.cardId)}
+              backImageUrl={imageUrlOf(CARD_BACK_IMAGE_ID)}
               board={board}
               dispatch={dispatch}
               onClick={() => onCardClick(item.iid)}
@@ -118,6 +121,7 @@ export function StackedCardSlot({
           instance={target}
           card={cardOf(target.cardId)}
           imageUrl={imageUrlOf(target.cardId)}
+          backImageUrl={imageUrlOf(CARD_BACK_IMAGE_ID)}
           board={board}
           dispatch={dispatch}
           onClick={() => onCardClick(target.iid)}

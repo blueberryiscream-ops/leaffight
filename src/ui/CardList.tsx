@@ -45,7 +45,7 @@ export function CardList({
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">カード一覧</h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-muted">
             {visible.length} / {cards.length} 種を表示（うち画像あり {withImage}）
             {meta && ` ・ プール ${meta.poolSets.length} セット`}
           </p>
@@ -53,7 +53,7 @@ export function CardList({
         <button
           type="button"
           onClick={onReset}
-          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition hover:border-red-800 hover:text-red-300"
+          className="rounded-lg border border-line-strong px-3 py-1.5 text-xs text-ink-muted transition hover:border-danger/60 hover:text-danger"
         >
           データを削除して読み込み直す
         </button>
@@ -65,7 +65,7 @@ export function CardList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="カード名・かなで検索"
-          className="w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none placeholder:text-slate-600 focus:border-emerald-600"
+          className="w-64 rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-ok"
         />
 
         <div className="flex flex-wrap gap-1">
@@ -76,8 +76,8 @@ export function CardList({
               onClick={() => toggleKind(k)}
               className={`rounded-full border px-3 py-1 text-xs transition ${
                 kinds.has(k)
-                  ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
-                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                  ? 'border-ok bg-ok/20 text-ok'
+                  : 'border-line-strong text-ink-muted hover:border-ink-faint'
               }`}
             >
               {CARD_KIND_LABEL[k]}
@@ -88,7 +88,7 @@ export function CardList({
         <select
           value={attr}
           onChange={(e) => setAttr(e.target.value as Attr | '')}
-          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+          className="rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm outline-none focus:border-ok"
         >
           <option value="">属性すべて</option>
           {ATTRS.map((a) => (
@@ -100,7 +100,7 @@ export function CardList({
       </div>
 
       {visible.length === 0 ? (
-        <p className="py-20 text-center text-sm text-slate-500">該当するカードがありません。</p>
+        <p className="py-20 text-center text-sm text-ink-muted">該当するカードがありません。</p>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
           {visible.map((card) => (

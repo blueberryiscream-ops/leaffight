@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { BoardAction, ResolveDestination } from '../../core/actions'
 import type { BoardState, CardInstance, Seat } from '../../core/board'
 import { awaitingSeat, resolvingSeat, type ActionWindow, type DeclaredAction, type Priority } from '../../core/priority'
+import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { InterruptCandidate } from '../../data/interrupt'
 import type { InterruptsMap, PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
@@ -62,28 +63,28 @@ function ActionSlot({
   onSelectCard?: (iid: string) => void
 }) {
   return (
-    <div className="min-h-0 flex-1 rounded border border-slate-700 bg-slate-900/60 p-1.5">
-      <div className="mb-0.5 font-semibold text-slate-400">{label}</div>
+    <div className="min-h-0 flex-1 rounded border border-line-strong bg-surface-1/60 p-1.5">
+      <div className="mb-0.5 font-semibold text-ink-muted">{label}</div>
       {action ? (
         <>
-          <div className="text-slate-500">
+          <div className="text-ink-muted">
             {action.kind} ・ {action.actionType}
           </div>
           {action.sourceIid && onSelectCard ? (
             <button
               type="button"
               onClick={() => onSelectCard(action.sourceIid!)}
-              className="truncate text-left font-semibold text-sky-300 underline decoration-dotted hover:text-sky-200"
+              className="truncate text-left font-semibold text-accent underline decoration-dotted hover:text-accent"
             >
               {action.label}
             </button>
           ) : (
-            <div className="truncate font-semibold text-slate-200">{action.label}</div>
+            <div className="truncate font-semibold text-ink">{action.label}</div>
           )}
-          {action.detail && <div className="truncate text-slate-500">{action.detail}</div>}
+          {action.detail && <div className="truncate text-ink-muted">{action.detail}</div>}
         </>
       ) : (
-        <p className="text-slate-600">（宣言なし）</p>
+        <p className="text-ink-faint">（宣言なし）</p>
       )}
     </div>
   )
@@ -116,8 +117,8 @@ function PendingArea({
 }) {
   if (cards.length === 0) return null
   return (
-    <div data-pending-area className="shrink-0 rounded border border-sky-800 bg-sky-950/20 p-1">
-      <div className="mb-0.5 font-semibold text-sky-400">提示エリア（ドラッグで置く）</div>
+    <div data-pending-area className="shrink-0 rounded border border-accent bg-accent/20 p-1">
+      <div className="mb-0.5 font-semibold text-accent">提示エリア（ドラッグで置く）</div>
       <div className="flex flex-wrap gap-1">
         {cards.map((inst) => (
           <CardPiece
@@ -125,6 +126,7 @@ function PendingArea({
             instance={inst}
             card={cardOf(inst.cardId)}
             imageUrl={imageUrlOf?.(inst.cardId)}
+            backImageUrl={imageUrlOf?.(CARD_BACK_IMAGE_ID)}
             board={board}
             dispatch={dispatch}
             onClick={() => onSelectCard?.(inst.iid)}
@@ -158,12 +160,12 @@ function InterruptBanner({
   return (
     <div className="flex shrink-0 flex-col gap-1">
       {notices.map((n) => (
-        <div key={n.id} className="rounded border border-amber-600 bg-amber-950/40 p-1.5">
+        <div key={n.id} className="rounded border border-warn bg-warn/40 p-1.5">
           <div className="flex items-start justify-between gap-1">
-            <span className="text-amber-300">
+            <span className="text-warn">
               《{n.timing}》— 割り込める札があります
             </span>
-            <button type="button" onClick={() => onDismiss(n.id)} className="shrink-0 text-slate-500 hover:text-slate-200">
+            <button type="button" onClick={() => onDismiss(n.id)} className="shrink-0 text-ink-muted hover:text-ink">
               ✕
             </button>
           </div>
@@ -173,7 +175,7 @@ function InterruptBanner({
                 key={i}
                 type="button"
                 onClick={() => onDeclare(n, c)}
-                className="rounded border border-sky-700 px-1.5 py-0.5 text-sky-400 hover:bg-sky-950"
+                className="rounded border border-accent px-1.5 py-0.5 text-accent hover:bg-accent/15"
               >
                 {c.annotation.ability}（{cardOf(c.cardId)?.name ?? c.cardId}/{c.annotation.cost}）
               </button>
@@ -281,7 +283,7 @@ export function StackPanel({
 
   if (board.mode === 'free') {
     return (
-      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1 rounded border border-dashed border-slate-700 bg-slate-950/30 p-2 text-center text-[10px] text-slate-600">
+      <div className="lf-panel flex h-full min-h-0 flex-col items-center justify-center gap-1 border-dashed p-2 text-center text-[10px] text-ink-faint">
         フリーモード中
         <br />
         （優先権オフ）
@@ -293,10 +295,10 @@ export function StackPanel({
 
   if (!priority) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-1.5 rounded border border-slate-700 bg-slate-950/40 p-2 text-[10px]">
+      <div className="lf-panel flex h-full min-h-0 flex-col gap-1.5 p-2 text-[10px]">
         <div className="flex shrink-0 items-center justify-between gap-1">
-          <span className="font-semibold text-slate-300">優先権</span>
-          <label className="flex shrink-0 items-center gap-1 text-slate-400">
+          <span className="font-semibold text-ink">優先権</span>
+          <label className="flex shrink-0 items-center gap-1 text-ink-muted">
             <input type="checkbox" checked={autoPass} onChange={(e) => setAutoPass(e.target.checked)} />
             自動パス
           </label>
@@ -304,7 +306,7 @@ export function StackPanel({
         <InterruptBanner notices={notices} cardOf={cardOf} onDeclare={declareInterrupt} onDismiss={dismiss} />
         {/* 窓が閉じていても提示エリアにカードが残ることがある（PHASE3a-4.md §1-5） */}
         {pendingArea}
-        <div className="flex flex-1 items-center justify-center text-slate-600">
+        <div className="flex flex-1 items-center justify-center text-ink-faint">
           {pendingCards.length > 0 ? '（提示エリアに未配置のカードがあります）' : '（割り込みなし）'}
         </div>
       </div>
@@ -326,17 +328,17 @@ export function StackPanel({
   const resolveTo = resolveDestinationOf(resolvingActionObj, board, cardOf)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5 rounded border border-slate-700 bg-slate-950/40 p-2 text-[10px]">
+    <div className="lf-panel flex h-full min-h-0 flex-col gap-1.5 p-2 text-[10px]">
       <div className="flex shrink-0 items-center justify-between gap-1">
-        <span className="font-semibold text-slate-300">優先権</span>
-        <label className="flex shrink-0 items-center gap-1 text-slate-400">
+        <span className="font-semibold text-ink">優先権</span>
+        <label className="flex shrink-0 items-center gap-1 text-ink-muted">
           <input type="checkbox" checked={autoPass} onChange={(e) => setAutoPass(e.target.checked)} />
           自動パス
         </label>
       </div>
 
       {depth > 1 && (
-        <div className="shrink-0 rounded border border-amber-700 bg-amber-950/30 px-1.5 py-0.5 text-center text-amber-400">
+        <div className="shrink-0 rounded border border-warn bg-warn/30 px-1.5 py-0.5 text-center text-warn">
           割り込み処理中（{depth}段）
         </div>
       )}
@@ -356,12 +358,12 @@ export function StackPanel({
             <button
               type="button"
               onClick={() => dispatch({ type: 'passPriority', by: localSeat })}
-              className="w-full rounded border border-emerald-700 py-1 text-emerald-400 hover:bg-emerald-950"
+              className="lf-btn-primary w-full rounded py-1"
             >
               通す（パス）
             </button>
           ) : (
-            <div className="text-center text-slate-500">相手の応答待ち…</div>
+            <div className="text-center text-ink-muted">相手の応答待ち…</div>
           ))}
         {resolving !== null &&
           (resolving === localSeat ? (
@@ -371,12 +373,12 @@ export function StackPanel({
             <button
               type="button"
               onClick={() => dispatch({ type: 'resolveStep', to: resolveTo })}
-              className="w-full rounded border border-sky-700 py-1 text-sky-400 hover:bg-sky-950"
+              className="lf-btn-primary w-full rounded py-1"
             >
               解決（完了）
             </button>
           ) : (
-            <div className="text-center text-slate-500">相手が処理中…</div>
+            <div className="text-center text-ink-muted">相手が処理中…</div>
           ))}
       </div>
     </div>

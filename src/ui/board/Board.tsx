@@ -534,17 +534,17 @@ export function Board({
 
   return (
     <DndContext sensors={sensors} collisionDetection={collisionDetectionStrategy} onDragEnd={handleDragEnd}>
-      <div className="flex h-full flex-col overflow-hidden bg-slate-950 text-slate-200">
+      <div className="flex h-full flex-col overflow-hidden text-ink">
         {/* 上部の薄いチロム。原本図には無いが、接続/追加/Undo等の操作をどこかに置く必要があるため
             盤面の外（chrome）にまとめた（PHASE2.6.mdはこの種の操作の置き場を指定していないための判断）。*/}
-        <div className="flex shrink-0 items-center gap-3 border-b border-slate-800 px-3 py-1.5">
-          <h1 className="text-sm font-semibold text-slate-200">🎴 対戦卓</h1>
+        <div className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-1.5">
+          <h1 className="text-sm font-semibold text-ink">🎴 対戦卓</h1>
           {mode === 'solo' && (
             <button
               type="button"
               onClick={() => setLocalSeat(theirSeat)}
               title="ひとり回し用: 自分の視点をA/Bで切り替える"
-              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+              className="rounded border border-line-strong px-2 py-1 text-xs text-ink-muted hover:border-accent hover:text-accent"
             >
               視点切替（現在: {mySeat}）
             </button>
@@ -552,7 +552,7 @@ export function Board({
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="rounded border border-emerald-700 px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-950"
+            className="rounded border border-ok px-2 py-1 text-xs text-ok hover:bg-ok/15"
           >
             ＋ カードを追加
           </button>
@@ -560,7 +560,7 @@ export function Board({
             type="button"
             onClick={toggleLayout}
             title="盤面レイアウトを見比べる（PHASE2.10.md。localStorageに保存）"
-            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+            className="rounded border border-line-strong px-2 py-1 text-xs text-ink-muted hover:border-accent hover:text-accent"
           >
             レイアウト: {layout} ⇄
           </button>
@@ -568,16 +568,16 @@ export function Board({
             type="button"
             onClick={() => dispatch({ type: 'setMode', mode: board.mode === 'assist' ? 'free' : 'assist' })}
             title="アシスト=優先権/スタックが働く。フリー=優先権オフで自由操作（DESIGN.md §5.1・共有・同期される）"
-            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-sky-600 hover:text-sky-300"
+            className="rounded border border-line-strong px-2 py-1 text-xs text-ink-muted hover:border-accent hover:text-accent"
           >
             モード: {board.mode === 'assist' ? 'アシスト' : 'フリー'} ⇄
           </button>
           {mode !== 'guest' && (
             <>
-              <button type="button" onClick={undo} disabled={!canUndo} className="rounded border border-slate-600 px-2 py-1 text-xs disabled:opacity-30">
+              <button type="button" onClick={undo} disabled={!canUndo} className="rounded border border-line-strong px-2 py-1 text-xs disabled:opacity-30">
                 ↶ Undo
               </button>
-              <button type="button" onClick={redo} disabled={!canRedo} className="rounded border border-slate-600 px-2 py-1 text-xs disabled:opacity-30">
+              <button type="button" onClick={redo} disabled={!canRedo} className="rounded border border-line-strong px-2 py-1 text-xs disabled:opacity-30">
                 ↷ Redo
               </button>
             </>
@@ -585,7 +585,7 @@ export function Board({
           <button
             type="button"
             onClick={handleClearBoard}
-            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-red-800 hover:text-red-300"
+            className="rounded border border-line-strong px-2 py-1 text-xs text-ink-muted hover:border-danger hover:text-danger"
           >
             盤面クリア
           </button>
@@ -603,7 +603,7 @@ export function Board({
         </div>
 
         {dragNotice && (
-          <div className="shrink-0 border-b border-amber-800 bg-amber-950/60 px-3 py-1 text-center text-xs text-amber-300">
+          <div className="shrink-0 border-b border-warn bg-warn/20 px-3 py-1 text-center text-xs text-warn">
             {dragNotice}
           </div>
         )}
@@ -615,8 +615,8 @@ export function Board({
         >
           {/* 左列 */}
           <div className="flex min-h-0 flex-col gap-1.5">
-            <div className="shrink-0 rounded border border-slate-800 bg-slate-900/60 p-2 text-[10px] text-slate-500">
-              <div className="mb-1 font-semibold text-slate-400">システム</div>
+            <div className="lf-panel shrink-0 p-2 text-[10px] text-ink-muted">
+              <div className="mb-1 font-semibold text-ink-muted">システム</div>
               <div>ダウン数 -/-（P4）</div>
               <div>ターン -（P4）</div>
               <div>フェイズ -（P4）</div>
@@ -651,7 +651,7 @@ export function Board({
               cardOf={cardOf}
               onSelectCard={setSelectedIid}
             />
-            <div className="min-h-0 flex-1 rounded border border-slate-800 bg-slate-900/60">
+            <div className="lf-panel min-h-0 flex-1">
               <DetailPanel
                 iid={selectedIid}
                 board={board}
@@ -685,7 +685,7 @@ export function Board({
                 type="button"
                 disabled
                 title="P4で実装予定（ターン進行）"
-                className="flex-1 rounded border border-slate-700 bg-slate-900/40 p-2 text-[10px] text-slate-500"
+                className="flex-1 rounded border border-line-strong bg-surface-1/40 p-2 text-[10px] text-ink-muted"
               >
                 ターンエンド /<br />次フェイズへ
                 <br />

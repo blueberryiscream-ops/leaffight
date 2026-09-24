@@ -1,5 +1,46 @@
 @import 'tailwindcss';
 
+@theme {
+  --color-surface-0: #0a1426;
+  --color-surface-1: #13243f;
+  --color-surface-2: #1c3358;
+  --color-surface-3: #2a4a78;
+  --color-line: rgb(207 226 255 / 0.22);
+  --color-line-strong: rgb(207 226 255 / 0.45);
+  --color-ink: #eef4ff;
+  --color-ink-muted: #9fb6d8;
+  --color-ink-faint: #6f88ad;
+  --color-accent: #8fd0ff;
+  --color-ok: #7fe0c4;
+  --color-warn: #ffd98a;
+  --color-danger: #ff7a8a;
+  --color-on-accent: #0f2542;
+}
+
+@utility lf-panel {
+  background: linear-gradient(180deg, #1c3358e6, #122542e6);
+  /* バトル中など枠の色だけ変えたいときは --lf-panel-border を上書きする（BattlePanel） */
+  border: 1px solid var(--lf-panel-border, var(--color-line-strong));
+  box-shadow:
+    0 0 0 1px #ffffff10,
+    0 8px 24px #0006;
+  border-radius: 8px;
+}
+
+@utility lf-btn-primary {
+  background: linear-gradient(180deg, #e9f4ff, #b9d8f5);
+  color: var(--color-on-accent);
+  border: 1px solid #ffffff;
+  font-weight: 700;
+}
+
+@utility lf-card-rim {
+  box-shadow:
+    0 0 0 1.5px #f4ecff,
+    0 0 10px #b9a8ff66,
+    0 4px 10px #0008;
+}
+
 :root {
   color-scheme: dark;
 }
@@ -12,9 +53,15 @@ body,
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 800px at 50% -10%, #121a2b 0%, #0b0f17 55%);
+  background: radial-gradient(ellipse at 30% 20%, #2a4a78 0%, #13243f 45%, #0a1426 100%);
   background-attachment: fixed;
-  color: #e5e9f0;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Kaku Gothic ProN',
-    'Noto Sans JP', sans-serif;
+  color: var(--color-ink);
+  font-family:
+    'M PLUS 1p',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Hiragino Kaku Gothic ProN',
+    'Noto Sans JP',
+    sans-serif;
 }

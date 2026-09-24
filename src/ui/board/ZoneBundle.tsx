@@ -3,6 +3,7 @@ import { useDroppable } from '@dnd-kit/core'
 import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat, ZoneId } from '../../core/board'
 import { cardsInZone } from '../../core/board'
+import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
 
@@ -67,15 +68,19 @@ export function ZoneBundle({
         ref={setNodeRef}
         data-dropid={dropId}
         style={{ width: size.w, height: size.h }}
-        className={`relative flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-dashed text-[10px] text-slate-400 transition-colors ${
-          isOver ? 'border-emerald-500 bg-emerald-950/40' : 'border-slate-700/70 bg-slate-950/40'
+        className={`relative flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-dashed text-[10px] text-ink-muted transition-colors ${
+          isOver ? 'border-ok bg-ok/40' : 'border-line-strong/70 bg-surface-0/40'
         }`}
         title="相手の手札（伏せ）"
       >
-        <div className="flex h-[70%] w-[80%] items-center justify-center rounded-sm border border-slate-600 bg-gradient-to-br from-slate-700 to-slate-900 text-[9px] text-slate-500">
-          裏
+        <div className="flex h-[70%] w-[80%] items-center justify-center overflow-hidden rounded-sm border border-line-strong bg-gradient-to-br from-surface-3 to-surface-1 text-[9px] text-ink-muted">
+          {imageUrlOf(CARD_BACK_IMAGE_ID) ? (
+            <img src={imageUrlOf(CARD_BACK_IMAGE_ID)} alt="裏面" className="h-full w-full object-cover" />
+          ) : (
+            '裏'
+          )}
         </div>
-        <span className="font-semibold text-slate-300">{list.length}枚</span>
+        <span className="font-semibold text-ink">{list.length}枚</span>
       </div>
     )
   }
@@ -87,10 +92,10 @@ export function ZoneBundle({
       style={fanOut ? undefined : { width: size.w, height: size.h }}
       className={`relative flex shrink-0 items-center justify-center gap-1 rounded-md border-2 border-dashed p-0.5 transition-colors ${
         fanOut ? 'h-full min-w-0 flex-1' : ''
-      } ${isOver ? 'border-emerald-500 bg-emerald-950/40' : 'border-slate-700/70 bg-slate-950/30'}`}
+      } ${isOver ? 'border-ok bg-ok/40' : 'border-line-strong/70 bg-surface-0/30'}`}
     >
       {list.length === 0 ? (
-        <span className="text-[9px] text-slate-600">{zone === 'hand' ? '手札' : zone === 'deck' ? 'デッキ' : 'ゴミ箱'}</span>
+        <span className="text-[9px] text-ink-faint">{zone === 'hand' ? '手札' : zone === 'deck' ? 'デッキ' : 'ゴミ箱'}</span>
       ) : fanOut ? (
         <HandFan
           list={list}
@@ -111,6 +116,7 @@ export function ZoneBundle({
             instance={list[0]}
             card={cardOf(list[0].cardId)}
             imageUrl={imageUrlOf(list[0].cardId)}
+            backImageUrl={imageUrlOf(CARD_BACK_IMAGE_ID)}
             board={board}
             dispatch={dispatch}
             onClick={() => onCardClick(list[0].iid)}
@@ -118,7 +124,7 @@ export function ZoneBundle({
             selected={selectedIid === list[0].iid}
             size={size}
           />
-          <span className="pointer-events-none absolute -left-1 -top-1 rounded-full bg-slate-700 px-1 text-[8px] font-bold text-slate-200 shadow">
+          <span className="pointer-events-none absolute -left-1 -top-1 rounded-full bg-surface-3 px-1 text-[8px] font-bold text-ink shadow">
             {list.length}
           </span>
           {zone === 'deck' && onShuffle && (
@@ -126,7 +132,7 @@ export function ZoneBundle({
               type="button"
               onClick={onShuffle}
               title="シャッフル"
-              className="absolute -bottom-1 -right-1 rounded-full border border-slate-600 bg-slate-800 px-1 text-[9px] text-slate-300 hover:border-emerald-500 hover:text-emerald-300"
+              className="absolute -bottom-1 -right-1 rounded-full border border-line-strong bg-surface-2 px-1 text-[9px] text-ink hover:border-ok hover:text-ok"
             >
               🔀
             </button>
@@ -194,6 +200,7 @@ function HandFan({
             instance={inst}
             card={cardOf(inst.cardId)}
             imageUrl={imageUrlOf(inst.cardId)}
+            backImageUrl={imageUrlOf(CARD_BACK_IMAGE_ID)}
             board={board}
             dispatch={dispatch}
             onClick={() => onCardClick(inst.iid)}

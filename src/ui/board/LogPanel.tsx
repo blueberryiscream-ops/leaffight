@@ -5,9 +5,9 @@ import type { LogEntry } from '../../core/history'
 
 export function LogPanel({ log }: { log: LogEntry[] }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-[11px] leading-relaxed text-slate-400">
+    <div className="lf-panel flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-muted">
       {log.length === 0 ? (
-        <p className="text-slate-600">ログはまだありません</p>
+        <p className="text-ink-faint">ログはまだありません</p>
       ) : (
         [...log].reverse().map((entry) => <div key={entry.id}>{entry.text}</div>)
       )}

@@ -75,21 +75,21 @@ export function App() {
   }, [])
 
   if (phase === 'booting') {
-    return <p className="p-8 text-sm text-slate-500">読み込んでいます…</p>
+    return <p className="p-8 text-sm text-ink-muted">読み込んでいます…</p>
   }
   if (phase === 'empty') {
     return <DataGate onLoaded={() => void refresh()} />
   }
   return (
     <div className="flex h-full flex-col">
-      <nav className="flex shrink-0 gap-1 border-b border-slate-800 bg-slate-950 px-2 pt-2">
+      <nav className="flex shrink-0 gap-1 border-b border-line bg-surface-0 px-2 pt-2">
         {(['board', 'library'] as const).map((v) => (
           <button
             key={v}
             type="button"
             onClick={() => setView(v)}
             className={`rounded-t px-3 py-1.5 text-xs font-medium ${
-              view === v ? 'bg-slate-900 text-emerald-400' : 'text-slate-500 hover:text-slate-300'
+              view === v ? 'bg-surface-1 text-ok' : 'text-ink-muted hover:text-ink'
             }`}
           >
             {v === 'board' ? '対戦卓' : 'カード一覧'}

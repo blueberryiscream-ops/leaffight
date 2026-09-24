@@ -6,6 +6,9 @@ import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage }
 
 export type ImportProgress = (message: string) => void
 
+/** カード裏面画像の db.images 上の予約id（PHASE2.11.md §4）。カードidと衝突しない形にする。 */
+export const CARD_BACK_IMAGE_ID = '__card-back__'
+
 // fflate の Uint8Array は ArrayBufferLike 型（SharedArrayBuffer の可能性を含む）なので
 // そのままでは BlobPart に渡せない。実体は必ず通常の ArrayBuffer なので絞り込む。
 const toBlobPart = (data: Uint8Array): BlobPart => data as Uint8Array<ArrayBuffer>
@@ -69,6 +72,12 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     if (data) images.push({ id: card.id, blob: new Blob([toBlobPart(data)], { type: mimeOf(card.image) }) })
   }
 
+  // カード裏面（PHASE2.11.md §4）。旧ZIP（back.jpg未収載）では単に無い扱い＝旧挙動のまま
+  const backRaw = entries['back.jpg']
+  if (backRaw) {
+    images.push({ id: CARD_BACK_IMAGE_ID, blob: new Blob([toBlobPart(backRaw)], { type: mimeOf('back.jpg') }) })
+  }
+
   // 入れ替えは1つのトランザクションで行う。途中で失敗しても、前のデータが消えたまま残らない。
   await db.transaction('rw', db.cards, db.images, db.meta, async () => {
     await db.cards.clear()
@@ -76,12 +85,15 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     await db.meta.clear()
     await db.cards.bulkPut(cards)
     await db.images.bulkPut(images)
-    await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: images.length })
+    // imageCount は「カード画像」の枚数（カード裏面は別枠なので数えない・DataGate等の表示に一致させる）
+    const cardImageCount = images.filter((img) => img.id !== CARD_BACK_IMAGE_ID).length
+    await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: cardImageCount })
     await writeAnnotations(annotations)
     await writeInterrupts(interrupts)
   })
 
-  return { ...meta, cardCount: cards.length, imageCount: images.length }
+  const cardImageCount = images.filter((img) => img.id !== CARD_BACK_IMAGE_ID).length
+  return { ...meta, cardCount: cards.length, imageCount: cardImageCount }
 }
 
 /** 一覧描画用に、カードと画像のURL・起動能力/割り込みの注釈をまとめて取り出す。URLは呼び出し側が revoke する */

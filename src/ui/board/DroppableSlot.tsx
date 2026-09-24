@@ -33,13 +33,13 @@ export function DroppableSlot({
       style={{ width: size.w, height: size.h }}
       className={`flex shrink-0 items-center justify-center rounded-md border-2 border-dashed transition-colors ${
         isOver
-          ? 'border-emerald-500 bg-emerald-950/40'
+          ? 'border-ok bg-ok/40'
           : emphasize
-            ? 'border-amber-700/70 bg-amber-950/10'
-            : 'border-slate-700/70 bg-slate-950/40'
+            ? 'border-warn/70 bg-warn/10'
+            : 'border-line-strong/70 bg-surface-0/40'
       }`}
     >
-      {children ?? <span className="text-[9px] text-slate-600">{label}</span>}
+      {children ?? <span className="text-[9px] text-ink-faint">{label}</span>}
     </div>
   )
 }

@@ -37,8 +37,8 @@ export function DetailPanel({
 
   if (!instance) {
     return (
-      <div className="flex h-full flex-col overflow-y-auto p-3 text-xs text-slate-500">
-        <div className="mb-2 font-semibold text-slate-300">詳細</div>
+      <div className="flex h-full flex-col overflow-y-auto p-3 text-xs text-ink-muted">
+        <div className="mb-2 font-semibold text-ink">詳細</div>
         <p>カードを左クリックすると、ここに詳細が表示されます。</p>
       </div>
     )
@@ -61,10 +61,10 @@ export function DetailPanel({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-3 text-xs">
-      <div className="mb-2 font-semibold text-slate-300">詳細</div>
+      <div className="mb-2 font-semibold text-ink">詳細</div>
 
       {hiddenFromMe ? (
-        <p className="text-slate-500">相手の手札（伏せ）</p>
+        <p className="text-ink-muted">相手の手札（伏せ）</p>
       ) : (
         <>
           <div className="mb-2 flex gap-2">
@@ -72,25 +72,25 @@ export function DetailPanel({
               <img src={imageUrl} alt="" className="aspect-[63/88] w-16 shrink-0 rounded object-cover" />
             )}
             <div>
-              <div className="text-sm font-semibold text-slate-100">{name}</div>
-              <div className="text-[10px] text-slate-500">{card?.kana}</div>
-              <div className="mt-0.5 text-[10px] text-slate-400">
+              <div className="text-sm font-semibold text-ink">{name}</div>
+              <div className="text-[10px] text-ink-muted">{card?.kana}</div>
+              <div className="mt-0.5 text-[10px] text-ink-muted">
                 {card ? CARD_KIND_LABEL[card.kind] : ''} ・ {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
               </div>
               {/* 属性(attr)とコスト(cost)は別物・混ぜない（DESIGN.md §4.8。PHASE3a-2b.md §3-4） */}
               {isCharLike && card?.attr && (
-                <div className="mt-0.5 text-[10px] text-slate-400">属性: {card.attr}</div>
+                <div className="mt-0.5 text-[10px] text-ink-muted">属性: {card.attr}</div>
               )}
-              {card?.cost && <div className="mt-0.5 text-[10px] text-slate-400">召喚コスト: {card.cost}</div>}
+              {card?.cost && <div className="mt-0.5 text-[10px] text-ink-muted">召喚コスト: {card.cost}</div>}
             </div>
           </div>
 
           {instance.kiryoku !== null && (
-            <div className="mb-2 text-slate-300">気力 {instance.kiryoku}</div>
+            <div className="mb-2 text-ink">気力 {instance.kiryoku}</div>
           )}
 
           {card?.stats && (
-            <div className="mb-2 flex flex-wrap gap-2 text-slate-300">
+            <div className="mb-2 flex flex-wrap gap-2 text-ink">
               {ATTRS.map((a) => {
                 const eff = effectiveStat(board, instance.iid, card.stats![a], a)
                 const diff = eff - card.stats![a]
@@ -98,7 +98,7 @@ export function DetailPanel({
                   <span key={a}>
                     {a}
                     {eff}
-                    {diff !== 0 && <span className="text-[10px] text-emerald-400"> ({diff >= 0 ? '+' : ''}{diff})</span>}
+                    {diff !== 0 && <span className="text-[10px] text-ok"> ({diff >= 0 ? '+' : ''}{diff})</span>}
                   </span>
                 )
               })}
@@ -106,15 +106,15 @@ export function DetailPanel({
           )}
 
           {(card?.battleAtk || card?.battleDef) && (
-            <div className="mb-2 text-slate-300">
+            <div className="mb-2 text-ink">
               攻:{card?.battleAtk} 防:{card?.battleDef}
             </div>
           )}
 
           {mods.length > 0 && (
             <div className="mb-2">
-              <div className="mb-1 font-semibold text-slate-400">修正</div>
-              <ul className="flex flex-col gap-0.5 text-[10px] text-slate-400">
+              <div className="mb-1 font-semibold text-ink-muted">修正</div>
+              <ul className="flex flex-col gap-0.5 text-[10px] text-ink-muted">
                 {mods.map((m) => (
                   <li key={m.id}>
                     {m.sourceLabel} {m.stat ? `${m.stat}${(m.delta ?? 0) >= 0 ? '+' : ''}${m.delta}` : m.note} ({m.scope})
@@ -126,7 +126,7 @@ export function DetailPanel({
 
           {triggerable.length > 0 && (
             <div className="mb-2">
-              <div className="mb-1 font-semibold text-slate-400">起動</div>
+              <div className="mb-1 font-semibold text-ink-muted">起動</div>
               <div className="flex flex-wrap gap-1.5">
                 {triggerable.map((a) => (
                   <button
@@ -145,7 +145,7 @@ export function DetailPanel({
                         },
                       })
                     }
-                    className="rounded border border-sky-700 px-2 py-1 text-sky-400 hover:bg-sky-950"
+                    className="rounded border border-accent px-2 py-1 text-accent hover:bg-accent/15"
                   >
                     {a.name}（{a.cost}）
                   </button>
@@ -156,19 +156,19 @@ export function DetailPanel({
 
           {card && card.abilities.length > 0 && (
             <div>
-              <div className="mb-1 font-semibold text-slate-400">能力</div>
+              <div className="mb-1 font-semibold text-ink-muted">能力</div>
               <ul className="flex flex-col gap-1.5">
                 {card.abilities.map((ab, i) => {
                   const anno = ab.header ? annotationByName.get(ab.header) : undefined
                   return (
-                  <li key={i} className="rounded border border-slate-700 bg-slate-800/60 p-1.5">
+                  <li key={i} className="rounded border border-line-strong bg-surface-2/60 p-1.5">
                     {ab.header && (
-                      <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                      <div className="flex items-center gap-1.5 font-semibold text-ink">
                         {ab.header}
-                        {anno && <span className="rounded bg-slate-700 px-1 py-0.5 text-[9px] font-normal text-slate-400">{anno.type}</span>}
+                        {anno && <span className="rounded bg-surface-3 px-1 py-0.5 text-[9px] font-normal text-ink-muted">{anno.type}</span>}
                       </div>
                     )}
-                    <div className="text-[10px] leading-snug text-slate-400">{ab.text}</div>
+                    <div className="text-[10px] leading-snug text-ink-muted">{ab.text}</div>
                   </li>
                   )
                 })}

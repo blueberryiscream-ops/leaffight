@@ -27,13 +27,13 @@ export function DataGate({ onLoaded }: { onLoaded: () => void }) {
     <div className="mx-auto flex min-h-full max-w-xl flex-col justify-center gap-6 p-8">
       <header>
         <h1 className="text-2xl font-bold">リーフファイト対戦ツール</h1>
-        <p className="mt-1 text-sm text-slate-400">ver.1〜3 プール</p>
+        <p className="mt-1 text-sm text-ink-muted">ver.1〜3 プール</p>
       </header>
 
-      <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-6">
-        <p className="text-sm leading-relaxed text-slate-300">
+      <div className="rounded-xl border border-line-strong bg-surface-1/60 p-6">
+        <p className="text-sm leading-relaxed text-ink">
           カードデータと画像はこのアプリに含まれていません。
-          手元の <code className="rounded bg-slate-800 px-1 py-0.5">leaffight-data.zip</code> を
+          手元の <code className="rounded bg-surface-2 px-1 py-0.5">leaffight-data.zip</code> を
           読み込んでください。中身はこのブラウザの中にだけ保存され、次回からは自動で読み込まれます。
         </p>
 
@@ -51,20 +51,20 @@ export function DataGate({ onLoaded }: { onLoaded: () => void }) {
           type="button"
           disabled={busy}
           onClick={() => inputRef.current?.click()}
-          className="mt-5 w-full rounded-lg bg-emerald-600 px-4 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-5 w-full rounded-lg bg-ok px-4 py-3 font-semibold text-on-accent transition hover:bg-ok/80 disabled:cursor-not-allowed disabled:opacity-50"
         >
           データファイルを読み込む
         </button>
 
-        {status && <p className="mt-4 text-sm text-emerald-400">{status}</p>}
+        {status && <p className="mt-4 text-sm text-ok">{status}</p>}
         {error && (
-          <p className="mt-4 rounded-lg border border-red-800 bg-red-950/60 p-3 text-sm text-red-300">
+          <p className="mt-4 rounded-lg border border-danger/60 bg-danger/10 p-3 text-sm text-danger">
             {error}
           </p>
         )}
       </div>
 
-      <p className="text-xs leading-relaxed text-slate-500">
+      <p className="text-xs leading-relaxed text-ink-muted">
         ZIPは <code>npm run data:bundle</code> でローカルに生成できます（開発者向け）。
       </p>
     </div>

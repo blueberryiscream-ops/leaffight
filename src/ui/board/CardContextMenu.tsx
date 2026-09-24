@@ -65,16 +65,16 @@ export function CardContextMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
       <aside
         style={{ left, top: Math.min(top, window.innerHeight - 480), maxHeight: '90vh' }}
-        className="fixed z-50 flex w-72 flex-col gap-3 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs shadow-2xl"
+        className="fixed z-50 flex w-72 flex-col gap-3 overflow-y-auto rounded-lg border border-line-strong bg-surface-1 p-3 text-xs shadow-2xl"
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-sm font-semibold text-slate-100">{name}</div>
-            <div className="text-[10px] text-slate-500">
+            <div className="text-sm font-semibold text-ink">{name}</div>
+            <div className="text-[10px] text-ink-muted">
               {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200">
+          <button type="button" onClick={onClose} className="text-ink-muted hover:text-ink">
             ✕
           </button>
         </div>
@@ -83,14 +83,14 @@ export function CardContextMenu({
           <button
             type="button"
             onClick={() => dispatch({ type: 'toggleOrientation', iid, cardName: name })}
-            className="flex-1 rounded border border-slate-600 py-1.5 hover:border-emerald-500"
+            className="flex-1 rounded border border-line-strong py-1.5 hover:border-ok"
           >
             {instance.orientation === 'ready' ? '待機 → 消耗' : '消耗 → 待機'}
           </button>
           <button
             type="button"
             onClick={() => dispatch({ type: 'flip', iid, cardName: name })}
-            className="flex-1 rounded border border-slate-600 py-1.5 hover:border-emerald-500"
+            className="flex-1 rounded border border-line-strong py-1.5 hover:border-ok"
           >
             {instance.faceUp ? '表 → 裏' : '裏 → 表'}
           </button>
@@ -107,20 +107,20 @@ export function CardContextMenu({
               onClose()
             }}
             title="汎用の宣言口（合法性は判定しない）。起動型能力だけの正式ボタンはP3a-2bで詳細パネルに作る（PHASE3a-2a.md §2-5）"
-            className="rounded border border-sky-700 py-1.5 text-sky-400 hover:bg-sky-950"
+            className="rounded border border-accent py-1.5 text-accent hover:bg-accent/15"
           >
             ⚡ スタックに宣言
           </button>
         )}
 
         {baseMax !== null && (
-          <section className="rounded border border-slate-700 p-2">
+          <section className="rounded border border-line-strong p-2">
             <div className="mb-1 flex items-center justify-between">
-              <span className="font-semibold text-slate-300">気力</span>
+              <span className="font-semibold text-ink">気力</span>
               <button
                 type="button"
                 onClick={() => setShowDamage((v) => !v)}
-                className="text-[9px] text-slate-500 underline hover:text-slate-300"
+                className="text-[9px] text-ink-muted underline hover:text-ink"
               >
                 表示: {showDamage ? 'ダメージ' : '残り気力'}（切替）
               </button>
@@ -129,15 +129,15 @@ export function CardContextMenu({
               <button
                 type="button"
                 onClick={() => dispatch({ type: 'setKiryoku', iid, value: max ?? 0, cardName: name })}
-                className="w-full rounded border border-emerald-700 py-1 text-emerald-400 hover:bg-emerald-950"
+                className="w-full rounded border border-ok py-1 text-ok hover:bg-ok/15"
               >
                 気力を初期値（{max}）にする
               </button>
             ) : (
               <>
-                <div className="mb-1.5 text-center text-lg font-bold text-slate-100">
+                <div className="mb-1.5 text-center text-lg font-bold text-ink">
                   {showDamage ? (max ?? 0) - instance.kiryoku : instance.kiryoku}
-                  <span className="ml-1 text-xs font-normal text-slate-500">/ {max}</span>
+                  <span className="ml-1 text-xs font-normal text-ink-muted">/ {max}</span>
                 </div>
                 <div className="flex justify-center gap-1">
                   {[-5, -1, 1, 5].map((d) => (
@@ -145,7 +145,7 @@ export function CardContextMenu({
                       key={d}
                       type="button"
                       onClick={() => dispatch({ type: 'adjustKiryoku', iid, delta: d, max: max ?? 0, cardName: name })}
-                      className="rounded border border-slate-600 px-2 py-1 hover:border-emerald-500"
+                      className="rounded border border-line-strong px-2 py-1 hover:border-ok"
                     >
                       {d > 0 ? `+${d}` : d}
                     </button>
@@ -156,20 +156,20 @@ export function CardContextMenu({
           </section>
         )}
 
-        <section className="rounded border border-slate-700 p-2">
-          <div className="mb-1 font-semibold text-slate-300">能力値修正</div>
+        <section className="rounded border border-line-strong p-2">
+          <div className="mb-1 font-semibold text-ink">能力値修正</div>
           {mods.length > 0 && (
             <ul className="mb-2 flex flex-col gap-1">
               {mods.map((m) => (
-                <li key={m.id} className="flex items-center justify-between rounded bg-slate-800 px-1.5 py-1">
-                  <span className="truncate text-[10px] text-slate-300">
+                <li key={m.id} className="flex items-center justify-between rounded bg-surface-2 px-1.5 py-1">
+                  <span className="truncate text-[10px] text-ink">
                     {m.sourceLabel} {m.stat ? `${m.stat}${(m.delta ?? 0) >= 0 ? '+' : ''}${m.delta}` : m.note}
-                    <span className="ml-1 text-slate-500">({m.scope})</span>
+                    <span className="ml-1 text-ink-muted">({m.scope})</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => dispatch({ type: 'removeModifier', modId: m.id, cardName: name })}
-                    className="ml-1 text-slate-500 hover:text-red-400"
+                    className="ml-1 text-ink-muted hover:text-danger"
                   >
                     ✕
                   </button>
@@ -181,7 +181,7 @@ export function CardContextMenu({
             <select
               value={modStat}
               onChange={(e) => setModStat(e.target.value as Attr)}
-              className="rounded border border-slate-600 bg-slate-800 px-1 py-1"
+              className="rounded border border-line-strong bg-surface-2 px-1 py-1"
             >
               {ATTRS.map((a) => (
                 <option key={a} value={a}>
@@ -193,12 +193,12 @@ export function CardContextMenu({
               type="number"
               value={modDelta}
               onChange={(e) => setModDelta(Number(e.target.value))}
-              className="w-14 rounded border border-slate-600 bg-slate-800 px-1 py-1"
+              className="w-14 rounded border border-line-strong bg-surface-2 px-1 py-1"
             />
             <select
               value={modScope}
               onChange={(e) => setModScope(e.target.value as typeof modScope)}
-              className="rounded border border-slate-600 bg-slate-800 px-1 py-1"
+              className="rounded border border-line-strong bg-surface-2 px-1 py-1"
             >
               <option value="このバトル">このバトル</option>
               <option value="ターン終了時">ターン終了時</option>
@@ -209,7 +209,7 @@ export function CardContextMenu({
               value={modSource}
               onChange={(e) => setModSource(e.target.value)}
               placeholder="出所（カード名等）"
-              className="w-28 flex-1 rounded border border-slate-600 bg-slate-800 px-1 py-1"
+              className="w-28 flex-1 rounded border border-line-strong bg-surface-2 px-1 py-1"
             />
             <button
               type="button"
@@ -229,7 +229,7 @@ export function CardContextMenu({
                 })
                 setModSource('')
               }}
-              className="rounded border border-emerald-700 px-2 py-1 text-emerald-400 disabled:opacity-40"
+              className="rounded border border-ok px-2 py-1 text-ok disabled:opacity-40"
             >
               追加
             </button>
@@ -238,24 +238,24 @@ export function CardContextMenu({
             <button
               type="button"
               onClick={() => dispatch({ type: 'clearModifiers', iid, cardName: name })}
-              className="mt-1 w-full rounded border border-slate-700 py-1 text-[10px] text-slate-400 hover:border-red-800 hover:text-red-300"
+              className="mt-1 w-full rounded border border-line-strong py-1 text-[10px] text-ink-muted hover:border-danger hover:text-danger"
             >
               すべての修正をクリア
             </button>
           )}
         </section>
 
-        <section className="rounded border border-slate-700 p-2">
-          <div className="mb-1 font-semibold text-slate-300">付随カード（アイテム等）</div>
+        <section className="rounded border border-line-strong p-2">
+          <div className="mb-1 font-semibold text-ink">付随カード（アイテム等）</div>
           {attachedItems.length > 0 && (
             <ul className="mb-2 flex flex-col gap-1">
               {attachedItems.map((it) => (
-                <li key={it.iid} className="flex items-center justify-between rounded bg-slate-800 px-1.5 py-1">
-                  <span className="truncate text-[10px] text-slate-300">{cardOf(it.cardId)?.name ?? it.cardId}</span>
+                <li key={it.iid} className="flex items-center justify-between rounded bg-surface-2 px-1.5 py-1">
+                  <span className="truncate text-[10px] text-ink">{cardOf(it.cardId)?.name ?? it.cardId}</span>
                   <button
                     type="button"
                     onClick={() => dispatch({ type: 'detach', itemIid: it.iid, itemName: cardOf(it.cardId)?.name ?? it.cardId })}
-                    className="text-slate-500 hover:text-red-400"
+                    className="text-ink-muted hover:text-danger"
                   >
                     取り外す
                   </button>
@@ -268,7 +268,7 @@ export function CardContextMenu({
               <select
                 value={attachTarget}
                 onChange={(e) => setAttachTarget(e.target.value)}
-                className="flex-1 rounded border border-slate-600 bg-slate-800 px-1 py-1"
+                className="flex-1 rounded border border-line-strong bg-surface-2 px-1 py-1"
               >
                 <option value="">手札から選ぶ…</option>
                 {handCandidates.map((c) => (
@@ -291,7 +291,7 @@ export function CardContextMenu({
                   })
                   setAttachTarget('')
                 }}
-                className="rounded border border-sky-700 px-2 py-1 text-sky-400 disabled:opacity-40"
+                className="rounded border border-accent px-2 py-1 text-accent disabled:opacity-40"
               >
                 付ける
               </button>
@@ -299,14 +299,14 @@ export function CardContextMenu({
           )}
         </section>
 
-        <div className="mt-auto flex gap-2 border-t border-slate-800 pt-2">
+        <div className="mt-auto flex gap-2 border-t border-line pt-2">
           <button
             type="button"
             onClick={() => {
               dispatch({ type: 'toTrash', iid, cardName: name })
               onClose()
             }}
-            className="flex-1 rounded border border-slate-600 py-1.5 hover:border-red-600 hover:text-red-300"
+            className="flex-1 rounded border border-line-strong py-1.5 hover:border-danger hover:text-danger"
           >
             ゴミ箱へ
           </button>
@@ -316,7 +316,7 @@ export function CardContextMenu({
               dispatch({ type: 'removeCard', iid, cardName: name })
               onClose()
             }}
-            className="flex-1 rounded border border-slate-600 py-1.5 hover:border-red-600 hover:text-red-300"
+            className="flex-1 rounded border border-line-strong py-1.5 hover:border-danger hover:text-danger"
           >
             盤外に出す
           </button>

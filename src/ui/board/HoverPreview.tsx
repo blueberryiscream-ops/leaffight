@@ -17,11 +17,13 @@ export function HoverPreview({
   card,
   imageUrl,
   faceUp,
+  backImageUrl,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
   imageUrl: string | undefined
   faceUp: boolean
+  backImageUrl?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
@@ -61,10 +63,16 @@ export function HoverPreview({
     <div
       ref={ref}
       style={style}
-      className="pointer-events-none z-50 w-72 overflow-hidden rounded-lg border border-emerald-600 bg-slate-900 shadow-2xl shadow-black/60"
+      className="pointer-events-none z-50 w-72 overflow-hidden rounded-lg border border-ok bg-surface-1 shadow-2xl shadow-black/60"
     >
       <div className="aspect-[63/88] w-full">
-        <CardFace faceUp={faceUp} imageUrl={imageUrl} card={card} name={card?.name ?? instance.cardId} />
+        <CardFace
+          faceUp={faceUp}
+          imageUrl={imageUrl}
+          card={card}
+          name={card?.name ?? instance.cardId}
+          backImageUrl={backImageUrl}
+        />
       </div>
     </div>
   )

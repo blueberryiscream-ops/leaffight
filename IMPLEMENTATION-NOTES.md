@@ -60,9 +60,17 @@ const input = document.querySelector('input[type=file]');
 input.files = dt.files;
 input.dispatchEvent(new Event('change', { bubbles: true }));
 ```
-2タブ検証では、P3d-2b の実装サブは両方のタブで実行する必要があったと報告している（理由は未確認。
-同一オリジンの IndexedDB は通常タブ間で共有されるので、ブラウザペインのタブごとに保存領域が分かれている可能性がある）。
-統括5の検証時は、既に両タブともデータ読込済みだった。
+IndexedDB は同じオリジン（localhost:5300）のタブ間で共有される（P2.11 で統括が確認: 1タブで読ませた zip の裏面画像が、
+新しく開いた2つ目のタブにも読み込み直しなしで出た）。読ませるのは1タブで足りる。
+
+### ブラウザペインが非表示だと CSS の transition が止まる（P2.11で発見）
+ペインが隠れている間（`document.visibilityState === 'hidden'`）は transition が進まず、`getComputedStyle` が
+**変化前の値を返し続ける**（例: 選択中の `outline-color` が金にならず本文色のまま）。色を実測するときは先に
+`el.getAnimations().forEach(a => a.finish())` で終わらせてから読む。
+
+### 画面サイズを変えた直後の寸法は古いことがある
+`resize_window` の直後に測ると、マスの高さ（`useMeasuredHeight`）が再計算される前の値が出る（P2.11 で 67×93 が 70×98 と出た）。
+**リロードしてから測る**か、同じ値が2回続くまで測り直す。
 
 ### `javascript_tool` が時々30秒タイムアウトする
 複数カードを連続で追加するような長めのループ処理で、原因不明のタイムアウトが繰り返し発生した。ページ自体は生きており、タイムアウト時点までの操作は正常に反映されている。**対策: 1〜2枚ずつ、短いスクリプトに分けて実行する。**

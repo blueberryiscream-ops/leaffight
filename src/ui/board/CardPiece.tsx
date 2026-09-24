@@ -28,6 +28,7 @@ export function CardPiece({
   instance,
   card,
   imageUrl,
+  backImageUrl,
   board,
   dispatch,
   onClick,
@@ -44,6 +45,8 @@ export function CardPiece({
   instance: CardInstance
   card: PoolCard | undefined
   imageUrl: string | undefined
+  /** カード裏面の画像（PHASE2.11.md §4）。呼び出し側が imageUrlOf(CARD_BACK_IMAGE_ID) で渡す */
+  backImageUrl?: string
   board: BoardState
   dispatch: (action: BoardAction) => void
   /** 左クリック→詳細選択 */
@@ -137,17 +140,17 @@ export function CardPiece({
           e.preventDefault()
           onContextMenu(e.clientX, e.clientY)
         }}
-        className={`relative flex shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border bg-slate-900 text-left shadow transition-shadow hover:border-emerald-500 hover:shadow-emerald-900/40 ${
-          selected ? 'border-emerald-400 ring-2 ring-emerald-500/50' : 'border-slate-600'
+        className={`lf-card-rim relative flex shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border border-transparent bg-surface-1 text-left transition-colors hover:border-accent ${
+          selected ? 'outline-2 outline-offset-2 outline-warn' : ''
         }`}
       >
-        <CardFace faceUp={faceUp} imageUrl={imageUrl} card={card} name={name} compact />
+        <CardFace faceUp={faceUp} imageUrl={imageUrl} card={card} name={name} compact backImageUrl={backImageUrl} />
 
         {/* オーバーレイ: 印刷されていない「今の状態」。画像/テキストどちらの上にも重ねる（PHASE2.8.md §2） */}
         {faceUp && (instance.kiryoku !== null || mods.length > 0) && (
           <div className="pointer-events-none absolute inset-x-0.5 bottom-0.5 flex flex-col items-start gap-0.5">
             {instance.kiryoku !== null && (
-              <span className="rounded bg-slate-950/85 px-1 text-[8px] font-bold text-emerald-400">
+              <span className="rounded bg-surface-0/85 px-1 text-[8px] font-bold text-ok">
                 気{instance.kiryoku}
               </span>
             )}
@@ -160,7 +163,7 @@ export function CardPiece({
                   return (
                     <span
                       key={a}
-                      className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-emerald-900/90 text-emerald-300' : 'bg-red-900/90 text-red-300'}`}
+                      className={`rounded px-0.5 text-[7px] ${diff >= 0 ? 'bg-ok/90 text-on-accent' : 'bg-danger/90 text-on-accent'}`}
                     >
                       {a}
                       {diff >= 0 ? '+' : ''}
@@ -175,14 +178,14 @@ export function CardPiece({
 
         <AttachBadge count={attachedCount} />
         {battleBadge && (
-          <span className="absolute left-0.5 top-0.5 rounded-full bg-red-700 px-1 text-[8px] font-bold text-white">
+          <span className="absolute left-0.5 top-0.5 rounded-full bg-danger px-1 text-[8px] font-bold text-white">
             ⚔
           </span>
         )}
       </button>
 
       {hovered && !isDragging && (
-        <HoverPreview instance={instance} card={card} imageUrl={imageUrl} faceUp={faceUp} />
+        <HoverPreview instance={instance} card={card} imageUrl={imageUrl} faceUp={faceUp} backImageUrl={backImageUrl} />
       )}
     </div>
   )
@@ -191,7 +194,7 @@ export function CardPiece({
 function AttachBadge({ count }: { count: number }) {
   if (count === 0) return null
   return (
-    <span className="absolute right-0.5 top-0.5 rounded-full bg-sky-600 px-1 text-[8px] font-bold text-white">
+    <span className="absolute right-0.5 top-0.5 rounded-full bg-accent px-1 text-[8px] font-bold text-on-accent">
       🔗{count}
     </span>
   )
