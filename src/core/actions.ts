@@ -27,6 +27,16 @@ export type BoardAction =
   | { type: 'removeCard'; iid: string; cardName: string }
   | { type: 'shuffleDeck'; owner: Seat; orderedIids: string[] }
   | { type: 'clearBoard' }
+  | {
+      type: 'startWithDeck'
+      owner: Seat
+      deckName: string
+      leader: { iid: string; cardId: string; kiryoku: number | null }
+      deck: { iid: string; cardId: string }[]
+      draw: number
+    }
+  | { type: 'mulligan'; owner: Seat; orderedIids: string[]; revealedNames: string[]; draw: number }
+  | { type: 'revealLeader'; owner: Seat; cardName: string }
   | { type: 'declareAction'; action: DeclaredAction }
   | { type: 'passPriority'; by: Seat }
   | { type: 'resolveStep'; to?: ResolveDestination }
@@ -118,6 +128,12 @@ function applyActionCore(state: BoardState, action: BoardAction): board.Result {
       return board.shuffleDeck(state, action)
     case 'clearBoard':
       return board.clearBoard()
+    case 'startWithDeck':
+      return board.startWithDeck(state, action)
+    case 'mulligan':
+      return board.mulligan(state, action)
+    case 'revealLeader':
+      return board.revealLeader(state, action)
     case 'declareAction': {
       const { priority, log } = priorityEngine.declareAction(state.priority, action.action)
       // 🚨 engineに弾かれた宣言（不正な手番等）はlogが空文字で返る。このときstateを一切変えず

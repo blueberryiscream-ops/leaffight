@@ -5,13 +5,15 @@
 
 import { applyAction, type BoardAction } from '../core/actions'
 import type { BoardState } from '../core/board'
-import { dispatch as dispatchHistory, type History } from '../core/history'
+import { dispatch as dispatchHistory, type History, type LogEntry } from '../core/history'
 
 export type NetMessage =
   | { kind: 'hello'; role: 'host' | 'guest'; name: string }
-  | { kind: 'sync'; version: number; state: BoardState }
+  // log: ホストの表示用ログ（古い順）。ゲストは past を持たないので、これが無いとゲストにログが一切出ない
+  // （10-1-1[1] マリガンの手札公開が相手に届かない）。古い相手からは来ないことがあるので省略可
+  | { kind: 'sync'; version: number; state: BoardState; log?: LogEntry[] }
   | { kind: 'action'; seq: number; action: BoardAction }
-  | { kind: 'state'; version: number; lastSeq: number | null; state: BoardState }
+  | { kind: 'state'; version: number; lastSeq: number | null; state: BoardState; log?: LogEntry[] }
 
 /** ホストが持つ、履歴とは別の配信用の付随情報 */
 export interface HostMeta {
@@ -22,15 +24,15 @@ export interface HostMeta {
 export const initialHostMeta: HostMeta = { version: 0, lastSeq: null }
 
 /** ホストがローカル操作（自分の操作/Undo/Redo/盤面クリア）を適用した「後」に呼ぶ。version を進めて配信メッセージを作る */
-export function bumpForBroadcast(meta: HostMeta, state: BoardState, lastSeq: number | null): { meta: HostMeta; message: NetMessage } {
+export function bumpForBroadcast(meta: HostMeta, state: BoardState, lastSeq: number | null, log: LogEntry[]): { meta: HostMeta; message: NetMessage } {
   const version = meta.version + 1
   const nextMeta = { version, lastSeq }
-  return { meta: nextMeta, message: { kind: 'state', version, lastSeq, state } }
+  return { meta: nextMeta, message: { kind: 'state', version, lastSeq, state, log } }
 }
 
 /** ゲストの hello に返す、現在の全状態 */
-export function helloReply(meta: HostMeta, state: BoardState): NetMessage {
-  return { kind: 'sync', version: meta.version, state }
+export function helloReply(meta: HostMeta, state: BoardState, log: LogEntry[]): NetMessage {
+  return { kind: 'sync', version: meta.version, state, log }
 }
 
 /** ホストがゲストの action を適用する。history が変わらなければ何もしない（対象が既に無い等） */

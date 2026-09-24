@@ -22,6 +22,7 @@ import { DetailPanel } from './DetailPanel'
 import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
 import { StackedCardSlot } from './StackedCardSlot'
+import { StartWithDeckDialog } from './StartWithDeckDialog'
 import { StackPanel } from './StackPanel'
 import { TodoBand } from './TodoBand'
 import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
@@ -143,6 +144,7 @@ export function Board({
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [startWithDeckOpen, setStartWithDeckOpen] = useState(false)
   // ドラッグ拒否の一言（PHASE3a-3.md §3-1「黙って何も起きないのは不可」）。共有ログではなく
   // このクライアントだけのローカルな失敗通知（「何も起きなかった」試みを両者のログに残す
   // 必要は無い）。数秒で自動的に消す。
@@ -292,6 +294,16 @@ export function Board({
   function handlePick(card: PoolCard, owner: Seat, zone: ZoneId) {
     dispatch({ type: 'spawnCard', iid: newIid(), cardId: card.id, cardName: card.name, owner, zone })
   }
+
+  // 「デッキで始める」ボタンの押せる/押せない（PHASE5b.md §2-1）。バトル中・宣言中は
+  // 盤面を差し替えると参照が壊れるため押せない（core側の startWithDeck も同じ条件で弾く）
+  const startWithDeckBlocked =
+    board.battle !== null
+      ? 'バトル中は使えません'
+      : board.priority !== null
+        ? '宣言の処理中は使えません'
+        : null
+  const hasOwnCards = Object.values(board.cards).some((c) => c.owner === mySeat)
 
   function handleClearBoard() {
     if (!confirm('盤面をすべてクリアします。よろしいですか？')) return
@@ -658,6 +670,15 @@ export function Board({
           >
             盤面クリア
           </button>
+          <button
+            type="button"
+            disabled={startWithDeckBlocked !== null}
+            title={startWithDeckBlocked ?? undefined}
+            onClick={() => setStartWithDeckOpen(true)}
+            className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            デッキで始める
+          </button>
           <div className="ml-auto">
             <ConnectionPanel
               mode={mode}
@@ -784,6 +805,16 @@ export function Board({
       )}
 
       {pickerOpen && <CardPicker cards={cards} mySeat={mySeat} onPick={handlePick} onClose={() => setPickerOpen(false)} />}
+
+      {startWithDeckOpen && (
+        <StartWithDeckDialog
+          cardById={cardMap}
+          mySeat={mySeat}
+          hasOwnCards={hasOwnCards}
+          dispatch={dispatch}
+          onClose={() => setStartWithDeckOpen(false)}
+        />
+      )}
     </DndContext>
   )
 }

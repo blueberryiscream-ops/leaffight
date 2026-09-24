@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
 import { isValidBattleShape } from '../../core/battle'
-import { EMPTY_BOARD, type BoardState, type Seat } from '../../core/board'
-import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
+import { fillBoardDefaults, type BoardState, type Seat } from '../../core/board'
+import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History, type LogEntry } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
 import { normalizeModifiers } from './normalize'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
@@ -53,6 +53,8 @@ export function normalizeBattle(board: BoardState): BoardState {
  */
 export function useBoard() {
   const [history, setHistory] = useState<History>(emptyHistory)
+  // ゲストが受け取ったホストのログ（ゲストは past を持たないので visibleLog が常に空になる）
+  const [remoteLog, setRemoteLog] = useState<LogEntry[]>([])
   const loaded = useRef(false)
 
   const [mode, setMode] = useState<ConnMode>('solo')
@@ -82,12 +84,13 @@ export function useBoard() {
       const saved = await readBoardState()
       if (saved) {
         // 旧バージョンで保存された盤面には priority / mode が無い（P3a-1以前）。
-        // EMPTY_BOARD のデフォルト（priority:null, mode:'assist'）で補完してから復元する。
-        // これをしないと StackPanel が undefined な priority を読んでクラッシュする。
-        // さらに priority があっても旧shape（frames無し）のことがあるので正規化する（上記コメント参照）。
+        // EMPTY_BOARD のデフォルト（priority:null, mode:'assist', setup:{A:null,B:null} 等）で
+        // 補完してから復元する（fillBoardDefaults）。これをしないと StackPanel が undefined な
+        // priority を読んでクラッシュする。さらに priority があっても旧shape（frames無し）の
+        // ことがあるので正規化する（上記コメント参照）。
         setHistory((h) => ({
           ...h,
-          present: normalizeModifiers(normalizeBattle(normalizePriority({ ...EMPTY_BOARD, ...saved }))),
+          present: normalizeModifiers(normalizeBattle(normalizePriority(fillBoardDefaults(saved)))),
         }))
       }
       loaded.current = true
@@ -117,7 +120,7 @@ export function useBoard() {
       setHistory((prev) => {
         const next = dispatchHistory(prev, action, nextLogId())
         if (mode === 'host' && next.present !== prev.present && transportRef.current) {
-          const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq)
+          const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq, visibleLog(next))
           hostMetaRef.current = meta
           transportRef.current.send(message)
         }
@@ -134,7 +137,7 @@ export function useBoard() {
     setHistory((prev) => {
       const next = undoHistory(prev)
       if (mode === 'host' && next.present !== prev.present && transportRef.current) {
-        const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq)
+        const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq, visibleLog(next))
         hostMetaRef.current = meta
         transportRef.current.send(message)
       }
@@ -147,7 +150,7 @@ export function useBoard() {
     setHistory((prev) => {
       const next = redoHistory(prev)
       if (mode === 'host' && next.present !== prev.present && transportRef.current) {
-        const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq)
+        const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, hostMetaRef.current.lastSeq, visibleLog(next))
         hostMetaRef.current = meta
         transportRef.current.send(message)
       }
@@ -167,7 +170,7 @@ export function useBoard() {
       if (role === 'host') {
         if (msg.kind === 'hello') {
           setHistory((prev) => {
-            t.send(helloReply(hostMetaRef.current, prev.present))
+            t.send(helloReply(hostMetaRef.current, prev.present, visibleLog(prev)))
             return prev
           })
           setConnStatus('connected')
@@ -177,7 +180,7 @@ export function useBoard() {
           setHistory((prev) => {
             const next = applyGuestAction(prev, msg.action, nextLogId())
             if (next.present !== prev.present) {
-              const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, msg.seq)
+              const { meta, message } = bumpForBroadcast(hostMetaRef.current, next.present, msg.seq, visibleLog(next))
               hostMetaRef.current = meta
               t.send(message)
             } else {
@@ -192,6 +195,7 @@ export function useBoard() {
       const next = applyRemoteState(msg)
       if (next) {
         setHistory(next)
+        if (msg.kind === 'sync' || msg.kind === 'state') setRemoteLog(msg.log ?? [])
         setConnStatus('connected')
       }
     })
@@ -261,7 +265,7 @@ export function useBoard() {
 
   return {
     board: history.present,
-    log: visibleLog(history),
+    log: mode === 'guest' ? remoteLog : visibleLog(history),
     canUndo: mode !== 'guest' && history.past.length > 0,
     canRedo: mode !== 'guest' && history.future.length > 0,
     dispatch,

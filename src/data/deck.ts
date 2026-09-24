@@ -75,6 +75,22 @@ export function probNoChar(deckSize: number, charCount: number, draw = 7): numbe
   return Math.max(0, p)
 }
 
+/**
+ * Fisher-Yates シャッフル。乱数は引数で受ける純関数（DESIGN.md §1「core純粋性」と同じ流儀を
+ * data/ 側でも守る）。破壊しない（新しい配列を返す）。PHASE5b.md §2-1: 対戦卓の「デッキで始める」
+ * （59枚シャッフル）でもこれを流用する。
+ */
+export function shuffle<T>(arr: T[], rng: () => number): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    const tmp = out[i]
+    out[i] = out[j]
+    out[j] = tmp
+  }
+  return out
+}
+
 /** リーダーを1枚抜いた残りをシャッフルして先頭7枚の cardId 配列を返す */
 export function sampleHand(deck: Pick<Deck, 'counts' | 'leaderCardId'>, rng: () => number): string[] {
   const pile: string[] = []
@@ -82,13 +98,7 @@ export function sampleHand(deck: Pick<Deck, 'counts' | 'leaderCardId'>, rng: () 
     const count = id === deck.leaderCardId ? n - 1 : n
     for (let i = 0; i < count; i++) pile.push(id)
   }
-  for (let i = pile.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    const tmp = pile[i]
-    pile[i] = pile[j]
-    pile[j] = tmp
-  }
-  return pile.slice(0, 7)
+  return shuffle(pile, rng).slice(0, 7)
 }
 
 export function exportDeckText(

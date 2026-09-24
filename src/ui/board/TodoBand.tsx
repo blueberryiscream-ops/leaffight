@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import type { BoardAction } from '../../core/actions'
 import { AT_LABELS, isActionAt, other } from '../../core/battle'
-import type { BoardState, Seat } from '../../core/board'
+import { cardsInZone, type BoardState, type Seat } from '../../core/board'
+import { shuffle } from '../../data/deck'
 import type { PoolCard } from '../../data/types'
 import { autoBattleValues } from './battleValues'
 import { canAct, clearableBattleMods, decideBlocked, nextActor, nextBlocked } from './BattlePanel'
@@ -32,6 +33,69 @@ function NextButton({ disabled, onClick }: { disabled?: boolean; onClick: () => 
   )
 }
 
+/**
+ * 開始準備中の帯（PHASE5b.md §2-2）。`setup[localSeat]` があって `leaderRevealed` が false の間だけ出す。
+ * バトル/優先権の帯より優先する（開始準備の最中はまだバトルが起きていない想定）。
+ */
+function SetupBand({
+  board,
+  localSeat,
+  dispatch,
+  cardOf,
+}: {
+  board: BoardState
+  localSeat: Seat
+  dispatch: (action: BoardAction) => void
+  cardOf: (cardId: string) => PoolCard | undefined
+}) {
+  const setup = board.setup[localSeat]!
+  const hand = cardsInZone(board, localSeat, 'hand')
+  // 🚨 マリガンの判定はタッグを数えない。kind==='c' だけ（DESIGN.md §4.21 見本からの訂正1）
+  const charCount = hand.filter((c) => cardOf(c.cardId)?.kind === 'c').length
+  const canMulligan = !setup.mulliganUsed && charCount === 0
+  const mulliganTitle = setup.mulliganUsed
+    ? 'マリガンは1回だけ'
+    : !canMulligan
+      ? '手札にキャラクターカードがあるためマリガンできません'
+      : undefined
+  const leaderInst = cardsInZone(board, localSeat, 'leader')[0]
+  const leaderName = leaderInst ? (cardOf(leaderInst.cardId)?.name ?? leaderInst.cardId) : ''
+
+  function handleMulligan() {
+    if (!confirm('マリガンします（手札を公開してすべてデッキに戻し、シャッフルして7枚引き直します）。よろしいですか？')) return
+    const deckCards = cardsInZone(board, localSeat, 'deck')
+    const orderedIids = shuffle([...hand, ...deckCards].map((c) => c.iid), Math.random)
+    const revealedNames = hand.map((c) => cardOf(c.cardId)?.name ?? c.cardId)
+    dispatch({ type: 'mulligan', owner: localSeat, orderedIids, revealedNames, draw: 7 })
+  }
+
+  return (
+    <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-line px-3">
+      <span className="truncate text-sm font-bold text-accent">
+        開始準備: マリガン（手札にキャラクターカードが無いときだけ）→ じゃんけん等で先攻後攻を決める → リーダーを表にする
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          disabled={!canMulligan}
+          title={mulliganTitle}
+          onClick={handleMulligan}
+          className="lf-btn-primary shrink-0 rounded px-3 py-1 text-xs disabled:opacity-30"
+        >
+          マリガン
+        </button>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'revealLeader', owner: localSeat, cardName: leaderName })}
+          className="lf-btn-primary shrink-0 rounded px-3 py-1 text-xs"
+        >
+          リーダーを表にする
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function TodoBand({
   board,
   localSeat,
@@ -45,6 +109,47 @@ export function TodoBand({
   cardOf: (cardId: string) => PoolCard | undefined
   battleSelection: string[]
 }) {
+  // 相手の開始準備の状態（マリガン済みか・リーダーを表にしたか）は、帯の下に常に薄く出す
+  // （PHASE5b.md §2-2「相手側の画面でも分かるように」）。自分のsetup状態に関わらず出す。
+  const theirSeat = other(localSeat)
+  const theirSetup = board.setup[theirSeat]
+  const opponentStatus = theirSetup && (
+    <div className="shrink-0 border-b border-line bg-surface-0/60 px-3 py-0.5 text-[10px] text-ink-muted">
+      相手: {theirSetup.leaderRevealed ? '準備完了' : `準備中${theirSetup.mulliganUsed ? '（マリガン済み）' : ''}`}
+    </div>
+  )
+
+  const mySetup = board.setup[localSeat]
+  if (mySetup && !mySetup.leaderRevealed) {
+    return (
+      <>
+        <SetupBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} />
+        {opponentStatus}
+      </>
+    )
+  }
+
+  return (
+    <>
+      {mainBand({ board, localSeat, dispatch, cardOf, battleSelection })}
+      {opponentStatus}
+    </>
+  )
+}
+
+function mainBand({
+  board,
+  localSeat,
+  dispatch,
+  cardOf,
+  battleSelection,
+}: {
+  board: BoardState
+  localSeat: Seat
+  dispatch: (action: BoardAction) => void
+  cardOf: (cardId: string) => PoolCard | undefined
+  battleSelection: string[]
+}): ReactNode {
   const battle = board.battle
   const battlePrefix = battle ? `[${battle.at}] ${AT_LABELS[battle.at] ?? ''}：` : ''
 

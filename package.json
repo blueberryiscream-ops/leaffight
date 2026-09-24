@@ -16,7 +16,8 @@
     "test:battle-flow": "node --import ./scripts/register-ts-loader.mjs scripts/test-battle-flow.ts",
     "test:battle-values": "node --import ./scripts/register-ts-loader.mjs scripts/test-battle-values.ts",
     "test:deck": "node --import ./scripts/register-ts-loader.mjs scripts/test-deck.ts",
-    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare && npm run test:battle && npm run test:battle-flow && npm run test:battle-values && npm run test:deck",
+    "test:setup": "node --import ./scripts/register-ts-loader.mjs scripts/test-setup.ts",
+    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare && npm run test:battle && npm run test:battle-flow && npm run test:battle-values && npm run test:deck && npm run test:setup",
     "verify": "npm run build && npm run test"
   },
   "dependencies": {

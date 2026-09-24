@@ -49,7 +49,10 @@ export function DetailPanel({
   const imageUrl = imageUrlOf(instance.cardId)
   const name = card?.name ?? instance.cardId
   const mods = modifiersFor(board, instance.iid)
-  const hiddenFromMe = instance.owner !== mySeat && instance.zone === 'hand'
+  // 🚨 手札だけでなく、裏向き（faceUp===false）の相手のカード全般を伏せる（DESIGN.md §4.21・
+  // PHASE5b.md §2-3。デッキで始めたときの裏向きリーダー等）。自分の裏向きカードは自分には見えてよい
+  // （実物でも自分は知っている）。
+  const hiddenFromMe = instance.owner !== mySeat && (instance.zone === 'hand' || !instance.faceUp)
   // キャラ/タッグの attr は「本人の属性」（DESIGN.md §4.8）。i/e/f/b の attr はコスト側の
   // 属性要求なので、ここでは別扱いにしない（従来通りコスト行にまとめる。PHASE3a-2b.md §3-4）
   const isCharLike = card?.kind === 'c' || card?.kind === 't'
@@ -65,7 +68,7 @@ export function DetailPanel({
       <div className="mb-2 font-semibold text-ink">詳細</div>
 
       {hiddenFromMe ? (
-        <p className="text-ink-muted">相手の手札（伏せ）</p>
+        <p className="text-ink-muted">{instance.zone === 'hand' ? '相手の手札（伏せ）' : '相手の裏向きのカード'}</p>
       ) : (
         <>
           <div className="mb-2 flex gap-2">

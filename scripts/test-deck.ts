@@ -8,6 +8,7 @@ import {
   parseDeckText,
   probNoChar,
   sampleHand,
+  shuffle,
   validateDeck,
   type Deck,
 } from '../src/data/deck'
@@ -141,6 +142,22 @@ const cardById = new Map(cards.map((c) => [c.id, c]))
   let i2_ = 0
   const rng2 = () => rngSeq[i2_++ % rngSeq.length]
   assertEqual(sampleHand(deck, rng1), sampleHand(deck, rng2), '3c: 固定rngなら同じ結果')
+}
+
+// =============================================================================
+// shuffle（PHASE5b.md §2-1: sampleHandから切り出した汎用シャッフル。対戦卓の「デッキで始める」で流用）
+// =============================================================================
+{
+  const arr = [1, 2, 3, 4, 5]
+  const shuffled = shuffle(arr, () => 0.5)
+  assertEqual(arr, [1, 2, 3, 4, 5], '3d: 元の配列を破壊しない')
+  assertEqual([...shuffled].sort(), [1, 2, 3, 4, 5], '3e: 同じ要素の集合（並びが変わるだけ）')
+  const rngSeq2 = [0.1, 0.9, 0.2, 0.8, 0.3]
+  let j1 = 0
+  const rngA = () => rngSeq2[j1++ % rngSeq2.length]
+  let j2 = 0
+  const rngB = () => rngSeq2[j2++ % rngSeq2.length]
+  assertEqual(shuffle(arr, rngA), shuffle(arr, rngB), '3f: 固定rngなら同じ結果')
 }
 
 // =============================================================================

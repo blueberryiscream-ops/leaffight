@@ -56,6 +56,16 @@ export interface Modifier {
   scope: ModScope
 }
 
+/**
+ * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
+ * null＝デッキで始めていない（今までどおりの手置き）。`clearBoard` で両方 null に戻る。
+ */
+export interface SetupState {
+  deckName: string
+  mulliganUsed: boolean
+  leaderRevealed: boolean
+}
+
 export interface BoardState {
   cards: Record<string, CardInstance>
   modifiers: Record<string, Modifier>
@@ -65,9 +75,27 @@ export interface BoardState {
   mode: Mode
   /** 進行中のバトル。null＝バトル中でない。DESIGN.md §5.2 / PHASE3d-1.md */
   battle: Battle | null
+  /** 開始準備の状態（座席ごと）。PHASE5b.md §1-1 */
+  setup: Record<Seat, SetupState | null>
 }
 
-export const EMPTY_BOARD: BoardState = { cards: {}, modifiers: {}, priority: null, mode: 'assist', battle: null }
+export const EMPTY_BOARD: BoardState = {
+  cards: {},
+  modifiers: {},
+  priority: null,
+  mode: 'assist',
+  battle: null,
+  setup: { A: null, B: null },
+}
+
+/**
+ * 保存された盤面に、新しいフィールドの既定値を補う（旧保存盤面用。IMPLEMENTATION-NOTES.md
+ * 「永続状態にフィールドを足したら、古い保存盤面を既定値で補完する」の実体を切り出したもの。
+ * `useBoard.ts` の読込処理と test-setup.ts の両方がこれを使う）。
+ */
+export function fillBoardDefaults(saved: Partial<BoardState>): BoardState {
+  return { ...EMPTY_BOARD, ...saved }
+}
 
 /**
  * フィールド系ゾーンの固定スロット数（座席ごと）。DESIGN.md §4.13。ルール強制ではなくUIの置き場。
@@ -130,6 +158,7 @@ function cloneBoard(state: BoardState): BoardState {
     priority: state.priority,
     mode: state.mode,
     battle: state.battle,
+    setup: { ...state.setup },
   }
 }
 
@@ -411,6 +440,163 @@ export function shuffleDeck(state: BoardState, args: { owner: Seat; orderedIids:
 
 export function clearBoard(): Result {
   return { state: EMPTY_BOARD, log: '盤面をクリアした' }
+}
+
+// ---------------------------------------------------------------------------
+// デッキで始める（開始準備 10-1・マリガン 10-1-1）。DESIGN.md §4.21・PHASE5b.md §1。
+// 🚨 乱数・カード種別の知識は持ち込まない。シャッフルの並び（iid配列）とマリガンできるかの判定は
+// ui が決めて渡す。ここは「渡された並びが正しい集合か」だけ確かめる（shuffleDeckと同じ流儀）。
+// ---------------------------------------------------------------------------
+
+/**
+ * デッキで開始準備（10-1 [1]〜[4]）。owner の盤面を全部片付けてから、リーダー・デッキ・手札を置く。
+ * battle・priority が動いている最中は差し替えない（参照が壊れるため）。
+ */
+export function startWithDeck(
+  state: BoardState,
+  args: {
+    owner: Seat
+    deckName: string
+    leader: { iid: string; cardId: string; kiryoku: number | null }
+    deck: { iid: string; cardId: string }[]
+    draw: number
+  },
+): Result {
+  if (state.battle !== null || state.priority !== null) return { state, log: '' }
+  const { owner, deckName, leader, deck, draw } = args
+
+  // 2. owner のカードを全ゾーンから消す（共有フィールドの owner 一致分も）。
+  //    消したカードを対象にした modifiers も消す。相手のカードの attachedTo が
+  //    消したカードを指していたら null にする（ぶら下がり参照を残さない）。
+  const removedIids = new Set<string>()
+  for (const c of Object.values(state.cards)) {
+    if (c.owner === owner) removedIids.add(c.iid)
+  }
+  const cards: Record<string, CardInstance> = {}
+  for (const [iid, c] of Object.entries(state.cards)) {
+    if (removedIids.has(iid)) continue
+    cards[iid] = c.attachedTo && removedIids.has(c.attachedTo) ? { ...c, attachedTo: null } : c
+  }
+  const modifiers: Record<string, Modifier> = {}
+  for (const [id, m] of Object.entries(state.modifiers)) {
+    if (removedIids.has(m.targetIid)) continue
+    modifiers[id] = m
+  }
+
+  // 3. リーダーを裏向き・待機（ready）で置く（利用者確定 2026-09-24・DESIGN.md §4.21）。
+  //    spawnCard の既定（leader ゾーンは消耗）ではないので明示して上書きする。
+  cards[leader.iid] = {
+    iid: leader.iid,
+    cardId: leader.cardId,
+    owner,
+    zone: 'leader',
+    index: 0,
+    orientation: 'ready',
+    faceUp: false,
+    kiryoku: leader.kiryoku,
+    attachedTo: null,
+  }
+
+  // 4[5]. deck の並びどおりデッキへ置き、上から draw 枚を手札へ（index 0 が一番上）
+  const drawn = deck.slice(0, draw)
+  const remaining = deck.slice(draw)
+  drawn.forEach((d, i) => {
+    cards[d.iid] = {
+      iid: d.iid,
+      cardId: d.cardId,
+      owner,
+      zone: 'hand',
+      index: i,
+      orientation: 'ready',
+      faceUp: true,
+      kiryoku: null,
+      attachedTo: null,
+    }
+  })
+  remaining.forEach((d, i) => {
+    cards[d.iid] = {
+      iid: d.iid,
+      cardId: d.cardId,
+      owner,
+      zone: 'deck',
+      index: i,
+      orientation: 'ready',
+      faceUp: false,
+      kiryoku: null,
+      attachedTo: null,
+    }
+  })
+
+  const next: BoardState = {
+    cards,
+    modifiers,
+    priority: state.priority,
+    mode: state.mode,
+    battle: state.battle,
+    setup: { ...state.setup, [owner]: { deckName, mulliganUsed: false, leaderRevealed: false } },
+  }
+
+  // 🚨 リーダーの名前をログに出さない（10-1[1]「相手プレイヤーに見せないよう」）
+  return {
+    state: next,
+    log: `「${deckName}」で開始準備（リーダーを裏向きで置き・${deck.length}枚シャッフル・${draw}枚ドロー）`,
+  }
+}
+
+/** マリガン（10-1-1）。「1回だけ」「開始準備の中だけ」はここで守る。 */
+export function mulligan(
+  state: BoardState,
+  args: { owner: Seat; orderedIids: string[]; revealedNames: string[]; draw: number },
+): Result {
+  const setup = state.setup[args.owner]
+  if (!setup || setup.mulliganUsed || setup.leaderRevealed) return { state, log: '' }
+
+  // orderedIids が「owner の hand ∪ deck」とちょうど同じ集合でなければ何もしない
+  const combined = new Set<string>()
+  for (const c of Object.values(state.cards)) {
+    if (c.owner === args.owner && (c.zone === 'hand' || c.zone === 'deck')) combined.add(c.iid)
+  }
+  const ordered = new Set(args.orderedIids)
+  if (combined.size !== args.orderedIids.length || ordered.size !== combined.size) return { state, log: '' }
+  for (const iid of combined) {
+    if (!ordered.has(iid)) return { state, log: '' }
+  }
+
+  // 手札を全部デッキへ → orderedIids の並びにする → 上から draw 枚を手札へ
+  const cards: Record<string, CardInstance> = { ...state.cards }
+  args.orderedIids.forEach((iid, i) => {
+    const card = cards[iid]
+    if (!card) return
+    if (i < args.draw) {
+      cards[iid] = { ...card, zone: 'hand', index: i, faceUp: true }
+    } else {
+      cards[iid] = { ...card, zone: 'deck', index: i - args.draw, faceUp: false }
+    }
+  })
+
+  const next: BoardState = {
+    ...state,
+    cards,
+    setup: { ...state.setup, [args.owner]: { ...setup, mulliganUsed: true } },
+  }
+
+  return { state: next, log: `マリガン: 手札を公開 [${args.revealedNames.join('・')}]` }
+}
+
+/** リーダーを表にする（10-1[7]）。 */
+export function revealLeader(state: BoardState, args: { owner: Seat; cardName: string }): Result {
+  const setup = state.setup[args.owner]
+  if (!setup || setup.leaderRevealed) return { state, log: '' }
+  const leader = cardsInZone(state, args.owner, 'leader')[0]
+  if (!leader) return { state, log: '' }
+
+  const next: BoardState = {
+    ...state,
+    cards: { ...state.cards, [leader.iid]: { ...leader, faceUp: true } },
+    setup: { ...state.setup, [args.owner]: { ...setup, leaderRevealed: true } },
+  }
+
+  return { state: next, log: `リーダーを表にした: ${args.cardName}` }
 }
 
 export const ZONE_LABEL: Record<ZoneId, string> = {
