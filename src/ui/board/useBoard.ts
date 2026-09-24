@@ -4,6 +4,7 @@ import { isValidBattleShape } from '../../core/battle'
 import { EMPTY_BOARD, type BoardState, type Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
+import { normalizeModifiers } from './normalize'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
 import { applyGuestAction, applyRemoteState, bumpForBroadcast, helloReply, initialHostMeta, type HostMeta, type NetMessage } from '../../net/session'
 
@@ -84,7 +85,10 @@ export function useBoard() {
         // EMPTY_BOARD のデフォルト（priority:null, mode:'assist'）で補完してから復元する。
         // これをしないと StackPanel が undefined な priority を読んでクラッシュする。
         // さらに priority があっても旧shape（frames無し）のことがあるので正規化する（上記コメント参照）。
-        setHistory((h) => ({ ...h, present: normalizeBattle(normalizePriority({ ...EMPTY_BOARD, ...saved })) }))
+        setHistory((h) => ({
+          ...h,
+          present: normalizeModifiers(normalizeBattle(normalizePriority({ ...EMPTY_BOARD, ...saved }))),
+        }))
       }
       loaded.current = true
     })()

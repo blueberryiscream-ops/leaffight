@@ -1,39 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import type { BoardAction, ResolveDestination } from '../../core/actions'
+import type { BoardAction } from '../../core/actions'
 import type { BoardState, CardInstance, Seat } from '../../core/board'
 import { awaitingSeat, resolvingSeat, type ActionWindow, type DeclaredAction, type Priority } from '../../core/priority'
 import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { InterruptCandidate } from '../../data/interrupt'
 import type { InterruptsMap, PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
+import { resolveDestinationOf } from './priorityWindow'
 import { useInterruptNotices, type InterruptNotice } from './useInterruptNotices'
 import { otherSeat } from './useBoard'
 
-/**
- * 解決された「プレイ」宣言のカードの行き先（PHASE3a-4.md §1-3）。
- * 🚨 種別判定はここ（ui）の責務。core が受け取るのは行き先のゾーンだけで、
- * 「なぜそこへ行くのか」は知らない（P3c の cardKindOf と同じ流儀）。
- *
- *   e イベント → ゴミ箱（oldrule.txt:834 16-1[6]「その後そのカードをごみ箱送りにする」）
- *   f フィールド → フィールド枠（oldrule.txt:935 18-2。既存の1枚はゴミ箱送り＝coreが処理）
- *   c/t キャラ・タッグ → 動かさない（スロット位置にルール上の意味は無い＝人間が置く）
- *   i アイテム → 動かさない（装備対象の指定はP3a-5。行き先は「指定した装備対象」17-3[11]）
- *   b バトル → 動かさない
- *   kind:'能力' → カード自体は動かさない（15-13-1にカード移動の記述なし）
- */
-function resolveDestinationOf(
-  action: DeclaredAction | null,
-  board: BoardState,
-  cardOf: (cardId: string) => PoolCard | undefined,
-): ResolveDestination | undefined {
-  if (!action || action.kind !== 'プレイ' || !action.sourceIid) return undefined
-  const inst = board.cards[action.sourceIid]
-  if (!inst || inst.zone !== 'pending') return undefined
-  const kind = cardOf(inst.cardId)?.kind
-  if (kind === 'e') return { toZone: 'trash' }
-  if (kind === 'f') return { toZone: 'field' }
-  return undefined
-}
+// 解決された「プレイ」宣言のカードの行き先の判定（resolveDestinationOf）は
+// src/ui/board/priorityWindow.ts に切り出した（PHASE3d-3.md §5「二重に書かない」・TodoBand.tsxと共有）。
 
 /** 提示エリアのカード1枚分の大きさ(px)。カード比63:88（DESIGN.md §4.18.1）。
  *  盤面のマスと違い回転しないうえ、パネル幅が狭い（レイアウトBで140px）ので小さめの固定値にする。 */

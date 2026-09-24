@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   closestCenter,
   DndContext,
@@ -9,11 +9,12 @@ import {
   type CollisionDetection,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import type { Seat, ZoneId } from '../../core/board'
+import { other } from '../../core/battle'
+import type { BoardState, Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
 import { canDeclare, type ActionTiming } from '../../core/priority'
 import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
-import { BattlePanel } from './BattlePanel'
+import { BattlePanel, canAct } from './BattlePanel'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
@@ -22,9 +23,35 @@ import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
 import { StackedCardSlot } from './StackedCardSlot'
 import { StackPanel } from './StackPanel'
+import { TodoBand } from './TodoBand'
 import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
+
+/**
+ * 盤面クリックでの参加キャラ・種目選択（PHASE3d-3.md §1）。候補の集合は既存の
+ * ParticipantChecklist/BattleCardChecklist の candidates と同じ（合法性は判定しない）。
+ * 🚨 candidatesにはBattlePanel.tsxのcanActを使う（二重に書かない）。
+ */
+function battleCandidateKind(board: BoardState, iid: string, localSeat: Seat): 'participant' | 'battleCard' | null {
+  const battle = board.battle
+  if (!battle) return null
+  const inst = board.cards[iid]
+  if (!inst) return null
+  if (battle.at === 7 && canAct(board, localSeat, battle.challenger)) {
+    if (inst.owner === battle.challenger && (inst.zone === 'char' || inst.zone === 'leader')) return 'participant'
+  }
+  if (battle.at === 11) {
+    const receiver = other(battle.challenger)
+    if (canAct(board, localSeat, receiver) && inst.owner === receiver && (inst.zone === 'char' || inst.zone === 'leader')) {
+      return 'participant'
+    }
+  }
+  if (battle.at === 16 && canAct(board, localSeat, battle.challenger)) {
+    if (inst.zone === 'battle' && inst.used !== true) return 'battleCard'
+  }
+  return null
+}
 
 // 盤面レイアウト（PHASE2.7.md。原本図 _local/reference/layout_sketch.png.png が正）。
 // 🚨 マスをflex-1で引き伸ばさない（PHASE2.6の元凶）。マスの大きさはrowHeightから計算した
@@ -145,6 +172,45 @@ export function Board({
 
   const openMenu = (iid: string, x: number, y: number) => setMenuTarget({ iid, x, y })
 
+  // 盤面クリックでの参加キャラ・種目選択（PHASE3d-3.md §1）。「未決定の選択（iidの配列）」だけを
+  // ローカルstateに持つ（localSeatと同じくBoardStateには入れない）。battle.atが変わったらリセットする
+  // （旧 ParticipantChecklist の `key={battle.at}` と同じ効果）。BattlePanelのチェックリストと共有する。
+  const [battleSelected, setBattleSelected] = useState<string[]>([])
+  useEffect(() => {
+    setBattleSelected([])
+  }, [board.battle?.at])
+  const toggleBattleSelected = (iid: string) =>
+    setBattleSelected((cur) => (cur.includes(iid) ? cur.filter((i) => i !== iid) : [...cur, iid]))
+
+  function handleCardClick(iid: string) {
+    const kind = battleCandidateKind(board, iid, localSeat)
+    if (kind === 'participant') {
+      toggleBattleSelected(iid)
+      setSelectedIid(iid)
+      return
+    }
+    if (kind === 'battleCard') {
+      const inst = board.cards[iid]
+      if (inst) dispatch({ type: 'setBattleCard', iid, cardName: cardOf(inst.cardId)?.name ?? inst.cardId })
+      return
+    }
+    setSelectedIid(iid)
+  }
+
+  /** リング表示（§1）。候補でなければ何も返さない（対象カードの見た目は変えない） */
+  function battleRingProps(iid: string): { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string } {
+    const kind = battleCandidateKind(board, iid, localSeat)
+    if (kind === 'participant') {
+      return battleSelected.includes(iid) ? { battleRing: 'selected', battleRingLabel: '参加' } : { battleRing: 'candidate' }
+    }
+    if (kind === 'battleCard') {
+      return board.battle?.battleCardIid === iid
+        ? { battleRing: 'selected', battleRingLabel: '種目' }
+        : { battleRing: 'candidate' }
+    }
+    return {}
+  }
+
   // rows1-5は等高（1fr）なので1つ測れば足りる。row6(手札)だけ別に測る
   const [rowRef, rowH] = useMeasuredHeight<HTMLDivElement>()
   const [handRowRef, handRowH] = useMeasuredHeight<HTMLDivElement>()
@@ -260,12 +326,13 @@ export function Board({
             imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onCardClick={setSelectedIid}
+            onCardClick={handleCardClick}
             onCardContextMenu={openMenu}
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
             battleBadge={isBattleMarked(inst.iid)}
+            {...battleRingProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -284,12 +351,13 @@ export function Board({
             imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onCardClick={setSelectedIid}
+            onCardClick={handleCardClick}
             onCardContextMenu={openMenu}
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={owner !== mySeat}
             battleBadge={isBattleMarked(inst.iid)}
+            {...battleRingProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -310,12 +378,13 @@ export function Board({
                 imageUrlOf={imageUrlOf}
                 board={board}
                 dispatch={dispatch}
-                onCardClick={setSelectedIid}
+                onCardClick={handleCardClick}
                 onCardContextMenu={openMenu}
                 selectedIid={selectedIid}
                 size={cellPortrait}
                 flipped={owner !== mySeat}
                 battleBadge={isBattleMarked(inst.iid)}
+                {...battleRingProps(inst.iid)}
               />
             )}
           </DroppableSlot>
@@ -602,6 +671,9 @@ export function Board({
           </div>
         </div>
 
+        {/* 大きな「今やること」帯（PHASE3d-3.md §5）。チロムの直下・盤面の上に全幅で置く。高さ固定（shrink-0） */}
+        <TodoBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} battleSelection={battleSelected} />
+
         {dragNotice && (
           <div className="shrink-0 border-b border-warn bg-warn/20 px-3 py-1 text-center text-xs text-warn">
             {dragNotice}
@@ -650,6 +722,8 @@ export function Board({
               dispatch={dispatch}
               cardOf={cardOf}
               onSelectCard={setSelectedIid}
+              battleSelection={battleSelected}
+              onToggleBattleSelection={toggleBattleSelected}
             />
             <div className="lf-panel min-h-0 flex-1">
               <DetailPanel

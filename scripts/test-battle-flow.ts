@@ -7,7 +7,7 @@
 
 import { applyAction, type BoardAction } from '../src/core/actions'
 import * as battleEngine from '../src/core/battle'
-import { EMPTY_BOARD, type BoardState } from '../src/core/board'
+import { EMPTY_BOARD, effectiveStat, type BoardState } from '../src/core/board'
 import * as priorityEngine from '../src/core/priority'
 
 let failures = 0
@@ -581,6 +581,126 @@ function ability(by: 'A' | 'B', label: string) {
   // 非回帰: atがある現行shapeは正規化で消えない
   const freshBattle = battleEngine.declareBattle('A').battle
   assertEqual(battleEngine.isValidBattleShape(freshBattle), true, '15b: atのある現行shapeはisValidBattleShape=true（消されない）')
+}
+
+// =============================================================================
+// 16. PHASE3d-3 §2-3: decideBattleValues（[23]で4値を一括確定してat=25へ）
+// =============================================================================
+{
+  // at=23まで進める（advanceToAt19→19-22を両者パスで抜ける。advanceToAt26の前半と同じ手順）
+  function advanceToAt23(state: BoardState): BoardState {
+    let s = closeWindowByPassing(state) // 19→20
+    s = closeWindowByPassing(s) // 20→21
+    s = dispatch(s, { type: 'advanceBattleStep' }) // 21→22
+    s = closeWindowByPassing(s) // 22→23
+    return s
+  }
+
+  let s = advanceToAt23(advanceToAt19(setupFreshBoard()))
+  assertEqual(s.battle!.at, 23, '16a: 前提としてat=23に到達している')
+
+  const decided = dispatch(s, {
+    type: 'decideBattleValues',
+    atk: { A: 7, B: 6 },
+    def: { A: 1, B: 2 },
+  })
+  assertEqual(decided.battle!.atk, { A: 7, B: 6 }, '16b: decideBattleValuesでatkが一括で入る')
+  assertEqual(decided.battle!.def, { A: 1, B: 2 }, '16c: decideBattleValuesでdefが一括で入る')
+  assertEqual(decided.battle!.at, 25, '16d: decideBattleValues後at=25へ進む（同じdispatchで前進も済む）')
+
+  // at≠23はno-op
+  const atNot23 = { ...battleEngine.declareBattle('A').battle } // at=2
+  const noop = battleEngine.decideBattleValues(atNot23, { atk: { A: 1, B: 1 }, def: { A: 1, B: 1 } })
+  assertEqual(noop.log, '', '16e: at≠23のdecideBattleValuesはno-op（log空）')
+  assertEqual(noop.battle, atNot23, '16f: at≠23のdecideBattleValuesは状態不変')
+
+  // assistでpriorityが開いていれば（宣言/処理中）no-op（§2-3「ゲートはadvanceBattleStepと同じ」）。
+  // at=23自体はACTION_ATSで通常priorityは無いが、ゲート単体を確かめるため[19]の窓が開いた
+  // state（priority!==null）のbattle.atだけ23にすり替えて投げる。
+  const s19WindowOpen = advanceToAt19(setupFreshBoard())
+  assertTrue(s19WindowOpen.priority !== null, '16g: 前提として[19]の窓が開いている（priority!==null）')
+  const s23WithOpenPriority: BoardState = { ...s19WindowOpen, battle: { ...s19WindowOpen.battle!, at: 23 } }
+  const gatedResult = applyAction(s23WithOpenPriority, {
+    type: 'decideBattleValues',
+    atk: { A: 1, B: 1 },
+    def: { A: 1, B: 1 },
+  })
+  assertEqual(gatedResult.log, '', '16h: assistでpriorityが開いていればat=23でもdecideBattleValuesはno-op')
+  assertEqual(gatedResult.state, s23WithOpenPriority, '16i: ゲートされたdecideBattleValuesは状態不変')
+}
+
+// =============================================================================
+// 17. PHASE3d-3 §3-2: [28]から出るとき、攻防修正（このバトル）だけを失わせる
+// =============================================================================
+{
+  function advanceToAt28(state: BoardState): BoardState {
+    let s = closeWindowByPassing(state) // 19→20
+    s = closeWindowByPassing(s) // 20→21
+    s = dispatch(s, { type: 'advanceBattleStep' }) // 21→22
+    s = closeWindowByPassing(s) // 22→23
+    s = dispatch(s, { type: 'advanceBattleStep' }) // 23→25
+    s = closeWindowByPassing(s) // 25→26
+    s = dispatch(s, {
+      type: 'applyBattleDamage',
+      damages: [{ iid: 'charB1', amount: 1, max: 5 }],
+    }) // 26→27
+    s = closeWindowByPassing(s) // 27→28
+    return s
+  }
+
+  let s = advanceToAt28(advanceToAt19(setupFreshBoard()))
+  assertEqual(s.battle!.at, 28, '17a: 前提としてat=28に到達している')
+
+  s = dispatch(s, {
+    type: 'addModifier',
+    modifier: { id: 'm1', targetIid: 'charA1', sourceLabel: 'テスト攻防', kind: '攻防修正', battleStat: 'atk', delta: 2, scope: 'このバトル' },
+    cardName: 'キャラA1',
+  })
+  s = dispatch(s, {
+    type: 'addModifier',
+    modifier: { id: 'm2', targetIid: 'charA1', sourceLabel: 'テスト能力値', kind: '能力値修正', stat: '力', delta: 3, scope: 'このバトル' },
+    cardName: 'キャラA1',
+  })
+  s = dispatch(s, {
+    type: 'addModifier',
+    modifier: { id: 'm3', targetIid: 'charA1', sourceLabel: 'テスト攻防（ターン終了時）', kind: '攻防修正', battleStat: 'def', delta: 1, scope: 'ターン終了時' },
+    cardName: 'キャラA1',
+  })
+  assertEqual(Object.keys(s.modifiers).length, 3, '17b: 前提として修正3件が付いている')
+
+  const advanced = dispatch(s, { type: 'advanceBattleStep' }) // 28→29
+  assertEqual(advanced.modifiers['m1'], undefined, '17c: 攻防修正・このバトル はat=28を出るときに消える（20-4[28]）')
+  assertEqual(advanced.modifiers['m2']?.delta, 3, '17d: 能力値修正（scopeこのバトル含む）は残る（12-1）')
+  assertEqual(advanced.modifiers['m3']?.delta, 1, '17e: 攻防修正・ターン終了時（scopeがこのバトル以外）は残る')
+
+  // 中断経由でも同じ（20-6-1）
+  let s2 = advanceToAt28(advanceToAt19(setupFreshBoard()))
+  s2 = dispatch(s2, {
+    type: 'addModifier',
+    modifier: { id: 'm4', targetIid: 'charA1', sourceLabel: 'テスト攻防2', kind: '攻防修正', battleStat: 'atk', delta: 5, scope: 'このバトル' },
+    cardName: 'キャラA1',
+  })
+  s2 = dispatch(s2, { type: 'abortBattle', reason: 'テスト中断' })
+  assertEqual(s2.battle!.at, 28, '17f: 前提として中断後もat=28')
+  const advancedAborted = dispatch(s2, { type: 'advanceBattleStep' }) // 28(aborted)→battle=null
+  assertEqual(advancedAborted.battle, null, '17g: 中断後のadvanceBattleStepでbattle=nullになる')
+  assertEqual(advancedAborted.modifiers['m4'], undefined, '17h: 中断経由でも攻防修正・このバトル は消える（20-6-1でも[28]は行う）')
+}
+
+// =============================================================================
+// 18. PHASE3d-3 §3-1: effectiveStatは攻防修正を数えない
+// =============================================================================
+{
+  const withMods: BoardState = {
+    ...EMPTY_BOARD,
+    cards: { c1: { iid: 'c1', cardId: 'c', owner: 'A', zone: 'char', index: 0, orientation: 'ready', faceUp: true, kiryoku: null, attachedTo: null } },
+    modifiers: {
+      m1: { id: 'm1', targetIid: 'c1', sourceLabel: 'a', kind: '能力値修正', stat: '力', delta: 2, scope: 'このバトル' },
+      m2: { id: 'm2', targetIid: 'c1', sourceLabel: 'b', kind: '攻防修正', battleStat: 'atk', delta: 100, scope: 'このバトル' },
+    },
+  }
+  const eff = effectiveStat(withMods, 'c1', 3, '力')
+  assertEqual(eff, 5, '18: effectiveStatは能力値修正だけ数える（攻防修正の100は無視・3+2=5）')
 }
 
 console.log(failures === 0 ? `\n✅ 全ケース成功` : `\n❌ ${failures}件失敗`)

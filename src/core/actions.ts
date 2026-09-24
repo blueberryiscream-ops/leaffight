@@ -37,7 +37,8 @@ export type BoardAction =
   | { type: 'autoAssignBattleLeader'; seat: Seat }
   | { type: 'forceAutoLeaderBattle'; seat: Seat }
   | { type: 'setBattleCard'; iid: string; cardName?: string }
-  | { type: 'setBattleValue'; seat: Seat; stat: 'atk' | 'def'; value: number }
+  | { type: 'setBattleValue'; seat: Seat; stat: 'atk' | 'def'; value: number | null }
+  | { type: 'decideBattleValues'; atk: { A: number; B: number }; def: { A: number; B: number } }
   | { type: 'loopBackBattle' }
   | { type: 'applyBattleDamage'; damages: battleEngine.DamageInput[] }
   | { type: 'abortBattle'; reason: string }
@@ -199,23 +200,38 @@ function applyActionCore(state: BoardState, action: BoardAction): board.Result {
       return { state: { ...state, battle }, log }
     }
     case 'advanceBattleStep': {
-      if (!state.battle) return { state, log: '' }
+      const battleAtStart = state.battle
+      if (!battleAtStart) return { state, log: '' }
       // assist では行動の点でだけ有効。かつ priority===null（宣言が処理中なら進めない）。
       // free では at の種類を問わず1つずつ進める（PHASE3d-2a §2-3）。
-      if (state.mode === 'assist' && (!battleEngine.isActionAt(state.battle.at) || state.priority !== null)) {
+      if (state.mode === 'assist' && (!battleEngine.isActionAt(battleAtStart.at) || state.priority !== null)) {
         return { state, log: '' }
       }
+
+      // 🚨 at=28 から出るとき（中断経由・通常とも。assist/free とも）は必ず攻防修正を失わせる
+      // （原典20-4[28] oldrule.txt:1121-1122・FAQ oldfaq.txt:78。P3d-3 §3-2）。
+      // ここに来た時点で上のゲートは通っているので、at=28なら必ず抜ける（下の中断分岐かadvanceStepのどちらか）。
+      let clearLog = ''
+      if (battleAtStart.at === 28) {
+        const cleared = board.clearBattleModifiers(state)
+        if (cleared.count > 0) {
+          state = cleared.state
+          clearLog = `攻防修正 ${cleared.count} 件を失わせた（20-4[28]）`
+        }
+      }
+
       // at=28 を出る: 中断していれば at=29 へ行かず battle=null（20-6-1 oldrule.txt:1138-1139）
-      if (state.battle.at === 28 && state.battle.aborted) {
-        return { state: { ...state, battle: null }, log: 'バトル終了（中断のため[29]は行わない・20-6-1）' }
+      if (battleAtStart.at === 28 && battleAtStart.aborted) {
+        const log = 'バトル終了（中断のため[29]は行わない・20-6-1）'
+        return { state: { ...state, battle: null }, log: clearLog ? `${clearLog}／${log}` : log }
       }
       // at=29 を出る（freeのみ到達。assistでは窓なので上で弾かれ、窓が閉じたらbattleFlowが終える）
-      if (state.battle.at === 29) {
+      if (battleAtStart.at === 29) {
         return { state: { ...state, battle: null }, log: 'バトル終了' }
       }
 
       let working = state
-      let preLog = ''
+      let preLog = clearLog
       // at=11 を出る前提: participants[挑まれた側] が空なら、先に autoAssignLeader を試す（PHASE3d-2a §3）
       if (working.battle && working.battle.at === 11) {
         const receiver = battleEngine.other(working.battle.challenger)
@@ -270,6 +286,14 @@ function applyActionCore(state: BoardState, action: BoardAction): board.Result {
     case 'setBattleValue': {
       if (!state.battle) return { state, log: '' }
       const { battle, log } = battleEngine.setValue(state.battle, action.seat, action.stat, action.value)
+      return { state: { ...state, battle }, log }
+    }
+    case 'decideBattleValues': {
+      if (!state.battle) return { state, log: '' }
+      // ゲートは advanceBattleStep と同じ（assist で priority !== null なら no-op。PHASE3d-3 §2-3）
+      if (state.mode === 'assist' && state.priority !== null) return { state, log: '' }
+      const { battle, log } = battleEngine.decideBattleValues(state.battle, { atk: action.atk, def: action.def })
+      if (!log) return { state, log: '' }
       return { state: { ...state, battle }, log }
     }
     case 'loopBackBattle': {

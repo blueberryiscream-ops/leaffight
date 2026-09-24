@@ -373,5 +373,17 @@ function advanceTo(battle: Battle, targetAt: number): Battle {
   assertTrue(noBattleResult.battle.at === 4 && noBattleResult.battle.step === '宣言', '11: battle:nullな旧盤面と無関係に、battle.ts自体は単独でも動く（atが1点進む）')
 }
 
+// =============================================================================
+// 12. PHASE3d-3 §2-3: setValue(..., null) で「自動に戻す」（nullに戻る）
+// =============================================================================
+{
+  let { battle } = battleEngine.declareBattle('A')
+  battle = battleEngine.setValue(battle, 'A', 'atk', 5).battle
+  assertEqual(battle.atk.A, 5, '12a: 前提として手入力で5が入っている')
+  const reverted = battleEngine.setValue(battle, 'A', 'atk', null)
+  assertEqual(reverted.battle.atk.A, null, '12b: setValue(..., null) でnull（自動）に戻る')
+  assertTrue(reverted.log.includes('自動'), '12c: ログに「自動に戻した」旨が出る')
+}
+
 console.log(failures === 0 ? `\n✅ 全ケース成功` : `\n❌ ${failures}件失敗`)
 process.exit(failures === 0 ? 0 : 1)

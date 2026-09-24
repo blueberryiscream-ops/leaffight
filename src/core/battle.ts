@@ -330,12 +330,33 @@ export function setBattleCard(
   return { state: used.state, battle: { ...battle, battleCardIid: iid }, log: used.log }
 }
 
-/** setValue: 攻撃/防御能力値を入れる（20-4[23]。このフェーズでは自動計算せず人間が入れる） */
-export function setValue(battle: Battle, seat: Seat, stat: 'atk' | 'def', value: number): BattleResult {
+/**
+ * setValue: 攻撃/防御能力値を入れる（20-4[23]）。
+ * 🚨 P3d-3: `null` ＝ 自動（UI が battleValues.ts で算出して表示）／数値 ＝ 人が入れた値（手入力）。
+ * `null` を渡すと「自動に戻す」になる。
+ */
+export function setValue(battle: Battle, seat: Seat, stat: 'atk' | 'def', value: number | null): BattleResult {
+  const label = stat === 'atk' ? '攻撃' : '防御'
   return {
     battle: { ...battle, [stat]: { ...battle[stat], [seat]: value } },
-    log: `${seat} の${stat === 'atk' ? '攻撃' : '防御'}能力値を ${value} にした`,
+    log: value === null ? `${seat} の${label}能力値を自動に戻した` : `${seat} の${label}能力値を ${value} にした`,
   }
+}
+
+/**
+ * decideBattleValues: [23]で攻防4値を一括で確定し、at=25へ進める（P3d-3 §2-3）。
+ * 🚨 at===23のときだけ有効（それ以外はno-op・log空）。core はカードを知らないまま、[23]で値が確定する
+ * （1回のdispatch＝Undoも1回）。ゲートはactions.ts側（assistでpriority!==nullならno-op）。
+ */
+export function decideBattleValues(
+  battle: Battle,
+  values: { atk: { A: number; B: number }; def: { A: number; B: number } },
+): BattleResult {
+  if (battle.at !== 23) return { battle, log: '' }
+  const withValues: Battle = { ...battle, atk: { ...values.atk }, def: { ...values.def } }
+  const advanced = advanceStep(withValues)
+  const log = `攻防能力値を確定した（攻A${values.atk.A}/防A${values.def.A}／攻B${values.atk.B}/防B${values.def.B}）`
+  return { battle: advanced.battle, log: advanced.log ? `${log}／${advanced.log}` : log }
 }
 
 /** loopBack: [21]で[19]（バトル中アクション）に戻る。at=19に戻し、loopCountを増やすだけ（千日手検知用） */

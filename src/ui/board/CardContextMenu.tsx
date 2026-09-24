@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { BoardAction } from '../../core/actions'
-import type { BoardState, Seat } from '../../core/board'
+import type { BoardState, ModifierKind, Seat } from '../../core/board'
 import { cardsInZone, maxKiryokuFor, modifiersFor } from '../../core/board'
 import { ATTRS, type Attr } from '../../core/types'
 import type { PoolCard } from '../../data/types'
+import { modifierLabel } from './modifierLabel'
 import { newIid } from './useBoard'
 
 // 右クリックメニュー（DESIGN.md §4.17）。気力±・能力値修正・裏返す・付随カード・ゴミ箱等、
@@ -34,7 +35,9 @@ export function CardContextMenu({
   // すべてのHooksは早期returnより前で呼ぶこと（Rules of Hooks）。
   // instanceは他プレイヤーの操作（P2以降のネット同期・盤面クリア等）でレンダー間に消えることがある
   // （P1のCardControlsクラッシュと同じ罠。PHASE2.6.md §10で改めて注意喚起されている）。
+  const [modKind, setModKind] = useState<ModifierKind>('能力値修正')
   const [modStat, setModStat] = useState<Attr>('力')
+  const [modBattleStat, setModBattleStat] = useState<'atk' | 'def'>('atk')
   const [modDelta, setModDelta] = useState(1)
   const [modSource, setModSource] = useState('')
   const [modScope, setModScope] = useState<'このバトル' | 'ターン終了時' | '発生元依存' | 'その他'>('ターン終了時')
@@ -157,14 +160,13 @@ export function CardContextMenu({
         )}
 
         <section className="rounded border border-line-strong p-2">
-          <div className="mb-1 font-semibold text-ink">能力値修正</div>
+          <div className="mb-1 font-semibold text-ink">能力値修正・攻防修正</div>
           {mods.length > 0 && (
             <ul className="mb-2 flex flex-col gap-1">
               {mods.map((m) => (
                 <li key={m.id} className="flex items-center justify-between rounded bg-surface-2 px-1.5 py-1">
                   <span className="truncate text-[10px] text-ink">
-                    {m.sourceLabel} {m.stat ? `${m.stat}${(m.delta ?? 0) >= 0 ? '+' : ''}${m.delta}` : m.note}
-                    <span className="ml-1 text-ink-muted">({m.scope})</span>
+                    {m.sourceLabel} {modifierLabel(m)}
                   </span>
                   <button
                     type="button"
@@ -177,18 +179,44 @@ export function CardContextMenu({
               ))}
             </ul>
           )}
-          <div className="flex flex-wrap gap-1">
+          <div className="mb-1 flex gap-1">
+            {/* 種類の切り替え（P3d-3 §3-4）。攻防を選んだらscopeの既定を「このバトル」にする（FAQ oldfaq.txt:78） */}
             <select
-              value={modStat}
-              onChange={(e) => setModStat(e.target.value as Attr)}
+              value={modKind}
+              onChange={(e) => {
+                const kind = e.target.value as ModifierKind
+                setModKind(kind)
+                setModScope(kind === '攻防修正' ? 'このバトル' : 'ターン終了時')
+              }}
               className="rounded border border-line-strong bg-surface-2 px-1 py-1"
             >
-              {ATTRS.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
+              <option value="能力値修正">能力値</option>
+              <option value="攻防修正">攻防</option>
             </select>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {modKind === '能力値修正' ? (
+              <select
+                value={modStat}
+                onChange={(e) => setModStat(e.target.value as Attr)}
+                className="rounded border border-line-strong bg-surface-2 px-1 py-1"
+              >
+                {ATTRS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={modBattleStat}
+                onChange={(e) => setModBattleStat(e.target.value as 'atk' | 'def')}
+                className="rounded border border-line-strong bg-surface-2 px-1 py-1"
+              >
+                <option value="atk">攻</option>
+                <option value="def">防</option>
+              </select>
+            )}
             <input
               type="number"
               value={modDelta}
@@ -217,14 +245,26 @@ export function CardContextMenu({
               onClick={() => {
                 dispatch({
                   type: 'addModifier',
-                  modifier: {
-                    id: newIid(),
-                    targetIid: iid,
-                    sourceLabel: modSource.trim(),
-                    stat: modStat,
-                    delta: modDelta,
-                    scope: modScope,
-                  },
+                  modifier:
+                    modKind === '能力値修正'
+                      ? {
+                          id: newIid(),
+                          targetIid: iid,
+                          sourceLabel: modSource.trim(),
+                          kind: '能力値修正',
+                          stat: modStat,
+                          delta: modDelta,
+                          scope: modScope,
+                        }
+                      : {
+                          id: newIid(),
+                          targetIid: iid,
+                          sourceLabel: modSource.trim(),
+                          kind: '攻防修正',
+                          battleStat: modBattleStat,
+                          delta: modDelta,
+                          scope: modScope,
+                        },
                   cardName: name,
                 })
                 setModSource('')

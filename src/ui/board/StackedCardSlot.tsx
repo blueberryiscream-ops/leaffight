@@ -2,7 +2,7 @@ import type { BoardAction } from '../../core/actions'
 import type { BoardState, CardInstance } from '../../core/board'
 import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { PoolCard } from '../../data/types'
-import { CardPiece } from './CardPiece'
+import { CardPiece, tapRotation } from './CardPiece'
 
 // アイテム付与カードの重ね表示（PHASE2.9c.md）。対象カード＋付与アイテム群を
 // 「対象基準に左へオフセットして重ねる」1つの再利用コンポーネント。
@@ -38,6 +38,8 @@ export function StackedCardSlot({
   size,
   flipped,
   battleBadge,
+  battleRing,
+  battleRingLabel,
 }: {
   target: CardInstance
   /** targetに付与されているカード（attachedTo===target.iid）。呼び出し側でindex順にソート済みを渡す */
@@ -55,6 +57,9 @@ export function StackedCardSlot({
   flipped?: boolean
   /** targetが参加キャラ/バトル種目カードのとき⚔バッジを出す（PHASE3d-2b §1）。付随アイテムには出さない */
   battleBadge?: boolean
+  /** 盤面クリックでの参加キャラ・種目選択（PHASE3d-3 §1）。targetにだけ出す。付随アイテムには出さない */
+  battleRing?: 'candidate' | 'selected'
+  battleRingLabel?: string
 }) {
   const n = items.length
 
@@ -73,6 +78,8 @@ export function StackedCardSlot({
         size={size}
         flipped={flipped}
         battleBadge={battleBadge}
+        battleRing={battleRing}
+        battleRingLabel={battleRingLabel}
       />
     )
   }
@@ -85,7 +92,7 @@ export function StackedCardSlot({
   const originY = size.h / 2
   const pivotOrigin = (left: number) => `${groupCenterX - left}px ${originY}px`
 
-  const rotate = (flipped ? 180 : 0) + (target.orientation === 'rested' ? -90 : 0)
+  const rotate = (flipped ? 180 : 0) + tapRotation(target)
   const targetLeft = groupWidth - size.w
   // 重ねが窮屈になる枚数からは🔗バッジを「+N」相当（実数）で出す。それ未満は重ね自体で見えるので隠す（0）。
   const targetBadgeOverride = n >= MANY_THRESHOLD ? n : 0
@@ -131,6 +138,8 @@ export function StackedCardSlot({
           groupRotate={{ deg: rotate, origin: pivotOrigin(targetLeft) }}
           attachBadgeOverride={targetBadgeOverride}
           battleBadge={battleBadge}
+          battleRing={battleRing}
+          battleRingLabel={battleRingLabel}
         />
       </div>
     </div>

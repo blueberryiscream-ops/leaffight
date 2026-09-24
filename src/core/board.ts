@@ -35,13 +35,24 @@ export interface CardInstance {
 /** 修正の切れ方の目印。自動消滅はしない（DESIGN.md §4.16）。人間が見て判断・削除する */
 export type ModScope = 'このバトル' | 'ターン終了時' | '発生元依存' | 'その他'
 
+/**
+ * 修正の種類（DESIGN.md §4.16・原典の用語 oldrule.txt:1212-1215。P3d-3）。
+ * 【能力値修正】キャラの能力値を変化させる効果／【攻防修正】バトル参加キャラの攻撃・防御能力値を変化させる効果。
+ * 切れ方が違う（[28]で失われるのは攻防修正だけ）ので必ず区別する。
+ */
+export type ModifierKind = '能力値修正' | '攻防修正'
+
 export interface Modifier {
   id: string
   targetIid: string
   sourceLabel: string
+  /** 能力値修正のときだけ使う（力/早/賢/根/感） */
   stat?: Attr
+  /** 攻防修正のときだけ使う（stat は使わない）。P3d-3 */
+  battleStat?: 'atk' | 'def'
   delta?: number
   note?: string
+  kind: ModifierKind
   scope: ModScope
 }
 
@@ -92,10 +103,13 @@ export function modifiersFor(state: BoardState, iid: string): Modifier[] {
   return Object.values(state.modifiers).filter((m) => m.targetIid === iid)
 }
 
-/** 表示能力値 = 素の値 + 有効な Modifier の合計（DESIGN.md §4.16） */
+/**
+ * 表示能力値 = 素の値 + 有効な Modifier の合計（DESIGN.md §4.16）。
+ * 🚨 kind==='能力値修正' だけを数える。攻防修正はここに入らない（攻防能力値の算出側で別に足す。§5.2・P3d-3）。
+ */
 export function effectiveStat(state: BoardState, iid: string, base: number, stat: Attr): number {
   const delta = modifiersFor(state, iid)
-    .filter((m) => m.stat === stat)
+    .filter((m) => m.kind === '能力値修正' && m.stat === stat)
     .reduce((sum, m) => sum + (m.delta ?? 0), 0)
   return base + delta
 }
@@ -331,6 +345,23 @@ export function clearModifiers(state: BoardState, args: { iid: string; scope?: M
     count++
   }
   return { state: next, log: `${args.cardName} の修正を ${count} 件クリアした` }
+}
+
+/**
+ * [28]で攻防修正を失わせる（原典20-4[28] oldrule.txt:1121-1122・FAQ oldfaq.txt:78。P3d-3 §3-2）。
+ * kind==='攻防修正' かつ scope==='このバトル' の修正だけを消す。能力値修正・他scopeの攻防修正は残す
+ * （人間が見て消す）。呼び出し側（actions.ts の advanceBattleStep）が at===28 を出るときだけ呼ぶ。
+ */
+export function clearBattleModifiers(state: BoardState): { state: BoardState; count: number } {
+  const next = cloneBoard(state)
+  let count = 0
+  for (const [id, mod] of Object.entries(state.modifiers)) {
+    if (mod.kind === '攻防修正' && mod.scope === 'このバトル') {
+      delete next.modifiers[id]
+      count++
+    }
+  }
+  return { state: next, count }
 }
 
 export function attach(state: BoardState, args: { itemIid: string; targetIid: string; itemName: string; targetName: string }): Result {

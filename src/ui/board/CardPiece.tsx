@@ -10,6 +10,16 @@ import type { PoolCard } from '../../data/types'
 import { CardFace } from './CardFace'
 import { HoverPreview } from './HoverPreview'
 
+/**
+ * 消耗時の回転角（-90°）を1か所にまとめる（PHASE3d-3.md §4）。orientation==='rested' の他、
+ * zone==='battle' かつ used===true（使用済みバトルカード）も同じ-90°にする。両方立っていても
+ * 回転は-90°1回だけ（elseにしない＝どちらか一方でも-90、両方でも-90）。
+ * StackedCardSlot.tsx（スタックのtarget回転）とCardPiece自身（tap）の両方から呼ぶ。
+ */
+export function tapRotation(instance: CardInstance): number {
+  return instance.orientation === 'rested' || (instance.zone === 'battle' && instance.used === true) ? -90 : 0
+}
+
 // 盤面上の1枚。操作の割り当ては DESIGN.md §4.17:
 //   ホバー   → すぐ近くに拡大ポップアップ（0クリック）
 //   左クリック → 詳細パネルで選択（Board.tsx側の右パネルに表示）
@@ -41,6 +51,8 @@ export function CardPiece({
   groupRotate,
   attachBadgeOverride,
   battleBadge,
+  battleRing,
+  battleRingLabel,
 }: {
   instance: CardInstance
   card: PoolCard | undefined
@@ -88,6 +100,12 @@ export function CardPiece({
    * ⚔バッジを出す。判定（誰が参加中か等）はBoard.tsx側（board.battleを見て）が行う。
    */
   battleBadge?: boolean
+  /**
+   * 盤面クリックでの参加キャラ・種目選択（PHASE3d-3 §1）。候補＝点線リング、選択中＝実線リング＋バッジ。
+   * StackedCardSlotのtargetにだけ渡す（付随アイテムには出さない＝battleBadgeと同じ流儀）。
+   */
+  battleRing?: 'candidate' | 'selected'
+  battleRingLabel?: string
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: instance.iid,
@@ -98,7 +116,7 @@ export function CardPiece({
   // 向き（PHASE2.9b.md §2-1）: 相手のカードは180°反転、消耗は上部が自分から見て左に来るよう-90°。
   // グループ回転中（PHASE2.9c.md §2-4）は外から角度・原点を指定されるので自分では計算しない。
   const base = flipped ? 180 : 0
-  const tap = instance.orientation === 'rested' ? -90 : 0
+  const tap = tapRotation(instance)
   const rotate = groupRotate ? groupRotate.deg : base + tap
   const style = {
     width: size.w,
@@ -141,7 +159,16 @@ export function CardPiece({
           onContextMenu(e.clientX, e.clientY)
         }}
         className={`lf-card-rim relative flex shrink-0 touch-none select-none flex-col overflow-hidden rounded-md border border-transparent bg-surface-1 text-left transition-colors hover:border-accent ${
-          selected ? 'outline-2 outline-offset-2 outline-warn' : ''
+          // 🚨 battleRing===selected（参加/種目に決定済み）を detail パネルの selected（黄色）より優先する。
+          // §1のクリックは selected(setSelectedIid) も同時に行うため、優先度が逆だと参加リングが常に
+          // 隠れてしまう（実機で発覚。PHASE3d-3 §7の煙試験で確認）。
+          battleRing === 'selected'
+            ? 'outline-2 outline-offset-2 outline-accent'
+            : selected
+              ? 'outline-2 outline-offset-2 outline-warn'
+              : battleRing === 'candidate'
+                ? 'outline-2 outline-dashed outline-offset-2 outline-accent/70'
+                : ''
         }`}
       >
         <CardFace faceUp={faceUp} imageUrl={imageUrl} card={card} name={name} compact backImageUrl={backImageUrl} />
@@ -180,6 +207,11 @@ export function CardPiece({
         {battleBadge && (
           <span className="absolute left-0.5 top-0.5 rounded-full bg-danger px-1 text-[8px] font-bold text-white">
             ⚔
+          </span>
+        )}
+        {battleRing === 'selected' && battleRingLabel && (
+          <span className="absolute bottom-0.5 right-0.5 rounded bg-accent px-1 text-[7px] font-bold text-on-accent">
+            {battleRingLabel}
           </span>
         )}
       </button>

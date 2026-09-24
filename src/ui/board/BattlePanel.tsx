@@ -4,6 +4,7 @@ import { AT_LABELS, canDeclareBattle, computeDamage, isActionAt, isWindowAt, oth
 import { cardsInZone, effectiveStat, maxKiryokuFor, type BoardState, type CardInstance, type Seat } from '../../core/board'
 import { ATTRS, type Attr } from '../../core/types'
 import type { PoolCard } from '../../data/types'
+import { autoBattleValues, battleStatModifierSum } from './battleValues'
 
 // バトルパネル（PHASE3d-2b.md）。右列のDetailPanelの上に置く。窓の中の宣言・パス・解決は
 // 既存のStackPanelのまま（ここは「今どの窓か」を表示するだけ・二重に作らない）。
@@ -19,8 +20,12 @@ function seatLabel(seat: Seat, localSeat: Seat): string {
   return seat === localSeat ? 'あなた' : '相手'
 }
 
-/** 押せる人の判定（§2-3見出し）。freeモードでは両者とも押せる。ターン起因のロックではない（§0） */
-function canAct(board: BoardState, localSeat: Seat, expectedSeat: Seat): boolean {
+/**
+ * 押せる人の判定（§2-3見出し）。freeモードでは両者とも押せる。ターン起因のロックではない（§0）。
+ * 🚨 export して Board.tsx（盤面クリック選択）・TodoBand.tsx（今やること帯）からも同じものを使う
+ * （PHASE3d-3.md §1・§5「二重に書かない」）。
+ */
+export function canAct(board: BoardState, localSeat: Seat, expectedSeat: Seat): boolean {
   return board.mode === 'free' || localSeat === expectedSeat
 }
 
@@ -29,7 +34,7 @@ function canAct(board: BoardState, localSeat: Seat, expectedSeat: Seat): boolean
  * 🚨 合法性判定ではない。core（advanceStep）が既に同じ前提でno-opにする箇所を、
  * 「押せるのに何も起きないボタンを出さない」ためだけにUI側で先読みしている（PHASE3d-2b §7の自己点検対象）。
  */
-function nextBlocked(board: BoardState, battle: Battle): boolean {
+export function nextBlocked(board: BoardState, battle: Battle): boolean {
   if (battle.at === 7) return battle.participants[battle.challenger].length === 0
   if (battle.at === 11) {
     // 未指定でも、待機キャラがいなければ core がリーダーを自動参加させて進める（20-8・actions.ts の at=11 分岐）。
@@ -56,10 +61,29 @@ function nextBlocked(board: BoardState, battle: Battle): boolean {
  * 「次へ」がその判断をする人の操作である点（§2-3 の表）。[7][16][21]は挑んだ側、[11]は挑まれた側。
  * それ以外（[23][28]・free）は誰でも。手番ロックではなく、相手の選択を先取りして進めないための区別
  */
-function nextActor(battle: Battle): Seat | null {
+/** [28]の「次へ」で消える攻防修正（kind=攻防修正・scope=このバトル）の件数。core の clearBattleModifiers と同じ条件（表示専用） */
+export function clearableBattleMods(board: BoardState): number {
+  return Object.values(board.modifiers).filter((m) => m.kind === '攻防修正' && m.scope === 'このバトル').length
+}
+
+export function nextActor(battle: Battle): Seat | null {
   if (battle.at === 7 || battle.at === 16 || battle.at === 21) return battle.challenger
   if (battle.at === 11) return other(battle.challenger)
   return null
+}
+
+/**
+ * 「決定して次へ」（§1）を押せるかの判定。既存 nextBlocked の[7][11]分岐と同じ式だが、
+ * 判定対象がcommit済みのbattle.participantsでなく「今まさに選んでいる（未決定の）selected」配列である点が違う
+ * （盤面クリックの選択はBoard.tsxに持ち上げたローカルstateなので、決定前の値で押せるか判定する必要がある）。
+ * Board.tsx（盤面クリック時のリング表示）・TodoBand.tsx（今やること帯の主ボタン）からも呼ぶ。
+ */
+export function decideBlocked(board: BoardState, battle: Battle, seat: Seat, selected: string[]): boolean {
+  if (battle.at === 7) return selected.length === 0
+  if (battle.at === 11) {
+    return selected.length === 0 && cardsInZone(board, seat, 'char').some((c) => c.orientation === 'ready')
+  }
+  return false
 }
 
 function ParticipantChecklist({
@@ -71,6 +95,8 @@ function ParticipantChecklist({
   cardOf,
   dispatch,
   onSelectCard,
+  selected,
+  onToggle,
 }: {
   seat: Seat
   candidates: CardInstance[]
@@ -80,15 +106,19 @@ function ParticipantChecklist({
   cardOf: (cardId: string) => PoolCard | undefined
   dispatch: (action: BoardAction) => void
   onSelectCard?: (iid: string) => void
+  /**
+   * 未決定の選択（iidの配列）。🚨 Board.tsx に持ち上げた state（盤面クリックと共有。PHASE3d-3 §1）。
+   * at===7/11 が変わったら Board.tsx 側でリセットされる（旧 key={battle.at} の useState と同じ効果）。
+   */
+  selected: string[]
+  onToggle: (iid: string) => void
 }) {
-  // keyがbattle.atなので、at=7/11に入り直すたびに新規マウントされ選択状態がリセットされる。
-  const [selected, setSelected] = useState<string[]>(battle.participants[seat])
   const allowed = canAct(board, localSeat, seat)
 
   return (
     <div className="rounded border border-line-strong p-1.5">
       <div className="mb-1 font-semibold text-ink">
-        {seat === battle.challenger ? '挑んだ側' : '挑まれた側'}の参加キャラを選ぶ
+        {seat === battle.challenger ? '挑んだ側' : '挑まれた側'}の参加キャラを選ぶ（盤面のカードをクリックしても選べます）
       </div>
       <ul className="mb-1 flex flex-col gap-0.5">
         {candidates.map((c) => (
@@ -97,9 +127,7 @@ function ParticipantChecklist({
               type="checkbox"
               disabled={!allowed}
               checked={selected.includes(c.iid)}
-              onChange={(e) =>
-                setSelected((cur) => (e.target.checked ? [...cur, c.iid] : cur.filter((i) => i !== c.iid)))
-              }
+              onChange={() => onToggle(c.iid)}
             />
             <button
               type="button"
@@ -117,11 +145,16 @@ function ParticipantChecklist({
       </ul>
       <button
         type="button"
-        disabled={!allowed}
-        onClick={() => dispatch({ type: 'setBattleParticipants', seat, iids: selected })}
+        disabled={!allowed || decideBlocked(board, battle, seat, selected)}
+        onClick={() => {
+          // §1「決定の操作を1回にする」: setBattleParticipants → advanceBattleStep を続けて dispatch。
+          // assistでpriorityが開いている等advanceが効かない状況では、advance側がcoreでno-opになるだけでよい
+          dispatch({ type: 'setBattleParticipants', seat, iids: selected })
+          dispatch({ type: 'advanceBattleStep' })
+        }}
         className="lf-btn-primary w-full rounded py-1 disabled:opacity-30"
       >
-        決定
+        決定して次へ
       </button>
     </div>
   )
@@ -264,6 +297,11 @@ function DamageTable({
   )
 }
 
+/**
+ * §2-4: 入力欄には「手入力 ?? 自動」を出す。自動の値には「自動」札、手入力には「手入力」＋
+ * 「自動に戻す」ボタン（自動が出せるときだけ）。自動が出せない（特殊カード・複数参加・statsなし）
+ * ときは今の参考表示に加え、その陣営の攻防修正の合計を出す（人が足し忘れないように）。
+ */
 function AtkDefRow({
   battle,
   board,
@@ -282,6 +320,7 @@ function AtkDefRow({
   const battleCardDef = battleCard && cardOf(battleCard.cardId)
   const atkAttr = singleAttr(battleCardDef?.battleAtk)
   const defAttr = singleAttr(battleCardDef?.battleDef)
+  const auto = autoBattleValues(board, battle, cardOf)
 
   const referenceFor = (seat: Seat, attr: Attr | null) => {
     if (!attr) return null
@@ -297,39 +336,68 @@ function AtkDefRow({
     return list.length > 0 ? `参考: ${list.join('／')}` : null
   }
 
+  const modifierSumLabel = (seat: Seat, stat: 'atk' | 'def') => {
+    const sum = battle.participants[seat].reduce((s, iid) => s + battleStatModifierSum(board, iid, stat), 0)
+    if (sum === 0) return null
+    return `攻防修正 ${stat === 'atk' ? '攻' : '防'}${sum >= 0 ? '+' : ''}${sum}`
+  }
+
+  const statRow = (seat: Seat, stat: 'atk' | 'def') => {
+    const manual = battle[stat][seat]
+    const autoVal = auto[stat][seat]
+    const value = manual ?? autoVal
+    const isAuto = manual === null && autoVal !== null
+    return (
+      <label className="flex items-center gap-1">
+        {stat === 'atk' ? '攻' : '防'}
+        <input
+          type="number"
+          disabled={!editable || !canAct(board, localSeat, seat)}
+          value={value ?? ''}
+          onChange={(e) =>
+            dispatch({
+              type: 'setBattleValue',
+              seat,
+              stat,
+              value: e.target.value === '' ? null : Number(e.target.value),
+            })
+          }
+          className="w-14 rounded border border-line-strong bg-surface-2 px-1 py-0.5 text-right disabled:opacity-40"
+        />
+        {isAuto && <span className="rounded bg-surface-3 px-1 text-[9px] text-ink-muted">自動</span>}
+        {manual !== null && autoVal !== null && (
+          <>
+            <span className="text-[9px] text-warn">手入力</span>
+            <button
+              type="button"
+              disabled={!editable || !canAct(board, localSeat, seat)}
+              onClick={() => dispatch({ type: 'setBattleValue', seat, stat, value: null })}
+              className="text-[9px] text-accent underline decoration-dotted hover:text-accent disabled:opacity-40"
+            >
+              自動に戻す
+            </button>
+          </>
+        )}
+      </label>
+    )
+  }
+
   return (
     <div className="rounded border border-line-strong p-1.5">
       <div className="mb-1 font-semibold text-ink">攻防能力値</div>
       {(['A', 'B'] as const).map((seat) => (
         <div key={seat} className="mb-1 flex flex-wrap items-center gap-2">
           <span className="w-16 shrink-0 text-ink-muted">{seatLabel(seat, localSeat)}（{seat}）</span>
-          <label className="flex items-center gap-1">
-            攻
-            <input
-              type="number"
-              disabled={!editable || !canAct(board, localSeat, seat)}
-              value={battle.atk[seat] ?? ''}
-              onChange={(e) =>
-                dispatch({ type: 'setBattleValue', seat, stat: 'atk', value: Number(e.target.value) })
-              }
-              className="w-14 rounded border border-line-strong bg-surface-2 px-1 py-0.5 text-right disabled:opacity-40"
-            />
-          </label>
-          <label className="flex items-center gap-1">
-            防
-            <input
-              type="number"
-              disabled={!editable || !canAct(board, localSeat, seat)}
-              value={battle.def[seat] ?? ''}
-              onChange={(e) =>
-                dispatch({ type: 'setBattleValue', seat, stat: 'def', value: Number(e.target.value) })
-              }
-              className="w-14 rounded border border-line-strong bg-surface-2 px-1 py-0.5 text-right disabled:opacity-40"
-            />
-          </label>
+          {statRow(seat, 'atk')}
+          {statRow(seat, 'def')}
           <span className="text-ink-muted">
             {/* 攻防が同じ属性（腕相撲の力/力など）なら1回だけ出す */}
-            {[referenceFor(seat, atkAttr), atkAttr === defAttr ? null : referenceFor(seat, defAttr)]
+            {[
+              auto.atk[seat] === null ? referenceFor(seat, atkAttr) : null,
+              atkAttr === defAttr ? null : auto.def[seat] === null ? referenceFor(seat, defAttr) : null,
+              auto.atk[seat] === null ? modifierSumLabel(seat, 'atk') : null,
+              auto.def[seat] === null ? modifierSumLabel(seat, 'def') : null,
+            ]
               .filter(Boolean)
               .join('／')}
           </span>
@@ -345,12 +413,17 @@ export function BattlePanel({
   dispatch,
   cardOf,
   onSelectCard,
+  battleSelection,
+  onToggleBattleSelection,
 }: {
   board: BoardState
   localSeat: Seat
   dispatch: (action: BoardAction) => void
   cardOf: (cardId: string) => PoolCard | undefined
   onSelectCard?: (iid: string) => void
+  /** [7][11]の未決定の参加キャラ選択。Board.tsxに持ち上げたstate（盤面クリックと共有。PHASE3d-3 §1） */
+  battleSelection: string[]
+  onToggleBattleSelection: (iid: string) => void
 }) {
   const battle = board.battle
 
@@ -469,6 +542,8 @@ export function BattlePanel({
           cardOf={cardOf}
           dispatch={dispatch}
           onSelectCard={onSelectCard}
+          selected={battleSelection}
+          onToggle={onToggleBattleSelection}
         />
       )}
       {battle.at === 11 && (
@@ -483,6 +558,8 @@ export function BattlePanel({
             cardOf={cardOf}
             dispatch={dispatch}
             onSelectCard={onSelectCard}
+            selected={battleSelection}
+            onToggle={onToggleBattleSelection}
           />
           <button
             type="button"
@@ -516,23 +593,67 @@ export function BattlePanel({
         </button>
       )}
       {battle.at === 26 && <DamageTable key={battle.at} board={board} battle={battle} cardOf={cardOf} dispatch={dispatch} />}
-      {battle.at === 28 && (
-        <p className="text-ink-muted">
-          攻防修正を失わせる／《バトル終了時》《バトル終了時まで》の効果を処理してから次へ
-        </p>
-      )}
+      {battle.at === 28 &&
+        (() => {
+          const clearable = clearableBattleMods(board)
+          const remaining = Object.values(board.modifiers).filter(
+            (m) => m.kind === '攻防修正' && m.scope !== 'このバトル',
+          ).length
+          return (
+            <p className="text-ink-muted">
+              {clearable > 0
+                ? `攻防修正 ${clearable} 件を消して次へ（20-4[28]）`
+                : '《バトル終了時》《バトル終了時まで》の効果を処理してから次へ'}
+              {remaining > 0 && (
+                <span className="ml-1 text-warn">
+                  ／scope がこのバトル以外の攻防修正 {remaining} 件は残ります
+                </span>
+              )}
+            </p>
+          )
+        })()}
 
       <div className="flex gap-1.5">
-        {showNext && (
-          <button
-            type="button"
-            disabled={nextBlocked(board, battle) || (nextActor(battle) !== null && !canAct(board, localSeat, nextActor(battle)!))}
-            onClick={() => dispatch({ type: 'advanceBattleStep' })}
-            className="lf-btn-primary flex-1 rounded py-1 disabled:opacity-30"
-          >
-            次へ
-          </button>
-        )}
+        {showNext &&
+          (() => {
+            // [23]は decideBattleValues で確定する（手入力??自動の4値。§2-3）。それ以外は advanceBattleStep のまま
+            const auto = battle.at === 23 ? autoBattleValues(board, battle, cardOf) : null
+            const displayAtk = auto ? { A: battle.atk.A ?? auto.atk.A, B: battle.atk.B ?? auto.atk.B } : null
+            const displayDef = auto ? { A: battle.def.A ?? auto.def.A, B: battle.def.B ?? auto.def.B } : null
+            const at23Ready =
+              displayAtk !== null &&
+              displayDef !== null &&
+              typeof displayAtk.A === 'number' &&
+              typeof displayAtk.B === 'number' &&
+              typeof displayDef.A === 'number' &&
+              typeof displayDef.B === 'number'
+            const blocked =
+              battle.at === 23
+                ? !at23Ready
+                : nextBlocked(board, battle) || (nextActor(battle) !== null && !canAct(board, localSeat, nextActor(battle)!))
+            return (
+              <button
+                type="button"
+                disabled={blocked}
+                onClick={() => {
+                  if (battle.at === 23 && at23Ready && displayAtk && displayDef) {
+                    dispatch({
+                      type: 'decideBattleValues',
+                      atk: { A: displayAtk.A as number, B: displayAtk.B as number },
+                      def: { A: displayDef.A as number, B: displayDef.B as number },
+                    })
+                    return
+                  }
+                  dispatch({ type: 'advanceBattleStep' })
+                }}
+                className="lf-btn-primary flex-1 rounded py-1 disabled:opacity-30"
+              >
+                {battle.at === 28 && clearableBattleMods(board) > 0
+                  ? `攻防修正 ${clearableBattleMods(board)} 件を消して次へ`
+                  : '次へ'}
+              </button>
+            )
+          })()}
         <button
           type="button"
           onClick={() => dispatch({ type: 'abortBattle', reason: '手動で中断' })}

@@ -4,6 +4,7 @@ import { effectiveStat, modifiersFor } from '../../core/board'
 import type { ActionTiming } from '../../core/priority'
 import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
 import type { AbilityAnnotation, PoolCard } from '../../data/types'
+import { modifierLabel } from './modifierLabel'
 
 // 起動型能力の注釈type → 優先権エンジンのactionType。複合型（通常起動+割込起動）は
 // より許容的な「割込型」に寄せる（coreはactionTypeの中身で分岐しないので表示・記録用の割り切り）。
@@ -117,7 +118,7 @@ export function DetailPanel({
               <ul className="flex flex-col gap-0.5 text-[10px] text-ink-muted">
                 {mods.map((m) => (
                   <li key={m.id}>
-                    {m.sourceLabel} {m.stat ? `${m.stat}${(m.delta ?? 0) >= 0 ? '+' : ''}${m.delta}` : m.note} ({m.scope})
+                    {m.sourceLabel} {modifierLabel(m)}
                   </li>
                 ))}
               </ul>
