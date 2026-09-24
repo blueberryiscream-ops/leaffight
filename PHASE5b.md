@@ -71,7 +71,7 @@ setup: Record<Seat, SetupState | null>   // EMPTY_BOARD では { A: null, B: nul
   1. `battle !== null` または `priority !== null` なら何もしない（`log: ''`）。バトル・宣言の途中で盤面を差し替えると参照が壊れるため
   2. `owner` のカードを**全ゾーンから**消す（共有フィールドの `owner` 一致分も）。消したカードを対象にした `modifiers` も消す。
      **相手のカードの `attachedTo` が消したカードを指していたら `null` にする**（ぶら下がり参照を残さない）
-  3. リーダーを `leader` ゾーンに `faceUp: false`・`kiryoku` は渡された値で置く。向き（`orientation`）は今の `spawnCard` の既定のまま（§8 未決）
+  3. リーダーを `leader` ゾーンに `faceUp: false`・`kiryoku` は渡された値で置く。🚨 **向きは `orientation: 'ready'`（縦置き＝待機）**。`spawnCard` の既定（leader＝消耗）ではないので明示して上書きする（利用者確定 2026-09-24・§6）
   4. `deck` の並びどおり `deck` ゾーンに置く（index 0 が一番上＝`ZoneBundle` が見せる札）
   5. 上から `draw` 枚を `hand` へ（`faceUp: true`。相手の画面では既存どおり伏せて描画される）
   6. `setup[owner] = { deckName, mulliganUsed: false, leaderRevealed: false }`
@@ -114,7 +114,7 @@ setup: Record<Seat, SetupState | null>   // EMPTY_BOARD では { A: null, B: nul
 ## 3. テスト（`npm run verify` に足す）
 
 新規 `scripts/test-setup.ts`（core だけ・偽のカード）を `package.json` の `test` に1行:
-- `startWithDeck`: リーダー1枚が leader・faceUp=false・kiryoku が渡した値／deck 52枚・hand 7枚／hand の7枚が渡した並びの先頭7枚／ログにリーダー名が含まれない
+- `startWithDeck`: リーダー1枚が leader・faceUp=false・**orientation=ready**・kiryoku が渡した値／deck 52枚・hand 7枚／hand の7枚が渡した並びの先頭7枚／ログにリーダー名が含まれない
 - 既存の自分のカード（char・trash・field）が消える／**相手のカードは1枚も変わらない**／消したカードへの modifier が消える／相手のアイテムの attachedTo が消したカードを指していたら null
 - `battle` または `priority` が non-null なら状態が変わらない
 - `mulligan`: 手札7枚がデッキに戻り、渡した並びの先頭7枚が手札／2回目は何もしない／`leaderRevealed` 後は何もしない／集合が合わない orderedIids は何もしない／setup が null なら何もしない
@@ -137,7 +137,7 @@ setup: Record<Seat, SetupState | null>   // EMPTY_BOARD では { A: null, B: nul
 - 🚨 **コミットしない**
 
 ## 6. 未決事項（実装で決めない）
-- **開始時のリーダーの向き（待機／消耗）は原典に明文が見当たらない**（統括7が `oldrule.txt` を「待機状態」「リーダー」で検索して未発見）。今の `spawnCard` の既定（leader は消耗）のまま置き、利用者に確認中。変えるときは1行の修正で済むよう、向きを決める箇所を1か所にまとめておく
+- ✅ 解決: **開始時のリーダーは縦置き＝待機（`ready`）**（原典に明文なし→利用者確定 2026-09-24）。§1-2 startWithDeck の3で明示する。テストにも「leader の orientation が ready」を足す
 
 ## 7. 確認（サブは煙試験だけ・🚨 10手順以内・ブラウザのツール呼び出し40回まで）
 - `npm run verify` 緑
