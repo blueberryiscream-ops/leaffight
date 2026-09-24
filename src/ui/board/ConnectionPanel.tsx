@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ConnMode, ConnStatus } from './useBoard'
+import { useTestPlay } from './useTestPlay'
 
 const STATUS_LABEL: Record<ConnStatus, string> = {
   idle: '未接続',
@@ -39,6 +40,7 @@ export function ConnectionPanel({
   onDisconnect: () => void
 }) {
   const [codeInput, setCodeInput] = useState('')
+  useTestPlay({ mode, connStatus, roomCode, onHost, onJoin })
   const busy = connStatus === 'connecting'
 
   return (
