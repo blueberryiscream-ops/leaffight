@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
-import { db, readAnnotations, readInterrupts, writeAnnotations, writeBundleMeta, writeInterrupts } from './db'
-import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
+import { db, migrateAliasReferences, readAnnotations, readInterrupts, writeAnnotations, writeBundleMeta, writeInterrupts } from './db'
+import type { AliasMap, AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
 
 // ZIP展開はブラウザ内で行う（サーバーを持たないため）。fflate は軽くて依存ゼロ。
 
@@ -64,6 +64,10 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   const interruptsRaw = entries['interrupts.json']
   const interrupts: InterruptsMap = interruptsRaw ? (JSON.parse(strFromU8(interruptsRaw)) as InterruptsMap) : {}
 
+  // 旧id→新idの読み替え表（PHASE-DB.md §2）。旧バンドル（aliases.json未収載）では空扱い
+  const aliasesRaw = entries['aliases.json']
+  const aliases: AliasMap = aliasesRaw ? (JSON.parse(strFromU8(aliasesRaw)) as AliasMap) : {}
+
   onProgress?.(`カード ${cards.length} 種を保存しています…`)
   const images: StoredImage[] = []
   for (const card of cards) {
@@ -91,6 +95,10 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     await writeAnnotations(annotations)
     await writeInterrupts(interrupts)
   })
+
+  // カードデータ本体とは別トランザクション（db.decks/db.board は clearBundle 同様に触らない設計。
+  // db.ts参照）。保存済みデッキ・盤面が旧idを参照していれば新idに読み替える
+  await migrateAliasReferences(aliases)
 
   const cardImageCount = images.filter((img) => img.id !== CARD_BACK_IMAGE_ID).length
   return { ...meta, cardCount: cards.length, imageCount: cardImageCount }

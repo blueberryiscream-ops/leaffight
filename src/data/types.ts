@@ -9,6 +9,8 @@ export interface PoolCard extends Card {
   cells: string[]
   /** ZIP内のパス 'images/xxx.jpg' または null */
   image: string | null
+  /** 性別（PHASE-DB.md §3）。cells から抽出。表示・判定にはまだ使わない（入れるだけ） */
+  sex: '男性' | '女性' | ''
 }
 
 /** ZIP内の meta.json */
@@ -52,3 +54,6 @@ export interface InterruptAnnotation {
 
 /** card.id をキーにした割り込み注釈のマップ */
 export type InterruptsMap = Record<string, InterruptAnnotation[]>
+
+/** 旧id -> 新id の読み替え表（PHASE-DB.md §2）。zip内 aliases.json。旧バンドルでは空扱い */
+export type AliasMap = Record<string, string>

@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import type { BoardState } from '../core/board'
 import type { Deck } from './deck'
-import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
+import type { AliasMap, AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
 
 // カードデータと画像はリポジトリに入れない（権利面。DESIGN.md §7.5）。
 // ユーザーがローカルのZIPを読み込み、その中身をこの IndexedDB に保存して以後使う。
@@ -116,4 +116,46 @@ export async function saveDeck(deck: Deck): Promise<void> {
 
 export async function deleteDeck(id: string): Promise<void> {
   await db.decks.delete(id)
+}
+
+// PHASE-DB.md §2: カードDB作り直しで消えた旧id（例: `c_神岸あかりS`）を、保存済みのデッキと
+// 盤面が引き続き引けるように新idへ読み替える。UI側の「idで引く」箇所（cardOf・cardById等）は
+// 一切変えず、保存データの方をここで一度だけ書き換える（bundle importのたびに呼ぶ。冪等）。
+// PHASE-DB.md §2 は「UIの引き方を差し替える」想定だったが、保存データを読み込み時に1回書き換える方が
+// 触る箇所が1つで済むので、統括8の検証でこの形を採用した。ホストとゲストは同じ版のZIPを読み込むこと。
+export async function migrateAliasReferences(aliases: AliasMap): Promise<void> {
+  if (!aliases || Object.keys(aliases).length === 0) return
+  const resolve = (id: string): string => aliases[id] ?? id
+
+  await db.transaction('rw', db.decks, db.board, async () => {
+    const decks = await db.decks.toArray()
+    for (const deck of decks) {
+      let changed = false
+      const newCounts: Record<string, number> = {}
+      for (const [id, n] of Object.entries(deck.counts)) {
+        const newId = resolve(id)
+        if (newId !== id) changed = true
+        newCounts[newId] = (newCounts[newId] ?? 0) + n
+      }
+      const newLeaderId = deck.leaderCardId ? resolve(deck.leaderCardId) : deck.leaderCardId
+      if (newLeaderId !== deck.leaderCardId) changed = true
+      if (changed) {
+        await db.decks.put({ ...deck, counts: newCounts, leaderCardId: newLeaderId })
+      }
+    }
+
+    const boardRow = await db.board.get(BOARD_KEY)
+    if (boardRow) {
+      let changed = false
+      const newCards: BoardState['cards'] = {}
+      for (const [iid, inst] of Object.entries(boardRow.value.cards)) {
+        const newCardId = resolve(inst.cardId)
+        if (newCardId !== inst.cardId) changed = true
+        newCards[iid] = { ...inst, cardId: newCardId }
+      }
+      if (changed) {
+        await db.board.put({ key: BOARD_KEY, value: { ...boardRow.value, cards: newCards } })
+      }
+    }
+  })
 }

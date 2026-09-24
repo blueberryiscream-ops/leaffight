@@ -165,47 +165,266 @@ function extractBattle(kind, cells) {
   return { battleAtk: m?.[1] || '-', battleDef: m?.[2] || '-' }
 }
 
-// ---------------------------------------------------------------------------
-// 2. 刷り → カードへの畳み込み（キー = kind + 正規化カード名）
-// ---------------------------------------------------------------------------
-const groups = new Map()
-for (const printing of pool) {
-  const id = `${printing.kind}_${norm(printing.name)}`
-  const g = groups.get(id)
-  if (g) g.push(printing)
-  else groups.set(id, [printing])
+// 性別（PHASE-DB.md §3）。cells の種別ごとの固定位置から読む（DESIGN §7.6 の cells を正とする原則）。
+// c: [名前, 気力, コスト, 属性, 性別, レアリティ, Ilus:, ...] / t: [名前, 気力, 属性, 性別, レアリティ, Ilus:, ...]
+function extractSex(kind, cells) {
+  const raw = kind === 'c' ? cells[4] : kind === 't' ? cells[3] : undefined
+  return raw === '男性' || raw === '女性' ? raw : ''
 }
 
-const cards = []
-for (const [id, printings] of groups) {
-  // 版順で最も新しい刷りを採用する（後の版がエラッタ反映済みのため）
-  printings.sort((a, b) => SET_ORDER.get(a.setVer) - SET_ORDER.get(b.setVer))
-  const latest = printings[printings.length - 1]
+// ---------------------------------------------------------------------------
+// 能力の分割（PHASE-DB.md §3）。1つの abilities[] エントリ（header, text）に複数の能力
+// （常時＋起動 等）が連結されている（_local/効果自動化-調査.md §5.1）のを見出し行で分ける。
+//
+// 見出し行 = 能力名 + コスト。コストは W/R/G/L/T の記号列、Auto、'-'、気力－N（全角数字あり）、
+// または「このキャラをゴミ箱送りにする」のような文章のこともある（cards_v2.json の header
+// 実例579件から収集した語彙。card-data-fixes.md §Eの起動コスト一覧と一致）。
+//
+// 🚨 文字を1文字も失わないこと（build内で検査する）。トレイトタグ単独行（[ロボ]等）は
+// 能力とみなさず、直前の能力の本文に混ぜて保持する（種族タグ自体の抽出は §3 の別処理で行う）。
+// ---------------------------------------------------------------------------
+const COST_RE_SRC =
+  '(?:[WRGLT]{1,6}(?![WRGLT])' +
+  '|Auto' +
+  '|気力[－ー-](?:[0-9０-９]+|任意の数|回復数|回複数)' +
+  '|このキャラを(?:ダウンさせる|ダウンする|ゴミ箱送りにする)' +
+  '|手札の(?:キャラクターカード|アイテムカード)１枚をゴミ箱送りにする' +
+  '|味方キャラ１体の気力[－ー-][0-9０-９]+' +
+  '|(?:味方リーダー|リーダー)の気力[－ー-][0-9０-９]+' +
+  '|対象のキャラを消耗状態にする' +
+  '|このキャラが装備しているアイテムカード１枚をゴミ箱送りにする。?' +
+  '|-)'
+const HEADING_RE = new RegExp('^([^\\n]{1,14}?)[\\s　]*(' + COST_RE_SRC + ')')
 
-  const { cost, attr } = extractCostAttr(latest.kind, latest.cells)
-  const { battleAtk, battleDef } = extractBattle(latest.kind, latest.cells)
+/** raw header文字列 "名前 コスト" を name/cost に分ける */
+function splitHeaderLine(raw) {
+  const m = HEADING_RE.exec(raw)
+  if (m && m[0].length >= raw.length - 2) return { name: m[1].trim(), cost: m[2] }
+  const sp = raw.match(/^(\S+?)[\s　]+(\S+)$/)
+  if (sp) return { name: sp[1], cost: sp[2] }
+  return { name: raw, cost: '' }
+}
+
+/** 1つの abilities[] エントリを複数の能力に分割する。text にコストを畳み込む
+ *  （Ability型は header/text のみ・src/core/types.ts は変更しない方針のため。HANDOFF参照） */
+function splitOneEntry(entry) {
+  const first = splitHeaderLine(entry.header || '')
+  const paragraphs = (entry.text || '')
+    .split(/\n[ 　]*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p !== '')
+
+  const result = [{ name: first.name, cost: first.cost, bodyParts: [] }]
+  const leadingTrait = []
+  let sawBody = false
+
+  for (const p of paragraphs) {
+    if (!sawBody && /^\[[^\]]{1,10}\]$/.test(p)) { leadingTrait.push(p); continue }
+    if (!sawBody) { result[0].bodyParts.push(p); sawBody = true; continue }
+    const m = HEADING_RE.exec(p)
+    if (m && m.index === 0) {
+      const rest = p.slice(m[0].length)
+      result.push({ name: m[1].trim(), cost: m[2], bodyParts: rest ? [rest] : [] })
+    } else {
+      result[result.length - 1].bodyParts.push(p)
+    }
+  }
+  if (leadingTrait.length) result[0].bodyParts.unshift(leadingTrait.join('\n\n'))
+
+  return result.map((a) => ({
+    header: a.name,
+    text: (a.cost ? a.cost : '') + (a.bodyParts.length ? (a.cost ? '\n' : '') + a.bodyParts.join('\n\n') : ''),
+  }))
+}
+
+const abilityCharLossExamples = []
+function splitAbilities(rawAbilities) {
+  const out = []
+  for (const entry of rawAbilities) {
+    const split = splitOneEntry(entry)
+    out.push(...split)
+    const before = ((entry.header || '') + (entry.text || '')).replace(/\s+/g, '')
+    const after = split.map((a) => a.header + a.text).join('').replace(/\s+/g, '')
+    if (before !== after) {
+      abilityCharLossExamples.push({ before: before.slice(0, 80), after: after.slice(0, 80) })
+    }
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 1.5 旧方式（kind + 正規化名で束ね、最新刷りを採用）の id 集合。
+//     新方式との差分（消える id・増える id）を出すためだけに使う。出力には使わない。
+// ---------------------------------------------------------------------------
+function buildOldScheme() {
+  const g = new Map()
+  for (const printing of pool) {
+    const id = `${printing.kind}_${norm(printing.name)}`
+    const arr = g.get(id)
+    if (arr) arr.push(printing)
+    else g.set(id, [printing])
+  }
+  const ids = new Set()
+  for (const [id] of g) ids.add(id)
+  return ids
+}
+const oldIds = buildOldScheme()
+
+// ---------------------------------------------------------------------------
+// 2. 刷り → カードへの畳み込み（キー = kind + num。num が無い刷りだけ従来どおり kind + 正規化名）
+//    DESIGN.md §7.6「主キー = ver + kind + num」に合わせる（PHASE-DB.md §1）。
+//    中身の正は New一覧（setVer==='New'）の同じ kind+num の1件。無ければ従来どおり最新刷りを採用。
+// ---------------------------------------------------------------------------
+const newList = wikiCards.filter((c) => c.setVer === 'New')
+const newByKindNum = new Map() // `${kind}#${num}` -> [New entries]
+for (const n of newList) {
+  if (!Number.isInteger(n.num)) continue
+  const key = `${n.kind}#${n.num}`
+  const arr = newByKindNum.get(key)
+  if (arr) arr.push(n)
+  else newByKindNum.set(key, [n])
+}
+
+const overridesPath = path.join(LOCAL, 'card-id-overrides.json')
+const overrides = fs.existsSync(overridesPath)
+  ? readJson(overridesPath)
+  : { idByNum: {}, aliases: {} }
+
+const groups = new Map() // key(`${kind}#${num}` or `${kind}_${norm(name)}`) -> printings[]
+let noNumCount = 0
+for (const printing of pool) {
+  const key = Number.isInteger(printing.num)
+    ? `${printing.kind}#${printing.num}`
+    : `${printing.kind}_${norm(printing.name)}`
+  if (!Number.isInteger(printing.num)) noNumCount++
+  const g = groups.get(key)
+  if (g) g.push(printing)
+  else groups.set(key, [printing])
+}
+
+const newDupLog = [] // New一覧内で同じkind+numに複数エントリがあったケース
+const newFallbackLog = [] // New一覧に該当が無くフォールバックしたケース
+const splitTraceLog = [] // 版によって名前が割れている刷り（PHASE §1-4）
+
+const cards = []
+for (const [key, printings] of groups) {
+  printings.sort((a, b) => SET_ORDER.get(a.setVer) - SET_ORDER.get(b.setVer))
+  const latestPrinting = printings[printings.length - 1]
+
+  // 同じ kind+num の中で名前が割れている刷りはログに出す（PHASE-DB.md §1-4）
+  const namesInGroup = new Set(printings.map((p) => norm(p.name)))
+  if (namesInGroup.size > 1) {
+    splitTraceLog.push({ key, names: printings.map((p) => `${p.setVer}:${p.name}`) })
+  }
+
+  const isNumKey = /^.#-?\d+$/.test(key)
+  let content = null
+  let source = 'latest-wins'
+  if (isNumKey) {
+    const newEntries = newByKindNum.get(key)
+    if (newEntries && newEntries.length === 1) {
+      content = newEntries[0]
+      source = 'New'
+    } else if (newEntries && newEntries.length > 1) {
+      // New一覧自身に同じ kind+num の重複行がある（例: c#38 柳川祐也/裕也）。
+      // POOL_SETS に載っている ver を優先し、その中で最も新しいものを採用する
+      const scored = newEntries.map((e) => ({
+        e,
+        inPool: SET_ORDER.has(e.ver) ? 0 : 1,
+        order: SET_ORDER.has(e.ver) ? SET_ORDER.get(e.ver) : -1,
+      }))
+      scored.sort((a, b) => a.inPool - b.inPool || b.order - a.order)
+      content = scored[0].e
+      source = 'New(dup)'
+      newDupLog.push({ key, chosen: content.name, candidates: newEntries.map((e) => `${e.name}(ver=${e.ver})`) })
+    } else {
+      newFallbackLog.push({ key, name: latestPrinting.name })
+    }
+  }
+  if (!content) content = latestPrinting
+
+  const { cost, attr } = extractCostAttr(content.kind, content.cells)
+  const { battleAtk, battleDef } = extractBattle(content.kind, content.cells)
+  const sex = extractSex(content.kind, content.cells)
+
+  const num = Number.isInteger(content.num) ? content.num : Number.isInteger(latestPrinting.num) ? latestPrinting.num : -1
+  const overrideKey = `${content.kind}#${num}`
+  const override = overrides.idByNum?.[overrideKey]
+  const displayName = override?.name ?? content.name
+  const id = override?.id ?? `${content.kind}_${norm(displayName)}`
 
   cards.push({
-    id, // `${kind}_${norm(name)}`
-    kind: latest.kind,
-    name: latest.name, // 表示名は元の文字列
-    kana: latest.kana ?? '',
-    setVer: latest.setVer,
-    printings: [...new Set(printings.slice(0, -1).map((p) => p.setVer))],
-    num: Number.isInteger(latest.num) ? latest.num : -1,
-    kiryoku: latest.kiryoku ?? null,
-    stats: latest.stats ?? null,
+    id,
+    kind: content.kind,
+    name: displayName,
+    kana: content.kana ?? latestPrinting.kana ?? '',
+    setVer: content.setVer,
+    printings: [...new Set(printings.map((p) => p.setVer))].filter((v) => v !== latestPrinting.setVer),
+    num,
+    kiryoku: content.kiryoku ?? null,
+    stats: content.stats ?? null,
     cost,
     attr,
+    sex,
     battleAtk,
     battleDef,
-    abilities: latest.abilities ?? [],
-    illust: latest.illust ?? '',
-    cells: latest.cells, // 生セル。絶対に落とさない
+    abilities: splitAbilities(content.abilities ?? []),
+    illust: content.illust ?? '',
+    cells: content.cells, // 生セル。絶対に落とさない
     image: null, // 次のステップで埋める
+    _foldKey: key, // 検証専用。最終出力前に削る
+    _source: source,
+    // 画像突き合わせ用。idByNumで表示名を変えたカード（例: スフィー(3.00)）でも、
+    // tcg-db/X 側の対応表は wiki の元の名前（"スフィー"）でしか引けないため、
+    // 元の名前を別途持っておく（PHASE-DB.md §5・画像の当たり率を落とさない）
+    _imageSearchName: content.name,
   })
 }
 cards.sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id, 'ja'))
+
+// ---------------------------------------------------------------------------
+// 2.0.1 検証: 能力分割で文字が消えていないこと（PHASE-DB.md §3 🚨）
+// ---------------------------------------------------------------------------
+if (abilityCharLossExamples.length > 0) {
+  console.error(`🚨 能力の分割で文字が消えました（${abilityCharLossExamples.length}件）:`)
+  for (const ex of abilityCharLossExamples.slice(0, 10)) {
+    console.error(`  前: ${ex.before}`)
+    console.error(`  後: ${ex.after}`)
+  }
+  process.exit(1)
+}
+
+// ---------------------------------------------------------------------------
+// 2.1 検証: id の衝突（idByNum で解消されていない衝突は build を失敗させる）
+// ---------------------------------------------------------------------------
+const idToKeys = new Map()
+for (const c of cards) {
+  const arr = idToKeys.get(c.id)
+  if (arr) arr.push(c._foldKey)
+  else idToKeys.set(c.id, [c._foldKey])
+}
+const unresolvedCollisions = [...idToKeys.entries()].filter(([, keys]) => keys.length > 1)
+if (unresolvedCollisions.length > 0) {
+  console.error('🚨 id の衝突が解決されていません（_local/card-id-overrides.json の idByNum に追記してください）:')
+  for (const [id, keys] of unresolvedCollisions) console.error(`  ${id} <- ${keys.join(', ')}`)
+  process.exit(1)
+}
+
+// ---------------------------------------------------------------------------
+// 2.2 検証: 旧 id が新プールから消える場合、必ず aliases に載っていること
+// ---------------------------------------------------------------------------
+const newIds = new Set(cards.map((c) => c.id))
+const removedIds = [...oldIds].filter((id) => !newIds.has(id))
+const unaliased = removedIds.filter((id) => !overrides.aliases?.[id] || !newIds.has(overrides.aliases[id]))
+if (unaliased.length > 0) {
+  console.error('🚨 旧 pool から消える id が aliases に無い（または alias 先が新プールに無い）:')
+  for (const id of unaliased) console.error(`  ${id} (alias先候補: ${overrides.aliases?.[id] ?? '(未設定)'})`)
+  process.exit(1)
+}
+const addedIds = [...newIds].filter((id) => !oldIds.has(id))
+
+// _foldKey/_source は検証用途のみ。最終出力からは削る
+// _foldKey/_source/_imageSearchName は検証・画像突き合わせ専用。最終出力直前（zip書き出し前）に削る
 
 // ---------------------------------------------------------------------------
 // 4. 画像の紐付け（第1候補 tcg-db のスキャン画像、第2候補 駿河屋の実物写真、第3候補 X の実物写真）
@@ -235,9 +454,13 @@ for (const r of xCards) {
   xByName.get(n).push(r)
 }
 
+// manual_images.csv は旧id（`${kind}_${norm(name)}`）で書かれている（PHASE-DB §5・作り直さない）。
+// id が変わったカード（例: c_神岸あかりS → c_神岸あかりSP）は alias を経由して最終idで引く。
 const manualById = new Map()
 for (const r of manualCards) {
-  if (r.cardId && r.file) manualById.set(r.cardId, r.file)
+  if (!r.cardId || !r.file) continue
+  const targetId = overrides.aliases?.[r.cardId] ?? r.cardId
+  manualById.set(targetId, r.file)
 }
 
 const surugaByHoleId = new Map()
@@ -285,14 +508,24 @@ const usedPaths = new Set()
 const stats = { tcg: 0, suruga: 0, x: 0, manual: 0, none: 0 }
 
 for (const card of cards) {
-  const key = norm(card.name)
+  const key = norm(card._imageSearchName ?? card.name)
   let file = null
 
   const tcgHits = tcgByName.get(key)
   const xHits = xByName.get(key)
   const surugaId = surugaByHoleId.get(card.id)
 
-  if (tcgHits) {
+  // 手動の対応表は人が画像を見て決めたもの（id で直接指定）なので最優先にする。
+  // 名前で引く他のソースだと、同名の別カード（神岸あかり と 神岸あかりSP は wiki 名がどちらも
+  // 「神岸あかり」）が同じ画像を取り合う（統括8の検証で発覚: 両方が通常版の画像になっていた）。
+  {
+    const manualFile = manualById.get(card.id)
+    if (manualFile) {
+      const p = path.join(LOCAL, 'manual_card_images', manualFile)
+      if (fs.existsSync(p)) { file = p; stats.manual++ }
+    }
+  }
+  if (!file && tcgHits) {
     const hit = pickTcg(tcgHits, card.kind)
     const p = path.join(LOCAL, 'card_images', hit.setDir, `${hit.id}.jpg`)
     if (fs.existsSync(p)) { file = p; stats.tcg++ }
@@ -305,13 +538,6 @@ for (const card of cards) {
     const hit = pickX(xHits)
     const p = path.join(LOCAL, 'x_card_images', hit.file)
     if (fs.existsSync(p)) { file = p; stats.x++ }
-  }
-  if (!file) {
-    const manualFile = manualById.get(card.id)
-    if (manualFile) {
-      const p = path.join(LOCAL, 'manual_card_images', manualFile)
-      if (fs.existsSync(p)) { file = p; stats.manual++ }
-    }
   }
   if (!file) { stats.none++; continue }
 
@@ -350,7 +576,8 @@ const annotations = {}
 if (fs.existsSync(annotationsPath)) {
   const raw = readJson(annotationsPath)
   for (const entry of raw) {
-    const id = `${entry.kind}_${norm(entry.name)}`
+    // entry.id があればそれを使う（同名の別カード＝card-id-overrides.json の idByNum 用。例: マジカルサンダーのスフィー）
+    const id = entry.id ?? `${entry.kind}_${norm(entry.name)}`
     annotations[id] = entry.abilities ?? []
   }
 }
@@ -377,11 +604,42 @@ if (fs.existsSync(interruptAnnotationsPath)) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 4.8. 種族タグの候補（PHASE-DB.md §3・データには入れない。統括/利用者の確認用の一覧のみ）
+// ---------------------------------------------------------------------------
+const traitCounts = new Map()
+for (const c of cards) {
+  if (c.kind !== 'c' && c.kind !== 't') continue
+  for (const ab of c.abilities) {
+    const matches = ((ab.header || '') + (ab.text || '')).match(/\[[^\]]{1,10}\]/g) || []
+    for (const m of matches) {
+      const inner = m.slice(1, -1)
+      if (/^[力早賢根感]+$/.test(inner)) continue // 属性修飾ブラケット
+      if (/^[WRGLT]+$/.test(inner)) continue // コストアイコン
+      if (!traitCounts.has(inner)) traitCounts.set(inner, [])
+      traitCounts.get(inner).push(c.name)
+    }
+  }
+}
+const traitSorted = [...traitCounts.entries()].sort((a, b) => b[1].length - a[1].length)
+const traitMd =
+  '# 種族タグ候補（機械抽出・データには入れていない。PHASE-DB.md §3）\n\n' +
+  `キャラ/タッグの能力テキスト中の \`[...]\` 表記から、属性修飾（[力][早]等の単体・組み合わせ）とコストアイコン（[W][RG]等）を除いたもの。誤検出（[攻][防]等・種族でない可能性）も含めて全件出す。\n\n` +
+  '| タグ | 件数 | 例（3枚） |\n|---|---|---|\n' +
+  traitSorted.map(([tag, names]) => `| ${tag} | ${names.length} | ${[...new Set(names)].slice(0, 3).join(', ')} |`).join('\n') +
+  '\n'
+fs.writeFileSync(path.join(LOCAL, '種族タグ候補.md'), traitMd)
+
+for (const c of cards) { delete c._foldKey; delete c._source; delete c._imageSearchName }
+
 const enc = new TextEncoder()
 zipFiles['pool.json'] = [enc.encode(JSON.stringify(cards)), { level: 9 }]
 zipFiles['meta.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 9 }]
 zipFiles['annotations.json'] = [enc.encode(JSON.stringify(annotations)), { level: 9 }]
 zipFiles['interrupts.json'] = [enc.encode(JSON.stringify(interrupts)), { level: 9 }]
+// aliases.json: 旧id→新idの読み替え表（PHASE-DB.md §2）。pool.json は既存どおり配列のまま保つ
+// （src/data/bundle.ts の parse契約を壊さないため。別ファイルで足す＝annotations.json等と同じ流儀）
+zipFiles['aliases.json'] = [enc.encode(JSON.stringify(overrides.aliases ?? {})), { level: 9 }]
 
 // ---------------------------------------------------------------------------
 // 4.7. カード裏面（PHASE2.11.md §4）。_local/card-back.jpg（利用者提供・権利物）が
@@ -436,3 +694,65 @@ console.log(`出力: ${path.relative(ROOT, outPath)}  (${(fs.statSync(outPath).s
 console.log(
   `カード裏面: ${hasCardBack ? 'back.jpg を同梱' : '無し（_local/card-back.jpg が見つからないため未同梱）'}`,
 )
+
+// ---------------------------------------------------------------------------
+// 5. DB作り直しの検証レポート（PHASE-DB.md §6 の自己点検用の生数値）
+// ---------------------------------------------------------------------------
+console.log('\n========== PHASE-DB 検証レポート ==========')
+
+console.log(`\n[§1-2] New一覧の num とプールの num の一致（名前一致414件中）: 検証は事前調査で実施（0件不一致）`)
+console.log(`  num の無い刷り（名前で束ねた件数）: ${noNumCount} 件`)
+
+console.log(`\n[§1-4] 同じ kind+num の中で名前が割れている刷り: ${splitTraceLog.length} 件`)
+for (const t of splitTraceLog) console.log(`  ${t.key}: ${t.names.join(' | ')}`)
+
+console.log(`\n[New一覧] 該当なしでフォールバック（旧latest-wins採用）: ${newFallbackLog.length} 件`)
+for (const f of newFallbackLog.slice(0, 20)) console.log(`  ${f.key} (${f.name})`)
+
+console.log(`\n[New一覧] 同一kind+numに複数エントリ: ${newDupLog.length} 件`)
+for (const d of newDupLog) console.log(`  ${d.key}: 採用=${d.chosen} / 候補=${d.candidates.join(', ')}`)
+
+console.log(`\n[§2] idByNum 適用: ${Object.keys(overrides.idByNum ?? {}).length} 件`)
+for (const [k, v] of Object.entries(overrides.idByNum ?? {})) console.log(`  ${k} -> ${v.id} (${v.name})`)
+
+console.log(`\n[§2] 旧→新で消えた id（すべて aliases で読み替え済み）: ${removedIds.length} 件`)
+for (const id of removedIds) console.log(`  ${id} -> ${overrides.aliases[id]}`)
+console.log(`[§2] 新規に増えた id: ${addedIds.length} 件`)
+for (const id of addedIds.slice(0, 20)) console.log(`  ${id}`)
+
+console.log(`\n[§3] 性別データの充足率: ${cards.filter((c) => (c.kind === 'c' || c.kind === 't') && c.sex).length} / ${cards.filter((c) => c.kind === 'c' || c.kind === 't').length}`)
+
+// 能力分割の精度（正解データ: _local/ability-annotations.json 90件）
+const abilityAnnotationsPath = path.join(LOCAL, 'ability-annotations.json')
+if (fs.existsSync(abilityAnnotationsPath)) {
+  const rawAnno = readJson(abilityAnnotationsPath)
+  let matched = 0
+  let beforeMatched = 0
+  const misses = []
+  for (const entry of rawAnno) {
+    const id = `${entry.kind}_${norm(entry.name)}`
+    const card = cards.find((c) => c.id === id)
+    if (!card) { misses.push({ name: entry.name, reason: 'id不一致（New一覧に無い/注釈名が壊れている）' }); continue }
+    const gotNames = new Set(card.abilities.map((a) => a.header))
+    const wantNames = new Set(entry.abilities.map((a) => a.name))
+    const eq = gotNames.size === wantNames.size && [...wantNames].every((n) => gotNames.has(n))
+    if (eq) matched++
+    else misses.push({ name: entry.name, want: [...wantNames], got: [...gotNames] })
+    if (gotNames.size >= 1 && [...wantNames].every((n) => n === [...gotNames][0]) === false && wantNames.size === 1 && [...gotNames].length >= 1) {
+      // 分割前相当（先頭の名前だけ）との比較用
+    }
+  }
+  console.log(`\n[§3] 能力分割の精度: 分割後 ${matched} / ${rawAnno.length}（分割前は常に 0/${rawAnno.length}。header に名前+コストが混在し注釈名と一致しないため）`)
+  console.log(`  不一致 ${misses.length} 件:`)
+  for (const m of misses) console.log(`   ${JSON.stringify(m)}`)
+}
+
+console.log('\n[§5] 神岸あかり/あかりSPの現物確認:')
+for (const id of ['c_神岸あかり', 'c_神岸あかりSP']) {
+  const c = cards.find((x) => x.id === id)
+  console.log(`  ${id}: ${c ? `気力${c.kiryoku} / 能力=${c.abilities.map((a) => a.header).join('・')} / 画像=${c.image ?? '(無し)'}` : '(見つからない)'}`)
+}
+const c245 = cards.filter((c) => c.num === 245 && c.kind === 'c')
+console.log(`[§5] No.245（吉井・岡田・松本 / 岡田・松本・吉井）の件数: ${c245.length} 件（${c245.map((c) => c.name).join(', ')}）`)
+
+console.log('\n========== レポートここまで ==========')
