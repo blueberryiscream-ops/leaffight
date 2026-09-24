@@ -445,7 +445,7 @@ export function Board({
     // 🚨 key必須: A⇄B切替時にDOMノードを強制的に作り直させる。同じ位置に同じ要素型(div)が
     // 並ぶだけだとReactが既存ノードを再利用し、rowRef(useMeasuredHeight)のコールバックrefが
     // 再発火せず、切替後もrowHが古いレイアウトの値のまま固まる（実機で発覚）。
-    <div key="A" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1fr 1.6fr' }}>
+    <div key="A" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: 'repeat(5, minmax(0, 1fr)) minmax(0, 1.6fr)' }}>
       {/* 行1: 相手の外側列。中央=相手キャラ3枚のクラスタ、左=手札(帯)、右=ゴミ箱/デッキ */}
       <CenterRow
         rowRef={rowRef}
@@ -528,7 +528,7 @@ export function Board({
   // 各プレイヤー自身のバトルを内側行の左へ寄せる。向き(P2.9b)・アイテム重ね(P2.9c)は
   // charCell等のヘルパーが担うのでAと共通のまま自動的に効く。
   const renderLayoutB = () => (
-    <div key="B" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: '1fr 1fr 1fr 1fr 1.6fr' }}>
+    <div key="B" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: 'repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr)' }}>
       {/* 行1: 相手の外側列。中央=相手キャラ3・リーダー・キャラ4、左=ゴミ箱/デッキ/手札(帯) */}
       <CenterRow
         rowRef={rowRef}

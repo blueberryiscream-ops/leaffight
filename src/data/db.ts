@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { BoardState } from '../core/board'
+import type { Deck } from './deck'
 import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
 
 // カードデータと画像はリポジトリに入れない（権利面。DESIGN.md §7.5）。
@@ -20,6 +21,7 @@ export class LeafFightDb extends Dexie {
   images!: Table<StoredImage, string>
   meta!: Table<MetaRow, string>
   board!: Table<BoardRow, string>
+  decks!: Table<Deck, string>
 
   constructor() {
     super('leaffight')
@@ -34,6 +36,14 @@ export class LeafFightDb extends Dexie {
       images: 'id',
       meta: 'key',
       board: 'key',
+    })
+    // P5a: デッキ保存用テーブルを追加（PHASE5a.md §3）。既存テーブルの定義はそのまま繰り返す
+    this.version(3).stores({
+      cards: 'id, kind, name',
+      images: 'id',
+      meta: 'key',
+      board: 'key',
+      decks: 'id, updatedAt',
     })
   }
 }
@@ -91,4 +101,19 @@ export async function readBoardState(): Promise<BoardState | null> {
 
 export async function writeBoardState(state: BoardState): Promise<void> {
   await db.board.put({ key: BOARD_KEY, value: state })
+}
+
+// デッキ（PHASE5a.md §3）。🚨 clearBundle（カードデータの削除・上の関数）はdecksに触らない。
+// カードデータを入れ直してもデッキは残るべきで、id は `kind_正規化名` で安定している（DESIGN.md §4.21）。
+
+export async function listDecks(): Promise<Deck[]> {
+  return db.decks.toArray()
+}
+
+export async function saveDeck(deck: Deck): Promise<void> {
+  await db.decks.put(deck)
+}
+
+export async function deleteDeck(id: string): Promise<void> {
+  await db.decks.delete(id)
 }

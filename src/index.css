@@ -15,6 +15,13 @@
   --color-warn: #ffd98a;
   --color-danger: #ff7a8a;
   --color-on-accent: #0f2542;
+  /* デッキ画面: 種類の色6つ（PHASE5a.md §0「守ること」・見本のKIND_COLORそのまま） */
+  --color-kind-c: #8fd0ff;
+  --color-kind-t: #b9a8ff;
+  --color-kind-b: #ff7a8a;
+  --color-kind-i: #ffd98a;
+  --color-kind-e: #7fe0c4;
+  --color-kind-f: #f0a8d0;
 }
 
 @utility lf-panel {
