@@ -14,20 +14,42 @@ import { useCallback, useRef, useState } from 'react'
 // マウント/アンマウントのたびに呼ばれるので、要素が変わるたびに監視し直せる。
 
 export function useMeasuredHeight<T extends HTMLElement>(): [(el: T | null) => void, number] {
-  const [height, setHeight] = useState(0)
+  return useMeasured<T>('clientHeight')
+}
+
+/** 幅版。レイアウトBでマスの大きさに横幅の上限をかけるのに使う（下の cellSizeForB） */
+export function useMeasuredWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
+  return useMeasured<T>('clientWidth')
+}
+
+function useMeasured<T extends HTMLElement>(prop: 'clientHeight' | 'clientWidth'): [(el: T | null) => void, number] {
+  const [value, setValue] = useState(0)
   const observerRef = useRef<ResizeObserver | null>(null)
 
   const setRef = useCallback((el: T | null) => {
     observerRef.current?.disconnect()
     observerRef.current = null
     if (!el) return
-    setHeight(el.clientHeight)
-    const ro = new ResizeObserver(() => setHeight(el.clientHeight))
+    setValue(el[prop])
+    const ro = new ResizeObserver(() => setValue(el[prop]))
     ro.observe(el)
     observerRef.current = ro
-  }, [])
+  }, [prop])
 
-  return [setRef, height]
+  return [setRef, value]
+}
+
+/**
+ * レイアウトBのマスの一辺。行の高さに加えて横幅でも頭を打つ。
+ * Bの行は「左=バトル3マス（またはゴミ箱/デッキ/帯）｜中央=キャラ3マス｜右=空」を
+ * 1fr/auto/1fr で並べ、中央を盤面の中心線に揃える（DESIGN.md §4.18.2）。左の列は
+ * (幅−中央)/2 しか無いので、行の高さだけで決めると 3マスが入り切らず justify-end で
+ * 左へ突き抜け、ログ欄に重なっていた（2026-09-24 利用者の指摘・1920×1080 で再現）。
+ * 必要な幅＝左3マス＋中央3マス＋右に左と同じ幅＝9マス＋隙間(gap-1=4px)×6。
+ */
+export function cellSizeForB(rowHeight: number, boardWidth: number): number {
+  if (boardWidth <= 0) return rowHeight
+  return Math.min(rowHeight, Math.floor((boardWidth - 4 * 6) / 9))
 }
 
 /** カードの縦横比 63:88（DESIGN.md §4.18.1） */

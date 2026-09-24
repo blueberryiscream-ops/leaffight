@@ -25,7 +25,7 @@ import { StackedCardSlot } from './StackedCardSlot'
 import { StartWithDeckDialog } from './StartWithDeckDialog'
 import { StackPanel } from './StackPanel'
 import { TodoBand } from './TodoBand'
-import { portraitCell, squareCell, useMeasuredHeight } from './useMeasuredHeight'
+import { cellSizeForB, portraitCell, squareCell, useMeasuredHeight, useMeasuredWidth } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
 
@@ -216,8 +216,10 @@ export function Board({
   // rows1-5は等高（1fr）なので1つ測れば足りる。row6(手札)だけ別に測る
   const [rowRef, rowH] = useMeasuredHeight<HTMLDivElement>()
   const [handRowRef, handRowH] = useMeasuredHeight<HTMLDivElement>()
-  const cellSquare = squareCell(rowH) // キャラ/リーダー/バトル（回転する＝正方形。DESIGN.md §4.18.1）
-  const cellPortrait = portraitCell(rowH) // デッキ/ゴミ箱/フィールド/相手手札の帯（回転しない＝縦長）
+  const [boardBRef, boardBW] = useMeasuredWidth<HTMLDivElement>()
+  const cellH = layout === 'B' ? cellSizeForB(rowH, boardBW) : rowH
+  const cellSquare = squareCell(cellH) // キャラ/リーダー/バトル（回転する＝正方形。DESIGN.md §4.18.1）
+  const cellPortrait = portraitCell(cellH) // デッキ/ゴミ箱/フィールド/相手手札の帯（回転しない＝縦長）
   const handCardSize = portraitCell(handRowH)
 
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
@@ -541,7 +543,7 @@ export function Board({
   // 各プレイヤー自身のバトルを内側行の左へ寄せる。向き(P2.9b)・アイテム重ね(P2.9c)は
   // charCell等のヘルパーが担うのでAと共通のまま自動的に効く。
   const renderLayoutB = () => (
-    <div key="B" className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: 'repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr)' }}>
+    <div key="B" ref={boardBRef} className="grid min-h-0 min-w-0 gap-1" style={{ gridTemplateRows: 'repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr)' }}>
       {/* 行1: 相手の外側列。中央=相手キャラ3・リーダー・キャラ4、左=ゴミ箱/デッキ/手札(帯) */}
       <CenterRow
         rowRef={rowRef}
