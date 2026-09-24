@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import type { BoardAction } from '../../core/actions'
-import type { CardInstance } from '../../core/board'
+import type { CardInstance, Seat } from '../../core/board'
 import { effectiveStat, modifiersFor } from '../../core/board'
 import type { BoardState } from '../../core/board'
 import { ATTRS } from '../../core/types'
@@ -23,7 +23,10 @@ export function tapRotation(instance: CardInstance): number {
 // 盤面上の1枚。操作の割り当ては DESIGN.md §4.17:
 //   ホバー   → すぐ近くに拡大ポップアップ（0クリック）
 //   左クリック → 詳細パネルで選択（Board.tsx側の右パネルに表示）
-//   左ダブルクリック → 待機⇔消耗
+//   左ダブルクリック → ゾーンで意味が違う（PHASE5c.md §3）:
+//     char・battle・leader → 待機⇔消耗（従来どおり）
+//     deck（自分の持ち主のときだけ）→ 一番上の1枚を手札へ（1枚ドロー）
+//     それ以外（hand・trash・field・pending）→ 何もしない
 //   右クリック → 状態変化メニュー（Board.tsx側で浮かせる CardContextMenu）
 //
 // サイズは呼び出し側（Board.tsx）がpxで渡す（DESIGN.md §4.18.1）。
@@ -46,6 +49,7 @@ export function CardPiece({
   size,
   dragDisabled,
   hidden,
+  mySeat,
   selected,
   flipped,
   groupRotate,
@@ -74,6 +78,12 @@ export function CardPiece({
    * 操作は塞がない（掴んで動かすことはできる。見えないだけ）。
    */
   hidden?: boolean
+  /**
+   * ダブルクリックの「デッキは持ち主が自分のときだけ1枚ドロー」判定に使う（PHASE5c.md §3）。
+   * デッキを描画しない呼び出し元（StackedCardSlotのchar/battle/leader/field）は渡さなくてよい
+   * （zoneがdeckにならないため、この判定自体が発火しない）。
+   */
+  mySeat?: Seat
   /** 詳細パネルで選択中のカードを軽く強調する */
   selected?: boolean
   /**
@@ -152,7 +162,15 @@ export function CardPiece({
         onClick={onClick}
         onDoubleClick={(e) => {
           e.stopPropagation()
-          dispatch({ type: 'toggleOrientation', iid: instance.iid, cardName: name })
+          if (instance.zone === 'char' || instance.zone === 'battle' || instance.zone === 'leader') {
+            dispatch({ type: 'toggleOrientation', iid: instance.iid, cardName: name })
+          } else if (instance.zone === 'deck') {
+            // 相手のデッキは何もしない。自分のデッキなら一番上の1枚をドロー（PHASE5c.md §3）
+            if (instance.owner === mySeat) {
+              dispatch({ type: 'moveCard', iid: instance.iid, toZone: 'hand', cardName: name })
+            }
+          }
+          // hand・trash・field・pending は何もしない
         }}
         onContextMenu={(e) => {
           e.preventDefault()

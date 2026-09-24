@@ -6,6 +6,7 @@ import { cardsInZone } from '../../core/board'
 import { CARD_BACK_IMAGE_ID } from '../../data/bundle'
 import type { PoolCard } from '../../data/types'
 import { CardPiece } from './CardPiece'
+import { hiddenFromViewer } from './visibility'
 
 // デッキ / 手札 / ゴミ箱。固定スロットではなく「束・横帯」（DESIGN.md §4.13）。
 // マスの大きさは呼び出し側から明示pxで受け取る（DESIGN.md §4.18.1・PHASE2.7.md §1.1）。
@@ -15,6 +16,7 @@ export function ZoneBundle({
   owner,
   zone,
   board,
+  mySeat,
   cardOf,
   imageUrlOf,
   dispatch,
@@ -31,6 +33,8 @@ export function ZoneBundle({
   owner: Seat
   zone: Extract<ZoneId, 'deck' | 'hand' | 'trash'>
   board: BoardState
+  /** デッキの一番上を隠すか（自分のデッキでも隠す）・ダブルクリックが1ドローになるかの判定用（PHASE5c.md §3・4） */
+  mySeat: Seat
   cardOf: (cardId: string) => PoolCard | undefined
   imageUrlOf: (cardId: string) => string | undefined
   dispatch: (action: BoardAction) => void
@@ -100,6 +104,7 @@ export function ZoneBundle({
         <HandFan
           list={list}
           board={board}
+          mySeat={mySeat}
           cardOf={cardOf}
           imageUrlOf={imageUrlOf}
           dispatch={dispatch}
@@ -123,6 +128,9 @@ export function ZoneBundle({
             onContextMenu={(x, y) => onCardContextMenu(list[0].iid, x, y)}
             selected={selectedIid === list[0].iid}
             size={size}
+            // 🚨 デッキの一番上は、古い盤面がfaceUp:trueで置いていても裏面を描く（PHASE5c.md §4）
+            hidden={zone === 'deck' ? hiddenFromViewer(list[0], mySeat) : undefined}
+            mySeat={mySeat}
           />
           <span className="pointer-events-none absolute -left-1 -top-1 rounded-full bg-surface-3 px-1 text-[8px] font-bold text-ink shadow">
             {list.length}
@@ -146,6 +154,7 @@ export function ZoneBundle({
 function HandFan({
   list,
   board,
+  mySeat,
   cardOf,
   imageUrlOf,
   dispatch,
@@ -157,6 +166,7 @@ function HandFan({
 }: {
   list: ReturnType<typeof cardsInZone>
   board: BoardState
+  mySeat: Seat
   cardOf: (cardId: string) => PoolCard | undefined
   imageUrlOf: (cardId: string) => string | undefined
   dispatch: (action: BoardAction) => void
@@ -206,6 +216,7 @@ function HandFan({
             onClick={() => onCardClick(inst.iid)}
             onContextMenu={(x, y) => onCardContextMenu(inst.iid, x, y)}
             hidden={hideContents}
+            mySeat={mySeat}
             selected={selectedIid === inst.iid}
             size={cardSize}
           />

@@ -6,6 +6,7 @@ import { ATTRS, type Attr } from '../../core/types'
 import type { PoolCard } from '../../data/types'
 import { modifierLabel } from './modifierLabel'
 import { newIid } from './useBoard'
+import { hiddenFromViewer } from './visibility'
 
 // 右クリックメニュー（DESIGN.md §4.17）。気力±・能力値修正・裏返す・付随カード・ゴミ箱等、
 // 中頻度の状態変化をここに集約する。旧 CardControls（固定右パネル）の中身をそのまま移設。
@@ -47,6 +48,10 @@ export function CardContextMenu({
   if (!instance) return null
   const card = cardOf(instance.cardId)
   const name = card?.name ?? instance.cardId
+  // 🚨 見出しの名前・気力・修正など「中身が分かる欄」は、非公開カードでは出さない（PHASE5c.md §4）。
+  // 待機↔消耗・表↔裏・ゴミ箱へ等の操作ボタン自体は残す（dispatchのcardNameは引き続き本当の名前でよい
+  // ＝ログ側のisPublicCardが隠す）。
+  const hidden = hiddenFromViewer(instance, mySeat)
   const mods = modifiersFor(board, iid)
   const baseMax = card?.kiryoku ?? null
   const max = maxKiryokuFor(instance.zone, baseMax)
@@ -72,7 +77,7 @@ export function CardContextMenu({
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-sm font-semibold text-ink">{name}</div>
+            <div className="text-sm font-semibold text-ink">{hidden ? '（非公開のカード）' : name}</div>
             <div className="text-[10px] text-ink-muted">
               {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
             </div>
@@ -99,7 +104,7 @@ export function CardContextMenu({
           </button>
         </div>
 
-        {board.mode === 'assist' && (
+        {board.mode === 'assist' && !hidden && (
           <button
             type="button"
             onClick={() => {
@@ -116,7 +121,7 @@ export function CardContextMenu({
           </button>
         )}
 
-        {baseMax !== null && (
+        {!hidden && baseMax !== null && (
           <section className="rounded border border-line-strong p-2">
             <div className="mb-1 flex items-center justify-between">
               <span className="font-semibold text-ink">気力</span>
@@ -159,6 +164,7 @@ export function CardContextMenu({
           </section>
         )}
 
+        {!hidden && (
         <section className="rounded border border-line-strong p-2">
           <div className="mb-1 font-semibold text-ink">能力値修正・攻防修正</div>
           {mods.length > 0 && (
@@ -284,7 +290,9 @@ export function CardContextMenu({
             </button>
           )}
         </section>
+        )}
 
+        {!hidden && (
         <section className="rounded border border-line-strong p-2">
           <div className="mb-1 font-semibold text-ink">付随カード（アイテム等）</div>
           {attachedItems.length > 0 && (
@@ -338,6 +346,7 @@ export function CardContextMenu({
             </div>
           )}
         </section>
+        )}
 
         <div className="mt-auto flex gap-2 border-t border-line pt-2">
           <button

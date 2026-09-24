@@ -437,6 +437,7 @@ export function Board({
       owner={owner}
       zone={zone}
       board={board}
+      mySeat={mySeat}
       cardOf={cardOf}
       imageUrlOf={imageUrlOf}
       dispatch={dispatch}

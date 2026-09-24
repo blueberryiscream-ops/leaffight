@@ -132,6 +132,15 @@ export function modifiersFor(state: BoardState, iid: string): Modifier[] {
 }
 
 /**
+ * ログに名前を出してよいか（PHASE5c.md §1）。手札は持ち主には見えるが相手には見えない＝
+ * ログは両者が読むので非公開扱い。デッキも常に非公開（自分でも一番上は知らない）。
+ * zone/faceUp だけを見るので、移動前後の仮の状態（`{ zone, faceUp }`）を渡しても使える。
+ */
+export function isPublicCard(c: Pick<CardInstance, 'zone' | 'faceUp'>): boolean {
+  return c.zone !== 'deck' && c.zone !== 'hand' && c.faceUp
+}
+
+/**
  * 表示能力値 = 素の値 + 有効な Modifier の合計（DESIGN.md §4.16）。
  * 🚨 kind==='能力値修正' だけを数える。攻防修正はここに入らない（攻防能力値の算出側で別に足す。§5.2・P3d-3）。
  */
@@ -227,6 +236,8 @@ export function moveCard(
   const fromOwner = card.owner
   const fromIndex = card.index
   const faceUp = resolveFaceUp(fromZone, args.toZone, card.faceUp)
+  // 移動前・後のどちらも非公開なら、ログに名前を出さない（PHASE5c.md §2）
+  const publicMove = isPublicCard(card) || isPublicCard({ zone: args.toZone, faceUp })
 
   let next = cloneBoard(state)
 
@@ -274,7 +285,10 @@ export function moveCard(
     }
   }
 
-  return { state: next, log: `${args.cardName} を ${ZONE_LABEL[fromZone]} から ${ZONE_LABEL[args.toZone]} へ移動した` }
+  const log = publicMove
+    ? `${args.cardName} を ${ZONE_LABEL[fromZone]} から ${ZONE_LABEL[args.toZone]} へ移動した`
+    : `カードを1枚 ${ZONE_LABEL[fromZone]} から ${ZONE_LABEL[args.toZone]} へ移動した`
+  return { state: next, log }
 }
 
 export function setOrientation(
@@ -285,9 +299,10 @@ export function setOrientation(
   if (!card) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, orientation: args.orientation }
+  const subject = isPublicCard(card) ? args.cardName : 'カード'
   return {
     state: next,
-    log: `${args.cardName} を ${args.orientation === 'rested' ? '消耗' : '待機'} にした`,
+    log: `${subject} を ${args.orientation === 'rested' ? '消耗' : '待機'} にした`,
   }
 }
 
@@ -306,7 +321,8 @@ export function setKiryoku(state: BoardState, args: { iid: string; value: number
   if (!card) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, kiryoku: args.value }
-  return { state: next, log: `${args.cardName} の気力を ${args.value} にした` }
+  const subject = isPublicCard(card) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} の気力を ${args.value} にした` }
 }
 
 export function adjustKiryoku(
@@ -320,7 +336,8 @@ export function adjustKiryoku(
   const after = Math.min(before + args.delta, args.max)
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, kiryoku: after }
-  return { state: next, log: `${args.cardName} の気力 ${before}→${after}` }
+  const subject = isPublicCard(card) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} の気力 ${before}→${after}` }
 }
 
 export function setFaceUp(state: BoardState, args: { iid: string; faceUp: boolean; cardName: string }): Result {
@@ -328,7 +345,11 @@ export function setFaceUp(state: BoardState, args: { iid: string; faceUp: boolea
   if (!card) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, faceUp: args.faceUp }
-  return { state: next, log: `${args.cardName} を ${args.faceUp ? '表' : '裏'} にした` }
+  // 表→裏は「前が公開」で名前を出してよい。裏→表も「後が公開」になるので出してよい
+  // （PHASE5c.md §2 🚨）。両方とも非公開のまま（例: 非公開ゾーンで裏のまま操作）のときだけ隠す
+  const publicChange = isPublicCard(card) || isPublicCard({ zone: card.zone, faceUp: args.faceUp })
+  const subject = publicChange ? args.cardName : 'カード'
+  return { state: next, log: `${subject} を ${args.faceUp ? '表' : '裏'} にした` }
 }
 
 /** バトルカードの未使用/使用済み（19-3）。PHASE3d-1.md §2。プレイヤーが直接叩く想定のsetterではなく、
@@ -338,7 +359,8 @@ export function setUsed(state: BoardState, args: { iid: string; used: boolean; c
   if (!card) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[card.iid] = { ...card, used: args.used }
-  return { state: next, log: `${args.cardName} を ${args.used ? '使用済み' : '未使用'} にした` }
+  const subject = isPublicCard(card) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} を ${args.used ? '使用済み' : '未使用'} にした` }
 }
 
 export function flip(state: BoardState, args: { iid: string; cardName: string }): Result {
@@ -353,7 +375,9 @@ export function addModifier(state: BoardState, args: { modifier: Modifier; cardN
   const statPart = args.modifier.stat
     ? `${args.modifier.stat}${(args.modifier.delta ?? 0) >= 0 ? '+' : ''}${args.modifier.delta ?? 0}`
     : (args.modifier.note ?? '')
-  return { state: next, log: `${args.cardName} に修正「${args.modifier.sourceLabel} ${statPart}」を追加した` }
+  const target = state.cards[args.modifier.targetIid]
+  const subject = !target || isPublicCard(target) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} に修正「${args.modifier.sourceLabel} ${statPart}」を追加した` }
 }
 
 export function removeModifier(state: BoardState, args: { modId: string; cardName: string }): Result {
@@ -361,7 +385,9 @@ export function removeModifier(state: BoardState, args: { modId: string; cardNam
   if (!mod) return { state, log: '' }
   const next = cloneBoard(state)
   delete next.modifiers[args.modId]
-  return { state: next, log: `${args.cardName} の修正「${mod.sourceLabel}」を消した` }
+  const target = state.cards[mod.targetIid]
+  const subject = !target || isPublicCard(target) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} の修正「${mod.sourceLabel}」を消した` }
 }
 
 export function clearModifiers(state: BoardState, args: { iid: string; scope?: ModScope; cardName: string }): Result {
@@ -373,7 +399,9 @@ export function clearModifiers(state: BoardState, args: { iid: string; scope?: M
     delete next.modifiers[id]
     count++
   }
-  return { state: next, log: `${args.cardName} の修正を ${count} 件クリアした` }
+  const target = state.cards[args.iid]
+  const subject = !target || isPublicCard(target) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} の修正を ${count} 件クリアした` }
 }
 
 /**
@@ -398,7 +426,10 @@ export function attach(state: BoardState, args: { itemIid: string; targetIid: st
   if (!item) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[item.iid] = { ...item, attachedTo: args.targetIid }
-  return { state: next, log: `${args.itemName} を ${args.targetName} に付けた` }
+  const target = state.cards[args.targetIid]
+  const itemSubject = isPublicCard(item) ? args.itemName : 'カード'
+  const targetSubject = !target || isPublicCard(target) ? args.targetName : 'カード'
+  return { state: next, log: `${itemSubject} を ${targetSubject} に付けた` }
 }
 
 export function detach(state: BoardState, args: { itemIid: string; itemName: string }): Result {
@@ -406,7 +437,8 @@ export function detach(state: BoardState, args: { itemIid: string; itemName: str
   if (!item) return { state, log: '' }
   const next = cloneBoard(state)
   next.cards[item.iid] = { ...item, attachedTo: null }
-  return { state: next, log: `${args.itemName} を取り外した` }
+  const subject = isPublicCard(item) ? args.itemName : 'カード'
+  return { state: next, log: `${subject} を取り外した` }
 }
 
 export function toTrash(state: BoardState, args: { iid: string; cardName: string }): Result {
@@ -423,7 +455,8 @@ export function removeCard(state: BoardState, args: { iid: string; cardName: str
   for (const [id, mod] of Object.entries(next.modifiers)) {
     if (mod.targetIid === card.iid) delete next.modifiers[id]
   }
-  return { state: next, log: `${args.cardName} を盤外に出した` }
+  const subject = isPublicCard(card) ? args.cardName : 'カード'
+  return { state: next, log: `${subject} を盤外に出した` }
 }
 
 /** シャッフル。乱数は呼び出し側が消費し、結果の並び（iid配列）だけを渡す（core純粋性のため） */
