@@ -330,8 +330,8 @@ function moveTo(
       }
     }
   }
-  const toIndex = to === 'deck' && opts.index === 'top' ? 0 : undefined
-  next = moveCard(next, { iid, toOwner: card.owner, toZone: to, toIndex, cardName: card.cardId }).state
+  // デッキの一番上＝index 0（-1 にしてから詰め直すと必ず先頭になる）
+  next = moveCard(next, { iid, toOwner: card.owner, toZone: to, toIndex: to === 'deck' && opts.index === 'top' ? -1 : undefined, cardName: card.cardId }).state
   const moved = next.cards[iid]
   if (moved) {
     const orientation = opts.orientation ?? (to === 'char' || to === 'leader' ? moved.orientation : 'ready')
