@@ -83,7 +83,14 @@ export function CardFace({
         >
           {card!.abilities.map((ab, i) => (
             <div key={i} className={i > 0 ? 'mt-0.5' : ''}>
-              {ab.header && <span className="font-semibold text-ink">{ab.header} </span>}
+              {ab.header && (
+                <span className="font-semibold text-ink">
+                  {ab.header}
+                  {(ab.auto || ab.cost) && (
+                    <span className="ml-1 font-normal text-ink-muted">{ab.auto ? '常時' : ab.cost}</span>
+                  )}{' '}
+                </span>
+              )}
               {ab.text}
             </div>
           ))}

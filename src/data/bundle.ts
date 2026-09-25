@@ -46,6 +46,16 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     throw new Error('pool.json にカードが入っていません。')
   }
 
+  // 旧バンドル（Ability.cost/auto・PoolCard.charTypes を持たない zip）の既定値の補い（PHASE-E0.md §4）。
+  // 新フィールドが無ければ既定値で補う: cost無し→''、auto無し→false、charTypes無し→[]
+  for (const card of cards) {
+    card.charTypes ??= []
+    for (const ability of card.abilities) {
+      ability.cost ??= ''
+      ability.auto ??= false
+    }
+  }
+
   const metaRaw = entries['meta.json']
   const meta: BundleMeta = metaRaw
     ? (JSON.parse(strFromU8(metaRaw)) as BundleMeta)

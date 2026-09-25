@@ -36,6 +36,11 @@ export type Stats = Record<Attr, number>
 /** カードの特殊能力。効果の解釈は人間が行う（DESIGN.md §5）ので、テキストのまま保持する */
 export interface Ability {
   header: string
+  /** 使用代償の元表記（'R'・'WG'・'R＋気力－１' 等）。無ければ ''（PHASE-E0.md §1） */
+  cost: string
+  /** 常時の印（原典表記の `Auto`）。使用代償ではないので cost には入れない */
+  auto: boolean
+  /** 本文だけ（先頭の使用代償・Auto・キャラタイプの行を除いた残り） */
   text: string
 }
 

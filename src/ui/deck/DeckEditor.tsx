@@ -23,7 +23,7 @@ const COST_LABEL: Record<CostKind, string> = { W: '白', R: '赤', L: '黄', T: 
 type Sort = 'kind' | 'name' | 'kiryoku'
 
 function abilityText(c: PoolCard): string {
-  return c.abilities.map((a) => a.header + a.text).join(' ')
+  return c.abilities.map((a) => a.header + a.cost + (a.auto ? '常時' : '') + a.text).join(' ')
 }
 
 export function DeckEditor({

@@ -85,6 +85,11 @@ export function DetailPanel({
             <div>
               <div className="text-sm font-semibold text-ink">{name}</div>
               <div className="text-[10px] text-ink-muted">{card?.kana}</div>
+              {card && card.charTypes.length > 0 && (
+                <div className="text-[10px] text-ink-muted">
+                  {card.charTypes.map((t) => `[${t}]`).join('')}
+                </div>
+              )}
               <div className="mt-0.5 text-[10px] text-ink-muted">
                 {card ? CARD_KIND_LABEL[card.kind] : ''} ・ {instance.owner === mySeat ? '自分' : '相手'} ・ {instance.zone}
               </div>
@@ -176,6 +181,9 @@ export function DetailPanel({
                     {ab.header && (
                       <div className="flex items-center gap-1.5 font-semibold text-ink">
                         {ab.header}
+                        {(ab.auto || ab.cost) && (
+                          <span className="text-[10px] font-normal text-ink-muted">{ab.auto ? '常時' : ab.cost}</span>
+                        )}
                         {anno && <span className="rounded bg-surface-3 px-1 py-0.5 text-[9px] font-normal text-ink-muted">{anno.type}</span>}
                       </div>
                     )}

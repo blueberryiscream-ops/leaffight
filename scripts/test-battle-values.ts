@@ -80,7 +80,7 @@ function boardWith(cards: CardInstance[], modifiers: Modifier[] = [], battle: ba
 {
   assertEqual(isBasicBattleCard(fakeCard({ battleAtk: '力', battleDef: '早', abilities: [] })), true, '1a: 力/早・abilities空 → true')
   assertEqual(
-    isBasicBattleCard(fakeCard({ battleAtk: '力', battleDef: '早', abilities: [{ header: 'h', text: 't' }] })),
+    isBasicBattleCard(fakeCard({ battleAtk: '力', battleDef: '早', abilities: [{ header: 'h', cost: '', auto: false, text: 't' }] })),
     false,
     '1b: 力/早・abilitiesあり → false',
   )
@@ -148,7 +148,7 @@ function boardWith(cards: CardInstance[], modifiers: Modifier[] = [], battle: ba
 {
   const cardOf = (cardId: string) =>
     cardId === 'bcard'
-      ? fakeCard({ id: 'bcard', battleAtk: '力', battleDef: '早', abilities: [{ header: 'h', text: 't' }] }) // テキストあり＝基本ではない
+      ? fakeCard({ id: 'bcard', battleAtk: '力', battleDef: '早', abilities: [{ header: 'h', cost: '', auto: false, text: 't' }] }) // テキストあり＝基本ではない
       : fakeCard({ id: cardId, kind: 'c', stats: { 力: 3, 早: 2, 賢: 0, 根: 0, 感: 0 } })
   const board = boardWith([
     card('bcard1', { owner: 'A', zone: 'battle', cardId: 'bcard' }),

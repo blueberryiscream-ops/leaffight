@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zipSync } from 'fflate'
+import { CHAR_TYPES, collectCharTypes, splitAbilities } from './lib/ability-split.mjs'
 
 // パスはスクリプト位置から導く。日本語パスを直書きしない（PHASE0 §10）。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -173,83 +174,35 @@ function extractSex(kind, cells) {
 }
 
 // ---------------------------------------------------------------------------
-// 能力の分割（PHASE-DB.md §3）。1つの abilities[] エントリ（header, text）に複数の能力
-// （常時＋起動 等）が連結されている（_local/効果自動化-調査.md §5.1）のを見出し行で分ける。
+// 能力の分割（PHASE-DB.md §3）と、使用代償/キャラタイプの分離（PHASE-E0.md §1-2）。
+// 実装は scripts/lib/ability-split.mjs（テストがimportできる純粋関数として分離）。
 //
-// 見出し行 = 能力名 + コスト。コストは W/R/G/L/T の記号列、Auto、'-'、気力－N（全角数字あり）、
-// または「このキャラをゴミ箱送りにする」のような文章のこともある（cards_v2.json の header
-// 実例579件から収集した語彙。card-data-fixes.md §Eの起動コスト一覧と一致）。
-//
-// 🚨 文字を1文字も失わないこと（build内で検査する）。トレイトタグ単独行（[ロボ]等）は
-// 能力とみなさず、直前の能力の本文に混ぜて保持する（種族タグ自体の抽出は §3 の別処理で行う）。
+// 🚨 文字を1文字も失わないこと（build内で検査する）。
 // ---------------------------------------------------------------------------
-const COST_RE_SRC =
-  '(?:[WRGLT]{1,6}(?![WRGLT])' +
-  '|Auto' +
-  '|気力[－ー-](?:[0-9０-９]+|任意の数|回復数|回複数)' +
-  '|このキャラを(?:ダウンさせる|ダウンする|ゴミ箱送りにする)' +
-  '|手札の(?:キャラクターカード|アイテムカード)１枚をゴミ箱送りにする' +
-  '|味方キャラ１体の気力[－ー-][0-9０-９]+' +
-  '|(?:味方リーダー|リーダー)の気力[－ー-][0-9０-９]+' +
-  '|対象のキャラを消耗状態にする' +
-  '|このキャラが装備しているアイテムカード１枚をゴミ箱送りにする。?' +
-  '|-)'
-const HEADING_RE = new RegExp('^([^\\n]{1,14}?)[\\s　]*(' + COST_RE_SRC + ')')
-
-/** raw header文字列 "名前 コスト" を name/cost に分ける */
-function splitHeaderLine(raw) {
-  const m = HEADING_RE.exec(raw)
-  if (m && m[0].length >= raw.length - 2) return { name: m[1].trim(), cost: m[2] }
-  const sp = raw.match(/^(\S+?)[\s　]+(\S+)$/)
-  if (sp) return { name: sp[1], cost: sp[2] }
-  return { name: raw, cost: '' }
-}
-
-/** 1つの abilities[] エントリを複数の能力に分割する。text にコストを畳み込む
- *  （Ability型は header/text のみ・src/core/types.ts は変更しない方針のため。HANDOFF参照） */
-function splitOneEntry(entry) {
-  const first = splitHeaderLine(entry.header || '')
-  const paragraphs = (entry.text || '')
-    .split(/\n[ 　]*\n+/)
-    .map((p) => p.trim())
-    .filter((p) => p !== '')
-
-  const result = [{ name: first.name, cost: first.cost, bodyParts: [] }]
-  const leadingTrait = []
-  let sawBody = false
-
-  for (const p of paragraphs) {
-    if (!sawBody && /^\[[^\]]{1,10}\]$/.test(p)) { leadingTrait.push(p); continue }
-    if (!sawBody) { result[0].bodyParts.push(p); sawBody = true; continue }
-    const m = HEADING_RE.exec(p)
-    if (m && m.index === 0) {
-      const rest = p.slice(m[0].length)
-      result.push({ name: m[1].trim(), cost: m[2], bodyParts: rest ? [rest] : [] })
-    } else {
-      result[result.length - 1].bodyParts.push(p)
-    }
-  }
-  if (leadingTrait.length) result[0].bodyParts.unshift(leadingTrait.join('\n\n'))
-
-  return result.map((a) => ({
-    header: a.name,
-    text: (a.cost ? a.cost : '') + (a.bodyParts.length ? (a.cost ? '\n' : '') + a.bodyParts.join('\n\n') : ''),
-  }))
-}
-
 const abilityCharLossExamples = []
-function splitAbilities(rawAbilities) {
-  const out = []
-  for (const entry of rawAbilities) {
-    const split = splitOneEntry(entry)
-    out.push(...split)
-    const before = ((entry.header || '') + (entry.text || '')).replace(/\s+/g, '')
-    const after = split.map((a) => a.header + a.text).join('').replace(/\s+/g, '')
-    if (before !== after) {
-      abilityCharLossExamples.push({ before: before.slice(0, 80), after: after.slice(0, 80) })
-    }
-  }
-  return out
+/** カードごとのキャラタイプ抽出結果を後段レポート用に集める（cardId -> string[]） */
+const charTypesByCard = new Map()
+/** cost/Auto/なしの件数集計（PHASE-E0 §5） */
+const costSplitStats = { withCost: 0, auto: 0, none: 0 }
+/** 統括が抜き取りで確かめる中間データ（_local/scratch/E0-cost-split.json） */
+const costSplitScratch = []
+
+function splitAbilitiesForCard(cardId, rawAbilities) {
+  const withTag = splitAbilities(rawAbilities, abilityCharLossExamples)
+  charTypesByCard.set(cardId, collectCharTypes(withTag))
+  return withTag.map((a) => {
+    if (a.auto) costSplitStats.auto++
+    else if (a.cost) costSplitStats.withCost++
+    else costSplitStats.none++
+    costSplitScratch.push({
+      cardId,
+      header: a.header,
+      cost: a.cost,
+      auto: a.auto,
+      text先頭20字: (a.text || '').slice(0, 20),
+    })
+    return { header: a.header, cost: a.cost, auto: a.auto, text: a.text }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +321,8 @@ for (const [key, printings] of groups) {
     sex,
     battleAtk,
     battleDef,
-    abilities: splitAbilities(content.abilities ?? []),
+    abilities: splitAbilitiesForCard(id, content.abilities ?? []),
+    charTypes: charTypesByCard.get(id) ?? [],
     illust: content.illust ?? '',
     cells: content.cells, // 生セル。絶対に落とさない
     image: null, // 次のステップで埋める
@@ -425,6 +379,45 @@ const addedIds = [...newIds].filter((id) => !oldIds.has(id))
 
 // _foldKey/_source は検証用途のみ。最終出力からは削る
 // _foldKey/_source/_imageSearchName は検証・画像突き合わせ専用。最終出力直前（zip書き出し前）に削る
+
+// ---------------------------------------------------------------------------
+// 2.5 エラッタの未反映を反映する（PHASE-E0.md §3-2）。
+//
+// _local/errata-overrides.json（無ければ空で続行）: [{ cardId, ability, from, to, source }]。
+// `from` はその能力（`ability` が空文字ならカードの全能力を通して）の text 中に
+// 🚨 ちょうど1回だけ現れることを確認してから置き換える。0回・2回以上ならビルドを失敗させる
+// （New一覧の本文が変わって前提が崩れたときに気づけるように）。
+// ---------------------------------------------------------------------------
+const errataOverridesPath = path.join(LOCAL, 'errata-overrides.json')
+const errataOverrides = fs.existsSync(errataOverridesPath) ? readJson(errataOverridesPath) : []
+let errataApplied = 0
+const errataErrors = []
+for (const ov of errataOverrides) {
+  const card = cards.find((c) => c.id === ov.cardId)
+  if (!card) {
+    errataErrors.push(`${ov.cardId}: カードが見つかりません`)
+    continue
+  }
+  const targets = ov.ability ? card.abilities.filter((a) => a.header === ov.ability) : card.abilities
+  const occurrences = targets.reduce((n, a) => n + (a.text.split(ov.from).length - 1), 0)
+  if (occurrences !== 1) {
+    errataErrors.push(
+      `${ov.cardId}${ov.ability ? '/' + ov.ability : ''}: from が ${occurrences} 回現れました（1回のはず）: ${ov.from.slice(0, 40)}`,
+    )
+    continue
+  }
+  for (const a of targets) {
+    if (a.text.includes(ov.from)) {
+      a.text = a.text.replace(ov.from, ov.to)
+      errataApplied++
+    }
+  }
+}
+if (errataErrors.length > 0) {
+  console.error('🚨 エラッタの反映に失敗しました（_local/errata-overrides.json を確認してください）:')
+  for (const e of errataErrors) console.error(`  ${e}`)
+  process.exit(1)
+}
 
 // ---------------------------------------------------------------------------
 // 4. 画像の紐付け（第1候補 tcg-db のスキャン画像、第2候補 駿河屋の実物写真、第3候補 X の実物写真）
@@ -583,6 +576,36 @@ if (fs.existsSync(annotationsPath)) {
 }
 
 // ---------------------------------------------------------------------------
+// 4.5.1 Ability.cost と起動ボタンの注釈(cost)の機械突き合わせ（PHASE-E0.md §1）。
+// 直さない。一致率と不一致の一覧だけレポートに出す。
+// ---------------------------------------------------------------------------
+const costAnnotationMismatches = []
+let costAnnotationChecked = 0
+let costAnnotationMatched = 0
+for (const [cardId, annAbilities] of Object.entries(annotations)) {
+  const card = cards.find((c) => c.id === cardId)
+  if (!card) continue
+  for (const ann of annAbilities) {
+    const ability = card.abilities.find((a) => a.header === ann.name)
+    if (!ability) continue // 分割の不一致8件（HANDOFF-DB参照・PHASE-E0ではやらない）
+    costAnnotationChecked++
+    const expectAuto = ann.type === '常時'
+    const match = expectAuto ? ability.auto === true : !ability.auto && ability.cost === ann.cost
+    if (match) costAnnotationMatched++
+    else {
+      costAnnotationMismatches.push({
+        cardId,
+        ability: ann.name,
+        annotationCost: ann.cost,
+        annotationType: ann.type,
+        dataCost: ability.cost,
+        dataAuto: ability.auto,
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 4.6. 割り込み（トリガー）の注釈（ユーザー校正済み54件。PHASE3c.md §1。annotations.jsonと同じ流儀）
 //
 // _local/interrupt-annotations.json（無ければ空で続行）を card.id キーのオブジェクトに変換する。
@@ -612,6 +635,7 @@ for (const c of cards) {
   if (c.kind !== 'c' && c.kind !== 't') continue
   for (const ab of c.abilities) {
     const matches = ((ab.header || '') + (ab.text || '')).match(/\[[^\]]{1,10}\]/g) || []
+    // PHASE-E0で先頭のキャラタイプ行はtextから抽出済み（この候補表は機械抽出の生の目安として残す）
     for (const m of matches) {
       const inner = m.slice(1, -1)
       if (/^[力早賢根感]+$/.test(inner)) continue // 属性修飾ブラケット
@@ -629,6 +653,23 @@ const traitMd =
   traitSorted.map(([tag, names]) => `| ${tag} | ${names.length} | ${[...new Set(names)].slice(0, 3).join(', ')} |`).join('\n') +
   '\n'
 fs.writeFileSync(path.join(LOCAL, '種族タグ候補.md'), traitMd)
+
+// ---------------------------------------------------------------------------
+// 4.9. キャラタイプ（PoolCard.charTypes・PHASE-E0.md §2）の件数と全件
+// ---------------------------------------------------------------------------
+const charTypeCards = new Map(CHAR_TYPES.map((t) => [t, []]))
+for (const c of cards) {
+  for (const t of c.charTypes) {
+    if (charTypeCards.has(t)) charTypeCards.get(t).push(`${c.name}(${c.id})`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4.10. 統括が抜き取りで確かめる中間データ（PHASE-E0.md §5）
+// ---------------------------------------------------------------------------
+const scratchDir = path.join(LOCAL, 'scratch')
+fs.mkdirSync(scratchDir, { recursive: true })
+fs.writeFileSync(path.join(scratchDir, 'E0-cost-split.json'), JSON.stringify(costSplitScratch, null, 1))
 
 for (const c of cards) { delete c._foldKey; delete c._source; delete c._imageSearchName }
 
@@ -689,6 +730,25 @@ console.log(
   `割り込みの注釈: ${Object.keys(interrupts).length} カード / ${Object.values(interrupts).reduce((n, a) => n + a.length, 0)} 件` +
     (fs.existsSync(interruptAnnotationsPath) ? '' : '（_local/interrupt-annotations.json が無いため空）'),
 )
+console.log('')
+console.log('========== PHASE-E0 レポート（使用代償・キャラタイプ・エラッタ） ==========')
+console.log(
+  `\n[§1] 使用代償の分け方: cost あり ${costSplitStats.withCost} / Auto(常時) ${costSplitStats.auto} / なし ${costSplitStats.none}（全 ${costSplitStats.withCost + costSplitStats.auto + costSplitStats.none} 能力）`,
+)
+console.log(
+  `[§1] 起動注釈との一致率: ${costAnnotationMatched} / ${costAnnotationChecked} (${costAnnotationChecked ? ((costAnnotationMatched / costAnnotationChecked) * 100).toFixed(1) : '-'}%)`,
+)
+console.log(`  不一致 ${costAnnotationMismatches.length} 件:`)
+for (const m of costAnnotationMismatches) {
+  console.log(`   ${m.cardId}/${m.ability}: 注釈cost=${JSON.stringify(m.annotationCost)}(${m.annotationType}) データ cost=${JSON.stringify(m.dataCost)} auto=${m.dataAuto}`)
+}
+console.log(`\n[§2] キャラタイプ件数（候補表 _local/種族タグ候補.md: 魔族8/ロボ7/鬼7/強化兵5/天使2）:`)
+for (const t of CHAR_TYPES) {
+  const names = charTypeCards.get(t)
+  console.log(`  ${t}: ${names.length} 件 — ${names.join(', ')}`)
+}
+console.log(`\n[§3] エラッタ反映: ${errataApplied} 件（_local/errata-overrides.json ${errataOverrides.length} 件中）`)
+console.log('\n========== PHASE-E0 レポートここまで ==========')
 console.log('')
 console.log(`出力: ${path.relative(ROOT, outPath)}  (${(fs.statSync(outPath).size / 1048576).toFixed(1)} MB)`)
 console.log(

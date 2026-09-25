@@ -102,7 +102,10 @@ export function CardTile({ card, imageUrl }: { card: PoolCard; imageUrl?: string
             {card.abilities.map((ab, i) => (
               <li key={i} className="text-[10px] leading-snug text-ink-muted">
                 {ab.header && (
-                  <span className="mr-1 font-semibold text-ink">{ab.header}</span>
+                  <span className="mr-1 font-semibold text-ink">
+                    {ab.header}
+                    {(ab.auto || ab.cost) && <span className="ml-1 font-normal">{ab.auto ? '常時' : ab.cost}</span>}
+                  </span>
                 )}
                 {ab.text}
               </li>

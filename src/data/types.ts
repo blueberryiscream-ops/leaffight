@@ -11,6 +11,8 @@ export interface PoolCard extends Card {
   image: string | null
   /** 性別（PHASE-DB.md §3）。cells から抽出。表示・判定にはまだ使わない（入れるだけ） */
   sex: '男性' | '女性' | ''
+  /** キャラタイプ（PHASE-E0.md §2）。'魔族'・'ロボ'・'鬼'・'強化兵'・'天使' の5値のみ。無ければ[] */
+  charTypes: string[]
 }
 
 /** ZIP内の meta.json */
