@@ -8,6 +8,7 @@ import * as board from './board'
 import type { BoardState, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 import * as priorityEngine from './priority'
 import type { DeclaredAction, Mode, Priority } from './priority'
+import { applyProc, type ProcAction, type ProcTrace } from './proc'
 
 export type BoardAction =
   | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId }
@@ -52,6 +53,8 @@ export type BoardAction =
   | { type: 'loopBackBattle' }
   | { type: 'applyBattleDamage'; damages: battleEngine.DamageInput[] }
   | { type: 'abortBattle'; reason: string }
+  // R2a: 原典の処理手順（core/proc.ts）。ゲストの操作もエンジンの自動処理もこの列になる（PHASE-R2a §2-1）
+  | ProcAction
 
 /**
  * 解決された宣言のカードを、どのゾーンへ送るか（PHASE3a-4.md §1-3）。
@@ -85,14 +88,14 @@ function resolvingAction(priority: Priority | null): DeclaredAction | null {
  * battleFlow.afterAction を通す（PHASE3d-2a §2-2「applyAction の最後で呼ぶ後処理」）。
  * battle が無ければ afterAction はほぼ何もしない（既存のテスト・通信経路への非回帰）。
  */
-export function applyAction(state: BoardState, action: BoardAction): board.Result {
+export function applyAction(state: BoardState, action: BoardAction): board.Result & { trace?: ProcTrace[] } {
   const core = applyActionCore(state, action)
   const flow = battleFlow.afterAction(state, core.state, action)
   if (!flow.log) return core
-  return { state: flow.state, log: core.log ? `${core.log}／${flow.log}` : flow.log }
+  return { state: flow.state, log: core.log ? `${core.log}／${flow.log}` : flow.log, trace: core.trace }
 }
 
-function applyActionCore(state: BoardState, action: BoardAction): board.Result {
+function applyActionCore(state: BoardState, action: BoardAction): board.Result & { trace?: ProcTrace[] } {
   switch (action.type) {
     case 'spawnCard':
       return board.spawnCard(state, action)
@@ -329,5 +332,7 @@ function applyActionCore(state: BoardState, action: BoardAction): board.Result {
       const { battle, log } = battleEngine.abortBattle(state.battle, action.reason)
       return { state: { ...state, battle }, log }
     }
+    default:
+      return applyProc(state, action)
   }
 }

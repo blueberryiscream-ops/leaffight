@@ -6,6 +6,7 @@
 import type { Attr } from './types'
 import type { Battle } from './battle'
 import type { Mode, Priority } from './priority'
+import type { CostToken, GameResult, Phase, ProcFrame, ProcMeta } from './proc'
 
 // 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
 // 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
@@ -77,6 +78,31 @@ export interface BoardState {
   battle: Battle | null
   /** 開始準備の状態（座席ごと）。PHASE5b.md §1-1 */
   setup: Record<Seat, SetupState | null>
+  // ── R2a（DESIGN §5.4 K1・PHASE-R2a §2）: 原典の処理手順。今の priority/battle とは独立（画面につなぐのは R2u）
+  /** 手順のスタック（空＝何も処理していない）。末尾＝今の手順 */
+  proc: ProcFrame[]
+  /** 手順の付帯状態（メインフェイズの窓・選択・連番・使用回数など） */
+  procMeta: ProcMeta
+  /** 手番（アクティブプレイヤー）とフェイズ。null＝未設定（今は priority.activePlayer で代用している） */
+  turn: { active: Seat; phase: Phase } | null
+  /** 確定したキャラのダウン数（9-2）。ダウン処理[3]で加えた分は[6]の後に確定する（H-12） */
+  downs: Record<Seat, number>
+  /** 発生済みのコスト（7-3） */
+  costs: Record<Seat, CostToken[]>
+  /** ゲームの結果（9）。null＝続いている */
+  result: GameResult | null
+}
+
+/** 手順の付帯状態の既定値（proc.ts と循環 import しないよう型だけ受け取り、値はここに置く） */
+export const EMPTY_PROC_META: ProcMeta = {
+  seq: 0,
+  base: null,
+  mainClosed: false,
+  choice: null,
+  answers: {},
+  used: {},
+  leaderLost: [],
+  aborted: [],
 }
 
 export const EMPTY_BOARD: BoardState = {
@@ -86,6 +112,12 @@ export const EMPTY_BOARD: BoardState = {
   mode: 'assist',
   battle: null,
   setup: { A: null, B: null },
+  proc: [],
+  procMeta: EMPTY_PROC_META,
+  turn: null,
+  downs: { A: 0, B: 0 },
+  costs: { A: [], B: [] },
+  result: null,
 }
 
 /**
@@ -94,7 +126,8 @@ export const EMPTY_BOARD: BoardState = {
  * `useBoard.ts` の読込処理と test-setup.ts の両方がこれを使う）。
  */
 export function fillBoardDefaults(saved: Partial<BoardState>): BoardState {
-  return { ...EMPTY_BOARD, ...saved }
+  // R2a で足した手順の状態も、古い保存盤面では既定値で補う（procMeta は欄ごとに補う）
+  return { ...EMPTY_BOARD, ...saved, procMeta: { ...EMPTY_PROC_META, ...(saved.procMeta ?? {}) } }
 }
 
 /**
@@ -162,11 +195,9 @@ export function maxKiryokuFor(zone: ZoneId, baseMax: number | null): number | nu
 
 function cloneBoard(state: BoardState): BoardState {
   return {
+    ...state,
     cards: { ...state.cards },
     modifiers: { ...state.modifiers },
-    priority: state.priority,
-    mode: state.mode,
-    battle: state.battle,
     setup: { ...state.setup },
   }
 }
@@ -561,6 +592,7 @@ export function startWithDeck(
   })
 
   const next: BoardState = {
+    ...state,
     cards,
     modifiers,
     priority: state.priority,

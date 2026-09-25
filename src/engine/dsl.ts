@@ -93,6 +93,7 @@ export type Expr =
   | { kiryoku: CardRef }
   | { count: Selector }
   | { eventAmount: 'damage' }    // 進行中のダメージの値
+  | { callCost: CardRef }        // 呼び出しコスト（印刷されたコストアイコンの数。R2a で足した・《恐怖の抱擁》）
   | { add: Expr[] }
   | { sub: [Expr, Expr] }
 
@@ -108,6 +109,9 @@ export type Cond =
   | { cmp: [Expr, '<' | '<=' | '==' | '>=' | '>', Expr] }
   | { pureAttrs: CardRef; side: 'atk' | 'def' | 'both' } // 用語【属性のみで構成された～】oldrule.txt:1250-1252
   | { exists: Selector }
+  // ── R2a で足した（HANDOFF-R2a「決めたこと」）
+  | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
+  | { targets: CardRef }                       // 進行中の宣言（イベントの役 declaredAction）がこのカードを対象にしている（《すっとぼけ》）
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -130,6 +134,9 @@ export interface Choice {
   count: [number, number]
   mode: 'target' | 'select'
   when: 'declare' | 'resolve' | 'apply'  // apply＝継続効果が適用される瞬間（装備した時など）
+  /** 選ぶときの優先（満たす候補があればその中から選ぶ）。対象の条件ではないので立ち消えの判定には使わない
+   *  （《マジカルサンダー》「相手プレイヤーが待機状態のキャラを優先的に選ぶ」FAQ:1995・1998。R2a で足した） */
+  prefer?: Cond
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -140,6 +147,7 @@ export type OtherCost =
   | { kiryoku: number; of?: CardRef }   // 「気力－N」。既定は能力を持つキャラ自身（8-3）
   | { kiryokuAny: true }                // 気力－任意
   | { trash: CardRef }                  // 「このキャラ／このアイテムをゴミ箱送りにする」
+  | { down: CardRef }                   // 「このキャラをダウンさせる」（《マルチ》受け渡し）。取り消されたら支払っていない（FAQ:2040）。R2a で足した
 
 export interface Cost {
   icons: CostIcon[]
@@ -191,6 +199,18 @@ export type Op =
   | { op: 'manual'; note: string }                                 // エンジンは扱わない。人が処理し、ログだけ残す
   /** ルールの穴の切り替え（holes.ts）で分岐する。未決で既定の無い穴なら manual に倒れる */
   | { op: 'hole'; id: HoleId; branches: Partial<Record<string, Op[]>> }
+  // ── R2a で足した（HANDOFF-R2a「決めたこと」。どれも原典の用語の一回きりの操作）
+  /** 同時処理（13-2）: 中の操作の順を AP が決める。中のダメージは同時に発生したダメージのまとまりになる（《不意打ち》FAQ:1600・《嫌がらせ》FAQ:1235） */
+  | { op: 'simul'; do: Op[] }
+  | { op: 'moveTo'; what: CardRef; to: 'hand' | 'deckTop' | 'deckBottom' }        // 手札に戻す・デッキの上／下に戻す（持ち主の）
+  | { op: 'swapZones'; player: PlayerRef }                                          // ゴミ箱のカードを混ぜてデッキと入れ替える（《輪廻》FAQ:1716）
+  | { op: 'shuffle'; player: PlayerRef }                                            // デッキをシャッフル（並びは呼び出し側が決める）
+  /** 「フィールドに出す」（呼び出しではない FAQ:3106）。orientation.asDeclared＝宣言した時点のそのカードの状態（FAQ:2298・3097）。
+   *  inheritFrom＝アイテムとダメージを引き継ぐ元 */
+  | { op: 'putOntoField'; what: CardRef; orientation: 'ready' | 'rested' | { asDeclared: CardRef }; inheritFrom?: CardRef }
+  | { op: 'cancelDown' }                                                            // 進行中のダウン（役 downedChar）を起こさない（「ダウンせずに」）
+  | { op: 'addDowns'; player: PlayerRef; n: number }                                // そのプレイヤーのダウン数を増やす（「相手プレイヤーは勝利条件を＋１」9-2-1）
+  | { op: 'setKiryoku'; who: CardRef; value: number }                               // 気力を N にする（ダメージでも気力の減少でもない FAQ:2516）
 
 // ───────────────────────────────────────────────────────────────
 // §7 継続効果（常時効果 12-2。エンジンは毎回「盤面＋継続効果の一覧」から現在値を導出する）
@@ -256,8 +276,8 @@ export type Ability =
   | { kind: 'static'; name?: string; effects: Continuous[] }
   /** 処理条件がある常時効果（12-2-1）。宣言しない・割り込み型アクションでもない。該当タイミングで自動で処理される */
   | { kind: 'conditional'; name?: string; trigger: Trigger; optional: boolean; effect: Op[] }
-  /** カード本体のプレイ（イベントの効果など）。16-1 の14段を通る */
-  | { kind: 'play'; cost?: Cost; speed: '通常型' | '割込型'; trigger?: Trigger; usableIf?: Cond; choices: Choice[]; effect: Op[] }
+  /** カード本体のプレイ（イベントの効果など）。16-1 の14段を通る。name は「次のうち１つ」の選択肢の名前（declare.option で選ぶ・R2a で足した） */
+  | { kind: 'play'; name?: string; cost?: Cost; speed: '通常型' | '割込型'; trigger?: Trigger; usableIf?: Cond; choices: Choice[]; effect: Op[] }
   /** DSL で書けない／書かない。エンジンは本文を出すだけ */
   | { kind: 'manual'; name?: string; reason: string }
 

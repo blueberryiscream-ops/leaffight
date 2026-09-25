@@ -7,6 +7,10 @@
 //   3. setup・steps・expect の中の ref がすべて setup で定義されている
 //   4. grade T なら setup・steps・expect がそろう／N・outOfPool なら whyNot がある
 //   5. holes の ID が src/engine/holes.ts にある
+//   6. 窓の指定（at）が原典の宣言の機会の段か（R2a）
+// 実行（R2a §3-3）: grade T のケースを setup → steps → drive → expect でエンジンに通す（scripts/lib/faq-run.ts）。
+//   ✅ 通った／❌ 期待と違う／保留（理由つき）。R2a の対象（_local/rules/faq/_r2a-scope.json）の ❌ は終了コード1。
+//   対象の外のケースも実行して記録するが、❌ は「参考」として保留に数える（R2b 以降の手順・記述の無いカードが多いため）。
 // _local/rules/faq が無い環境（公開リポジトリだけ）では 0件・スキップで成功する。
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -15,6 +19,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { unzipSync, strFromU8 } from 'fflate'
 import type { FaqCase, Step, Expect, CardSpec, BoardSpec } from '../src/engine/faqCase'
 import { HOLES } from '../src/engine/holes'
+import type { CardDef } from '../src/engine/dsl'
+import type { CardInfo, EngineCtx } from '../src/engine/ctx'
+import { parseCostText } from '../src/engine/cost'
+import { cardInfoOf, runCase, type CaseResult } from './lib/faq-run'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const faqDir = join(root, '_local', 'rules', 'faq')
@@ -33,10 +41,13 @@ const fail = (id: string, msg: string) => { failures++; console.error(`❌ ${id}
 const faqLines = existsSync(faqTxt) ? readFileSync(faqTxt, 'utf8').replace(/^﻿/, '').split(/\r\n|\n|\r/) : null
 if (!faqLines) console.warn('⚠ _local/oldfaq.txt が無いので確かめ1を飛ばす')
 let poolIds: Set<string> | null = null
+const cardInfos: Record<string, CardInfo> = {}
 if (existsSync(zipPath)) {
   const files = unzipSync(readFileSync(zipPath), { filter: (f) => f.name === 'pool.json' })
-  poolIds = new Set((JSON.parse(strFromU8(files['pool.json'])) as { id: string }[]).map((c) => c.id))
-} else console.warn('⚠ dist-data/leaffight-data.zip が無いので確かめ2を飛ばす')
+  const pool = JSON.parse(strFromU8(files['pool.json'])) as Parameters<typeof cardInfoOf>[0][]
+  poolIds = new Set(pool.map((c) => c.id))
+  for (const p of pool) cardInfos[p.id] = cardInfoOf(p)
+} else console.warn('⚠ dist-data/leaffight-data.zip が無いので確かめ2と実行を飛ばす')
 
 // ── ケースを読む
 const files = readdirSync(faqDir).filter((f) => f.endsWith('.ts')).sort()
@@ -178,5 +189,53 @@ console.log(`  concepts: ${JSON.stringify(concepts)}`)
 console.log(`  holes: ${JSON.stringify(holes)}`)
 console.log(`  note: ${notes.length}件`)
 console.log(`  保留（エンジン未実装）: ${pending.length}件`)
-if (failures) { console.error(`❌ 確かめ1〜5 の失敗: ${failures}件`); process.exit(1) }
-console.log('✅ 確かめ1〜5: 失敗 0件')
+if (failures) { console.error(`❌ 確かめ1〜6 の失敗: ${failures}件`); process.exit(1) }
+console.log('✅ 確かめ1〜6: 失敗 0件')
+
+// ── 実行（R2a §3-3）
+const cardsDir = join(root, '_local', 'rules', 'cards')
+const defs: Record<string, CardDef> = {}
+const defProblems: string[] = []
+if (existsSync(cardsDir)) {
+  for (const f of readdirSync(cardsDir).filter((f) => f.endsWith('.ts') && !f.startsWith('_')).sort()) {
+    const mod = (await import(pathToFileURL(join(cardsDir, f)).href)) as { def?: CardDef }
+    if (!mod.def) { defProblems.push(`${f}: export const def が無い`); continue }
+    defs[mod.def.id] = mod.def
+    // 記述の使用代償が、pool.json の元表記の読み取り（エンジンが実際に使う方）と一致するか
+    const info = cardInfos[mod.def.id]
+    if (!info) { defProblems.push(`${f}: pool.json に無い`); continue }
+    for (const ab of mod.def.abilities) {
+      if (ab.kind !== 'activated') continue
+      const printed = info.abilities.find((a) => a.header === ab.name)
+      if (!printed) { defProblems.push(`${f}: 能力「${ab.name}」が pool.json に無い`); continue }
+      const { cost, unknown } = parseCostText(printed.cost)
+      if (unknown.length || JSON.stringify(cost) !== JSON.stringify(ab.cost)) defProblems.push(`${f}: 「${ab.name}」の cost が元表記「${printed.cost}」の読み取りと違う`)
+    }
+  }
+}
+for (const p of defProblems) console.error(`❌ 記述: ${p}`)
+
+const scopePath = join(faqDir, '_r2a-scope.json')
+const scope = new Set<string>(existsSync(scopePath) ? (JSON.parse(readFileSync(scopePath, 'utf8')) as { ids: string[] }).ids : [])
+if (Object.keys(cardInfos).length) {
+  const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
+  const results: (CaseResult & { inScope: boolean })[] = []
+  for (const c of cases.filter((c) => c.grade === 'T')) {
+    const r = runCase(c, ctx)
+    const inScope = scope.has(c.id)
+    if (!inScope && r.verdict === '❌') {
+      r.verdict = '保留'
+      r.reasons.unshift('対象外（R2a の外）の参考実行で期待と違った')
+    }
+    results.push({ ...r, inScope })
+  }
+  const count = (xs: typeof results) => ({ total: xs.length, ok: xs.filter((r) => r.verdict === '✅').length, hold: xs.filter((r) => r.verdict === '保留').length, ng: xs.filter((r) => r.verdict === '❌').length })
+  const inS = results.filter((r) => r.inScope)
+  const missing = [...scope].filter((id) => !results.some((r) => r.id === id))
+  const summary = { scope: count(inS), outOfScope: count(results.filter((r) => !r.inScope)), scopeMissing: missing, okWithManual: inS.filter((r) => r.verdict === '✅' && r.manual.length).map((r) => r.id) }
+  writeFileSync(join(faqDir, '_r2a-result.json'), JSON.stringify({ generatedBy: 'scripts/test-faq.ts', summary, results }, null, 1) + String.fromCharCode(10))
+  console.log(`実行（R2a の対象 ${scope.size}件）: ✅ ${summary.scope.ok}／保留 ${summary.scope.hold}／❌ ${summary.scope.ng}${missing.length ? `／見つからない ${missing.length}` : ''}（✅ のうち manual を含む ${summary.okWithManual.length}）`)
+  console.log(`実行（対象の外・参考）: ✅ ${summary.outOfScope.ok}／保留 ${summary.outOfScope.hold}`)
+  for (const r of inS.filter((r) => r.verdict !== '✅')) console.log(`  ${r.verdict} ${r.id}: ${[...r.reasons, ...r.failures].join(' / ')}`)
+  if (summary.scope.ng || missing.length || defProblems.length) process.exit(1)
+} else console.log('実行: pool.json が無いのでスキップ')
