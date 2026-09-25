@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // src/core/ が ui/ net/ data/ や外部パッケージを import していないことを機械的に保証する。
+// src/engine/（ルールエンジン・DESIGN.md §5.4）も同じ扱い。ただし engine は core を import してよい。
 //
 // DESIGN.md §3:「core/ が ui/ や net/ を import することは禁止。これだけ守れば移植性は保たれる。」
 // レビュー観点として書くだけでは必ず破られるので、npm run build の最初に走らせる。
@@ -11,6 +12,13 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CORE = path.join(ROOT, 'src', 'core')
+const ENGINE = path.join(ROOT, 'src', 'engine')
+
+/** 層ごとに import してよいフォルダ */
+const LAYERS = [
+  { name: 'core', dir: CORE, allowed: [CORE] },
+  { name: 'engine', dir: ENGINE, allowed: [CORE, ENGINE] },
+]
 
 /** `from '...'` と副作用 import `import '...'` の両方を拾う */
 const SPECIFIER_RE = /(?:\bfrom\s*|(?:^|[;\n])\s*(?:import|export)\s*)['"]([^'"]+)['"]/g
@@ -32,7 +40,9 @@ if (!fs.existsSync(CORE)) {
 
 const violations = []
 
-for (const file of walk(CORE)) {
+for (const layer of LAYERS) {
+if (!fs.existsSync(layer.dir)) continue
+for (const file of walk(layer.dir)) {
   const src = fs.readFileSync(file, 'utf8')
   for (const m of src.matchAll(SPECIFIER_RE)) {
     const spec = m[1]
@@ -44,17 +54,19 @@ for (const file of walk(CORE)) {
       continue
     }
     const resolved = path.resolve(path.dirname(file), spec)
-    if (!resolved.startsWith(CORE + path.sep) && resolved !== CORE) {
-      violations.push(`${rel}: core/ の外 '${spec}' を import しています`)
+    const ok = layer.allowed.some((d) => resolved.startsWith(d + path.sep) || resolved === d)
+    if (!ok) {
+      violations.push(`${rel}: ${layer.name}/ から許されていない '${spec}' を import しています`)
     }
   }
 }
+}
 
 if (violations.length > 0) {
-  console.error('❌ core/ の分離が壊れています（DESIGN.md §3）:')
+  console.error('❌ core/・engine/ の分離が壊れています（DESIGN.md §3・§5.4）:')
   for (const v of violations) console.error('   ' + v)
   console.error('\n   core/ は純TypeScript。React・DOM・通信・Dexie に依存させないでください。')
   process.exit(1)
 }
 
-console.log('✅ core/ の分離OK（ui/ net/ data/ と外部パッケージへの import なし）')
+console.log('✅ core/・engine/ の分離OK（ui/ net/ data/ と外部パッケージへの import なし。engine→core は可）')
