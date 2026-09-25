@@ -37,7 +37,7 @@ export interface SideSpec {
   trash?: CardSpec[]
   deckTop?: CardSpec[]    // 上から順。残りは問わない
   downs?: number
-  costs?: { icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr: Attr }[] // 発生済みのコスト
+  costs?: { icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr }[] // 発生済みのコスト（attr 省略＝属性なし）
 }
 
 export interface BoardSpec {
@@ -49,10 +49,22 @@ export interface BoardSpec {
   battle?: { at: number; challenger: Side; battleCard?: string; participants?: Partial<Record<Side, string[]>> }
 }
 
+/** どの手順のどの段の窓か（原典の段番号）。省略時は「その宣言が合法になる最初の窓」（R1 の約束） */
+export interface WindowRef {
+  proc: 'ability' | 'event' | 'item' | 'field' | 'battleCard' | 'damage' | 'down' | 'battle' | 'phase'
+  step: number   // ability=15-13-1・event=16-1・item=17-3・field=18-2・battleCard=19-2・damage=15-4-2・down=15-5-1・battle=20-4 の [n]
+}
+
 /** 操作の列。force は状況を作るだけの出来事（DSL の Op をそのまま使う） */
 export type Step =
-  | { declare: { by: Side; source: string; ability?: string; targets?: string[] } }
-  | { pass: Side }
+  | { declare: { by: Side; source: string; ability?: string; targets?: string[]; at?: WindowRef
+      /** 15-13-1[4] 支払い方法の宣言（消耗させるキャラ・捨てる手札など ref の列） */
+      payWith?: string[]
+      /** 宣言時に選ぶ選択肢（バニッシュのどれか・回復する数など） */
+      option?: string } }
+  | { generateCost: { by: Side; source: string; icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr; at?: WindowRef } }
+  | { advancePhase: { to: 'エントリー' | 'メイン' | '終了' | '手札調整' | 'ターン終了' } }
+  | { pass: Side | { side: Side; at?: WindowRef } }
   | { choose: { by: Side; pick: string[] | string } }
   | { answer: { by: Side; accept: boolean } }
   | { challenge: { by: Side; participant: string; battleCard?: string } }
@@ -61,7 +73,13 @@ export type Step =
 /** FAQ の答えに書いてある結果だけ */
 export type Expect =
   | { kiryoku: [ref: string, value: number] }
-  | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'gone'] }
+  | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'gone', owner?: Side] }
+  /** steps の index 番目の宣言が立ち消え（11-4）た */
+  | { fizzled: { step: number } }
+  /** 発生済みのコストの数（その側） */
+  | { costs: [side: Side, count: number] }
+  /** バトル種目になったバトルカード */
+  | { battleCard: string }
   | { ready: [ref: string, ready: boolean] }
   | { stat: [ref: string, attr: Attr, value: number] }
   | { downs: [side: Side, value: number] }

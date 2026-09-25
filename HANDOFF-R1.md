@@ -75,3 +75,11 @@ note は 8件（10件以下）。種類:
 ## コミット
 - 親リポジトリ: （このファイルと同じコミット。ハッシュは最後の返答に書く）— `scripts/test-faq.ts`・`package.json`・`HANDOFF-R1.md`
 - `_local/rules/`: 28087c1（62件）→ 04bc84a（96件）→ ef5eb4f（131件）→ 7bc6dd7（183件・README）
+
+## 統括の検証（統括10・2026-09-25）
+- `npm run verify` 緑・`test:faq` 183件・確かめ1〜5 ❌0 を統括が自分で実行。grade 別・concepts・holes の数は報告と一致。`_local/rules/` のコミット 4件を確認
+- 抜き取り: faq-1800（H-12 の核・答えの「相手の負け」だけを期待）・faq-123（フィルスソード×放棄）・faq-3083（対戦ゲー）。後の2件は「効果が出なかった」を気力の値で確かめており、値は本文どおりの計算（保科 放棄＝気力−2／対戦ゲーム 早−賢: 玲子へ4−2＝2・たまへ2−1＝1）を統括が pool.json で再計算して一致
+- NH-1 の根拠（FAQ:3263・3217・2263・1351・4110）を原典で確認 → **H-7b を「利用者に確認中」に戻した**（DESIGN §5.3・holes.ts）。NH-2 は **H-13**（仮の既定＝元の受け手の対戦キャラ）
+- 副産物のカードデータ: 受け渡し・心の世界の「このキャラをダウンさせる／ゴミ箱送りにする」は使用代償（olderatta.txt:739・oldfaq.txt:3103）→ `build-data-bundle.mjs` の `COST_IN_TEXT` で本文から cost へ移した（`R＋このキャラをダウンさせる`・`RW＋このキャラをゴミ箱送りにする`）。zip で確認。⚠️利用者・友人は新しい zip を読み直す
+- 型に足した（`src/engine/faqCase.ts`）: `declare.at`（WindowRef＝手順と段番号）・`declare.payWith`・`declare.option`・`generateCost`・`advancePhase`・`pass` の窓指定・`costs.attr` を省略可・期待 `fizzled`・`costs`・`battleCard`・`zone` の持ち主。**note 8件と、窓の指定で T? にした 2565・2568・2571・949 などを新しい形に直すのは R2 の最初にやる**（実行器の ref の確かめも新しい欄に広げる）
+- 未検証: 長蛇の列・廃品回収の本文と FAQ の食い違い（「手札に戻す」vs「デッキの上/下」）はエラッタの記録が無い。R4 でカードを書くときに確かめる

@@ -187,8 +187,27 @@ const costSplitStats = { withCost: 0, auto: 0, none: 0 }
 /** 統括が抜き取りで確かめる中間データ（_local/scratch/E0-cost-split.json） */
 const costSplitScratch = []
 
+/**
+ * 本文の1行目に残っている使用代償（R1 で発見・統括10が確認）。元の表記では使用代償の欄にあるが、
+ * データでは本文の頭に入っている。本文から外して cost に「＋」でつなぐ（`R＋気力－１` と同じ書き方）。
+ * 根拠: olderatta.txt:737-739「使用代償：R　このキャラをゴミ箱送りにする」（受け渡しの原文）・
+ *       oldfaq.txt:3103「使用代償を支払った時点で、フィールドからリーダーキャラクターが失われた」（心の世界）
+ */
+const COST_IN_TEXT = [
+  { cardId: 'c_マルチ', header: '受け渡し', line: 'このキャラをダウンさせる' },
+  { cardId: 'c_牧部なつみ', header: '心の世界', line: 'このキャラをゴミ箱送りにする' },
+]
+const costInTextApplied = []
+
+function moveCostOutOfText(cardId, a) {
+  const fix = COST_IN_TEXT.find((f) => f.cardId === cardId && f.header === a.header)
+  if (!fix || !(a.text || '').startsWith(fix.line + '\n')) return a
+  costInTextApplied.push(`${cardId}/${a.header}`)
+  return { ...a, cost: a.cost ? `${a.cost}＋${fix.line}` : fix.line, text: a.text.slice(fix.line.length + 1) }
+}
+
 function splitAbilitiesForCard(cardId, rawAbilities) {
-  const withTag = splitAbilities(rawAbilities, abilityCharLossExamples)
+  const withTag = splitAbilities(rawAbilities, abilityCharLossExamples).map((a) => moveCostOutOfText(cardId, a))
   charTypesByCard.set(cardId, collectCharTypes(withTag))
   return withTag.map((a) => {
     if (a.auto) costSplitStats.auto++
@@ -735,6 +754,8 @@ console.log('========== PHASE-E0 レポート（使用代償・キャラタイ�
 console.log(
   `\n[§1] 使用代償の分け方: cost あり ${costSplitStats.withCost} / Auto(常時) ${costSplitStats.auto} / なし ${costSplitStats.none}（全 ${costSplitStats.withCost + costSplitStats.auto + costSplitStats.none} 能力）`,
 )
+console.log(`[§1] 本文から使用代償へ移した行: ${costInTextApplied.length}/${COST_IN_TEXT.length} 件 ${costInTextApplied.join('・')}`)
+if (costInTextApplied.length !== COST_IN_TEXT.length) throw new Error('COST_IN_TEXT の一部が当たらなかった（本文が変わった？）')
 console.log(
   `[§1] 起動注釈との一致率: ${costAnnotationMatched} / ${costAnnotationChecked} (${costAnnotationChecked ? ((costAnnotationMatched / costAnnotationChecked) * 100).toFixed(1) : '-'}%)`,
 )
