@@ -3,7 +3,8 @@
  */
 
 import type { BoardState } from '../core/board'
-import { STEP_TIMINGS, findFrame, type ProcFrame } from '../core/proc'
+import { STEP_TIMINGS, activeSeat, findFrame, type ProcFrame } from '../core/proc'
+import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
 import { evalCond, resolveRef } from './eval'
@@ -70,10 +71,15 @@ export function conditionalHits(ctx: EngineCtx, state: BoardState, frame: ProcFr
     if (!def) continue
     def.abilities.forEach((ab, index) => {
       if (ab.kind !== 'conditional') return
-      const you = controllerOf(state, c.iid) ?? c.owner
-      const env: Env = { self: c.iid, you, slots: {}, trigger: frame.id, declId: null, declared: {} }
-      if (!triggerMatches(ctx, state, env, ab.trigger, frame)) return
-      out.push({ iid: c.iid, index, ab, env, key: `${c.iid}#${index}` })
+      // フィールドカードの「お互いの」効果（eachPlayer）は AP→NAP の順にそれぞれのプレイヤーのものとして処理する（18-1・FAQ:4105）
+      const ap = activeSeat(state)
+      const seats: (Seat | null)[] = ab.eachPlayer ? [ap, ap === 'A' ? 'B' : 'A'] : [null]
+      for (const seat of seats) {
+        const you = seat ?? controllerOf(state, c.iid) ?? c.owner
+        const env: Env = { self: c.iid, you, slots: {}, trigger: frame.id, declId: null, declared: {} }
+        if (!triggerMatches(ctx, state, env, ab.trigger, frame)) continue
+        out.push({ iid: c.iid, index, ab, env, key: seat ? `${c.iid}#${index}@${seat}` : `${c.iid}#${index}` })
+      }
     })
   }
   return out
@@ -85,13 +91,13 @@ function zoneRank(zone: string, attachedTo: string | null): number {
 }
 
 /** K10: 条件を満たさなくなった効果を読み飛ばす。項目の処理を始めるときに《〜とき》をもう一度確かめる */
-export function stillMatches(ctx: EngineCtx, state: BoardState, iid: string, index: number, triggerId: string): boolean {
+export function stillMatches(ctx: EngineCtx, state: BoardState, iid: string, index: number, triggerId: string, seat?: Seat): boolean {
   const frame = findFrame(state, triggerId)
   const c = state.cards[iid]
   if (!frame || !c || !sourceActive(state, iid)) return false
   if (frame.kind === 'down' && frame.down?.canceled) return false
   const ab = ctx.defs[c.cardId]?.abilities[index]
   if (!ab || ab.kind !== 'conditional') return false
-  const you = controllerOf(state, iid) ?? c.owner
+  const you = seat ?? controllerOf(state, iid) ?? c.owner
   return triggerMatches(ctx, state, { self: iid, you, slots: {}, trigger: triggerId, declId: null, declared: {} }, ab.trigger, frame)
 }

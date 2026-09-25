@@ -103,6 +103,9 @@ export const EMPTY_PROC_META: ProcMeta = {
   used: {},
   leaderLost: [],
   aborted: [],
+  mods: [],
+  battles: [],
+  phaseRun: null,
 }
 
 export const EMPTY_BOARD: BoardState = {

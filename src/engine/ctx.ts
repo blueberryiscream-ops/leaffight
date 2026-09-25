@@ -21,6 +21,10 @@ export interface CardInfo {
   attr: string
   /** 能力の使用代償の元表記（E0 で分けたもの。'R＋気力－１' など） */
   abilities: { header: string; cost: string }[]
+  /** バトルカードの攻撃属性・防御属性（印刷。'力' など）と分類（'屋内'・'屋外'）。R2b */
+  battleAtk?: string
+  battleDef?: string
+  place?: string
 }
 
 export interface EngineCtx {

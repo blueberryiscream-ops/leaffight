@@ -9,13 +9,20 @@
 //  - pass はその席の番の窓まで進めて見送る。choose はその席の選択が来るまで進めて答える
 //  - steps に無い窓は見送り、steps に無い選択は既定で答える（順＝並びのまま・使うか＝使う・選ぶ＝先頭から）
 //  - 盤面に書いていないデッキは、結果に影響しないカード20枚で埋める（ボーナスドローでデッキ切れにしないため）
+// R2b で足した約束（HANDOFF-R2b「決めたこと」F10〜）:
+//  - setup.battle は core の startBattleAt で [at] から始める（参加キャラ・バトルカードは決まっているもの）
+//  - challenge は「バトルを行うアクションの宣言」（メインフェイズの窓）。participant・battleCard は [7][16] の選択の答えに使う
+//  - 窓で相手の番に、今の step の席がその窓で宣言できなかった（見送った）とき、続く step のうち相手の宣言がその窓で合法ならそれを先に行う。
+//    選択も、相手の選択が来たら続く step のうちその席の choose で選択肢に合うものを先に使う（steps の並びと処理の順が違うケース）
+//  - choose の選択が最後まで来なかったら「その選択はできない」（合法でない）。core が答えを受け付けなかったら合法でない
+//  - 期待の at は「その手順がその段以降で最初に止まった点」の盤面で確かめる。zone 'field' はバトルカード・フィールドカードの置き場も含む
 
 import type { BoardAction } from '../../src/core/actions'
 import { EMPTY_BOARD, type BoardState, type CardInstance, type Seat, type ZoneId } from '../../src/core/board'
-import { awaitingSeat, currentWindow, type ProcFrame, type ProcTrace } from '../../src/core/proc'
+import { awaitingSeat, currentWindow, startBattleAt, type ProcFrame, type ProcTrace } from '../../src/core/proc'
 import { applyAction } from '../../src/core/actions'
 import type { CardInfo, EngineCtx } from '../../src/engine/ctx'
-import { declare, drive, forceOp } from '../../src/engine/drive'
+import { currentStat, declare, drive, forceOp } from '../../src/engine/drive'
 import type { BoardSpec, CardSpec, Expect, FaqCase, Side, Step, WindowRef } from '../../src/engine/faqCase'
 
 export type Verdict = '✅' | '❌' | '保留'
@@ -75,13 +82,19 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
     downs[seat] = s.downs ?? 0
     costs[seat] = (s.costs ?? []).map((c, i) => ({ id: `init${seat}${i}`, icon: c.icon, attrs: c.attr ? [c.attr] : [], frameId: null }))
   }
-  const state: BoardState = {
+  let state: BoardState = {
     ...EMPTY_BOARD,
     cards,
     mode: 'assist',
     turn: { active: seatOf(spec.active), phase: spec.phase ?? 'メイン' },
     downs,
     costs,
+  }
+  if (spec.battle) {
+    const bt = spec.battle
+    const participants: Partial<Record<Seat, string[]>> = {}
+    for (const side of ['you', 'opponent'] as Side[]) if (bt.participants?.[side]) participants[seatOf(side)] = bt.participants[side]!
+    state = startBattleAt(state, { challenger: seatOf(bt.challenger), at: bt.at, participants, battleCard: bt.battleCard ?? null })
   }
   return { state, refs }
 }
@@ -95,6 +108,19 @@ interface Run {
   warnings: string[]
   steps: { legal?: boolean; reason?: string; declId?: string; consumed: boolean }[]
   pending: string[]
+  /** challenge の participant・battleCard（[7][16] の選択の答えに使う） */
+  intent: Partial<Record<Seat, { participant?: string; battleCard?: string }>>
+  /** 期待の at: 最初に止まった点の盤面 */
+  snaps: { at: WindowRef; state: BoardState | null }[]
+  /** 全 steps（先に使う＝lookahead のため） */
+  all: Step[]
+}
+
+function snap(run: Run) {
+  for (const sn of run.snaps) {
+    if (sn.state) continue
+    if (run.state.proc.some((f) => f.kind === sn.at.proc && f.step >= sn.at.step)) sn.state = run.state
+  }
 }
 
 function apply(run: Run, a: BoardAction): boolean {
@@ -103,6 +129,7 @@ function apply(run: Run, a: BoardAction): boolean {
   run.state = r.state
   run.actions.push(a)
   if (r.trace) run.trace.push(...r.trace)
+  snap(run)
   return true
 }
 
@@ -112,6 +139,17 @@ function driveRun(run: Run) {
   run.actions.push(...d.actions)
   run.trace.push(...d.trace)
   run.warnings.push(...d.warnings)
+  snap(run)
+}
+
+/** 割り振り（repeat）の既定: 上限の中で先頭から */
+function defaultRepeat(ch: NonNullable<BoardState['procMeta']['choice']>): string[] {
+  const pick: string[] = []
+  for (const o of ch.options) {
+    const cap = ch.caps?.[o.key] ?? ch.max
+    for (let i = 0; i < cap && pick.length < ch.min; i++) pick.push(o.key)
+  }
+  return pick
 }
 
 /** 入力が要る点で既定の入力を1つ入れる（窓は見送る・選択は既定で答える）。何もできなければ false */
@@ -121,10 +159,14 @@ function autoStep(run: Run): boolean {
   const ch = s.procMeta.choice
   if (ch) {
     let pick: string[] = []
-    if (ch.kind === 'use') pick = ch.options.slice(0, 1).map((o) => o.key)
+    const intent = run.intent[ch.by]
+    const want = ch.purpose === 'battleParticipant' ? intent?.participant : ch.purpose === 'battleCard' ? intent?.battleCard : undefined
+    if (want && ch.options.some((o) => o.key === (run.refs[want] ?? want))) pick = [run.refs[want] ?? want]
+    else if (ch.repeat) pick = defaultRepeat(ch)
+    else if (ch.kind === 'use') pick = ch.options.slice(0, 1).map((o) => o.key)
     else if (ch.kind === 'select') pick = ch.options.slice(0, Math.min(ch.max, Math.max(ch.min, 1))).map((o) => o.key)
-    run.warnings.push(`選択を既定で答えた: ${ch.prompt} → ${pick.join('・') || '（なし）'}`)
-    apply(run, { type: 'procChoose', id: ch.id, pick })
+    if (!want) run.warnings.push(`選択を既定で答えた: ${ch.prompt} → ${pick.join('・') || '（なし）'}`)
+    if (!apply(run, { type: 'procChoose', id: ch.id, pick })) return false
     driveRun(run)
     return true
   }
@@ -139,21 +181,98 @@ function autoStep(run: Run): boolean {
   return run.state !== before
 }
 
+const PROC_OF: Record<WindowRef['proc'], string[]> = {
+  ability: ['ability'],
+  event: ['event'],
+  item: ['equip'],
+  field: ['field'],
+  battleCard: ['battleCard'],
+  damage: ['damage'],
+  down: ['down'],
+  battle: ['battle'],
+  phase: ['entry', 'handAdjust', 'turnEnd'],
+}
+
 function atMatches(frame: ProcFrame | null, at: WindowRef | undefined): boolean {
   if (!at) return true
   if (!frame) return at.proc === 'phase'
-  return frame.kind === at.proc && frame.step === at.step
+  return PROC_OF[at.proc].includes(frame.kind) && frame.step === at.step
 }
 
 function mapPick(run: Run, pick: string[] | string): string[] {
   return (Array.isArray(pick) ? pick : [pick]).map((p) => run.refs[p] ?? p)
 }
 
-function doDeclare(run: Run, i: number, req: { by: Side; source: string; ability?: string; targets?: string[]; at?: WindowRef; payWith?: string[]; option?: string; costGen?: boolean }) {
+/** メインフェイズの窓がまだ回っている（手順が空でも「手順が終わった」ではない）。
+ *  開き直した新しい窓（まだ誰も宣言していない AP の番）は「回っている」に入れない＝手順が全部終わった */
+function baseOpen(s: BoardState): boolean {
+  const b = s.procMeta.base
+  if (!b || b.state === 'closed') return false
+  return !(b.state === 'awaitActive' && !b.active && !b.nonActive)
+}
+
+type DeclReq = { by: Side; source: string; ability?: string; targets?: string[]; at?: WindowRef; payWith?: string[]; option?: string; costGen?: boolean; battle?: boolean }
+
+function declReqOf(step: Step): DeclReq | null {
+  if ('declare' in step) return step.declare
+  if ('challenge' in step) return { by: step.challenge.by, source: step.challenge.participant, battle: true }
+  return null
+}
+
+/** その窓で宣言を試す（合法なら行う）。行ったら宣言の id を返す */
+function tryDeclare(run: Run, req: DeclReq): { ok: true; declId: string } | { ok: false; reason: string; stop?: string } {
+  const s = run.state
+  const out = declare(s, run.ctx, {
+    by: seatOf(req.by),
+    source: run.refs[req.source] ?? req.source,
+    ability: req.ability,
+    targets: req.targets?.map((t) => run.refs[t] ?? t),
+    payWith: req.payWith?.map((t) => run.refs[t] ?? t),
+    option: req.option,
+    costGen: req.costGen,
+    battle: req.battle,
+  })
+  if (out.ok) {
+    run.warnings.push(...out.warnings)
+    out.actions.forEach((a) => apply(run, a))
+    driveRun(run)
+    return { ok: true, declId: out.decl.id }
+  }
+  if (out.missingDef || out.manual) return { ok: false, reason: out.reason, stop: out.missingDef ? `記述の無いカード: ${out.reason}` : `manual の能力: ${out.reason}` }
+  return { ok: false, reason: out.reason }
+}
+
+/** 相手の番の窓で、続く step（宣言・選択の並び）の相手の宣言をこの窓で先に行えるか（F10） */
+function lookaheadDeclare(run: Run, i: number, seat: Seat): boolean {
+  for (let j = i + 1; j < run.all.length; j++) {
+    const st = run.all[j]
+    if (run.steps[j]?.consumed) continue
+    if (!('declare' in st) && !('choose' in st) && !('pass' in st)) return false
+    const req = declReqOf(st)
+    if (!req || seatOf(req.by) !== seat) continue
+    const w = currentWindow(run.state)
+    if (!w || !atMatches(w.frame, req.at)) return false
+    const r = tryDeclare(run, req)
+    if (r.ok) {
+      run.steps[j] = { legal: true, declId: r.declId, consumed: true }
+      return true
+    }
+    return false
+  }
+  return false
+}
+
+function doDeclare(run: Run, i: number, req: DeclReq) {
   const by = seatOf(req.by)
-  const snap = { state: run.state, actions: run.actions.length, trace: run.trace.length, warnings: run.warnings.length }
+  const snapState = { state: run.state, actions: run.actions.length, trace: run.trace.length, warnings: run.warnings.length }
   let sawProc = run.state.proc.length > 0
   let lastReason = '宣言できる窓が無かった'
+  /** この窓（フレームと段）で今の step の席が宣言できずに見送った */
+  let refusedAt: string | null = null
+  const winKey = () => {
+    const w = currentWindow(run.state)
+    return w ? `${w.frame?.id ?? 'base'}:${w.frame?.step ?? 0}:${run.state.procMeta.seq}` : ''
+  }
   for (let guard = 0; guard < 600; guard++) {
     const s = run.state
     if (s.result) {
@@ -161,46 +280,39 @@ function doDeclare(run: Run, i: number, req: { by: Side; source: string; ability
       break
     }
     if (s.procMeta.choice) {
-      autoStep(run)
+      if (!lookaheadChoose(run, i, s.procMeta.choice.by) && !autoStep(run)) break
       continue
     }
     // 手順の中を探していて、手順が全部終わった＝ここまでに宣言できる窓が無かった
-    if (sawProc && s.proc.length === 0) break
+    if (sawProc && s.proc.length === 0 && !baseOpen(s)) break
     const w = currentWindow(s)
     const seat = awaitingSeat(s)
     if (w && seat === by && atMatches(w.frame, req.at)) {
-      const out = declare(s, run.ctx, {
-        by,
-        source: run.refs[req.source] ?? req.source,
-        ability: req.ability,
-        targets: req.targets?.map((t) => run.refs[t] ?? t),
-        payWith: req.payWith?.map((t) => run.refs[t] ?? t),
-        option: req.option,
-        costGen: req.costGen,
-      })
-      if (out.ok) {
-        run.warnings.push(...out.warnings)
-        out.actions.forEach((a) => apply(run, a))
-        driveRun(run)
-        run.steps[i] = { legal: true, declId: out.decl.id, consumed: true }
+      const r = tryDeclare(run, req)
+      if (r.ok) {
+        run.steps[i] = { legal: true, declId: r.declId, consumed: true }
         return
       }
-      if (!out.ok && (out.missingDef || out.manual)) {
-        run.pending.push(out.missingDef ? `記述の無いカード: ${out.reason}` : `manual の能力: ${out.reason}`)
-        run.steps[i] = { reason: out.reason, consumed: false }
+      if (r.stop) {
+        run.pending.push(r.stop)
+        run.steps[i] = { reason: r.reason, consumed: false }
         return
       }
-      lastReason = out.reason
+      lastReason = r.reason
       // メインフェイズの窓で宣言できない通常型は、ここが唯一の機会＝合法でない。割込型はこの窓の行動の処理の中を探す
-      if (!w.frame && !out.reason.startsWith('割込型の使用タイミングでない')) break
+      if (!w.frame && !r.reason.startsWith('割込型の使用タイミングでない')) break
+      refusedAt = `${w.frame?.id ?? 'base'}:${w.frame?.step ?? 0}`
     }
     if (w && seat) {
+      const key = `${w.frame?.id ?? 'base'}:${w.frame?.step ?? 0}`
+      if (seat !== by && refusedAt === key && lookaheadDeclare(run, i, seat)) continue
+      void winKey
       apply(run, { type: 'procPass', by: seat })
       driveRun(run)
       sawProc ||= run.state.proc.length > 0
       continue
     }
-    if (run.state.proc.length === 0) {
+    if (run.state.proc.length === 0 && !baseOpen(run.state)) {
       // 手順が全部終わった（ここまでに窓が無ければ合法でない）
       if (sawProc || !autoStep(run)) break
       sawProc ||= run.state.proc.length > 0
@@ -210,10 +322,10 @@ function doDeclare(run: Run, i: number, req: { by: Side; source: string; ability
     if (!autoStep(run)) break
   }
   // 合法でない: 探す前の盤面に戻す（警告として記録）
-  run.state = snap.state
-  run.actions.length = snap.actions
-  run.trace.length = snap.trace
-  run.warnings.length = snap.warnings
+  run.state = snapState.state
+  run.actions.length = snapState.actions
+  run.trace.length = snapState.trace
+  run.warnings.length = snapState.warnings
   run.steps[i] = { legal: false, reason: lastReason, consumed: true }
 }
 
@@ -223,7 +335,7 @@ function doPass(run: Run, i: number, side: Side, at?: WindowRef) {
     const s = run.state
     if (s.result) break
     if (s.procMeta.choice) {
-      autoStep(run)
+      if (!autoStep(run)) break
       continue
     }
     const w = currentWindow(s)
@@ -239,37 +351,68 @@ function doPass(run: Run, i: number, side: Side, at?: WindowRef) {
   run.steps[i] = { consumed: false, reason: '見送る窓が来なかった' }
 }
 
+/** 選択肢に合う鍵の並び（合わなければ null） */
+function matchPick(run: Run, ch: NonNullable<BoardState['procMeta']['choice']>, pick: string[] | string): string[] | null {
+  const want = mapPick(run, pick)
+  const keys: string[] = []
+  for (const w of want) {
+    // 選択肢の鍵は iid・名前・効果の鍵（`${iid}#${能力の番号}`）・宣言の id（`d…:${席}:${iid}`）のどれでも指せる
+    const hit = (o: { key: string; label: string }) => o.key === w || o.label === w || o.key.startsWith(`${w}#`) || o.key.endsWith(`:${w}`)
+    const opt = ch.options.find((o) => hit(o) && (ch.repeat || !keys.includes(o.key)))
+    if (!opt) return null
+    keys.push(opt.key)
+  }
+  if (ch.kind !== 'order' && (keys.length < ch.min || keys.length > ch.max)) return null
+  return keys
+}
+
+/** 相手の選択が来たら、続く step のうちその席の choose で選択肢に合うものを先に使う（F11） */
+function lookaheadChoose(run: Run, i: number, seat: Seat): boolean {
+  const ch = run.state.procMeta.choice
+  if (!ch) return false
+  for (let j = i + 1; j < run.all.length; j++) {
+    const st = run.all[j]
+    if (run.steps[j]?.consumed) continue
+    if (!('declare' in st) && !('choose' in st) && !('pass' in st)) return false
+    if (!('choose' in st) || seatOf(st.choose.by) !== seat) continue
+    const keys = matchPick(run, ch, st.choose.pick)
+    if (!keys) return false
+    if (!apply(run, { type: 'procChoose', id: ch.id, pick: keys })) return false
+    driveRun(run)
+    run.steps[j] = { legal: true, consumed: true }
+    return true
+  }
+  return false
+}
+
 function doChoose(run: Run, i: number, side: Side, pick: string[] | string) {
   const by = seatOf(side)
-  const want = mapPick(run, pick)
   for (let guard = 0; guard < 600; guard++) {
     const s = run.state
     if (s.result) break
     const ch = s.procMeta.choice
     if (ch && ch.by === by) {
-      const keys: string[] = []
-      let ok = true
-      for (const w of want) {
-        // 選択肢の鍵は iid・名前・効果の鍵（`${iid}#${能力の番号}`）・宣言の id（`d…:${席}:${iid}`）のどれでも指せる
-        const hit = (o: { key: string; label: string }) => o.key === w || o.label === w || o.key.startsWith(`${w}#`) || o.key.endsWith(`:${w}`)
-        const opt = ch.options.find((o) => hit(o) && (ch.repeat || !keys.includes(o.key)))
-        if (!opt) ok = false
-        else keys.push(opt.key)
+      const keys = matchPick(run, ch, pick)
+      // core の手順の選択（参加キャラ・種目・[21] など）と同時処理の順（K10）で選択肢に合わないものは、既定で答えて次を待つ（F13）
+      if (!keys && (ch.purpose || ch.kind === 'order')) {
+        if (!autoStep(run)) break
+        continue
       }
-      if (ch.kind !== 'order' && (keys.length < ch.min || keys.length > ch.max)) ok = false
-      if (!ok) {
-        run.steps[i] = { legal: false, reason: `選択肢に無い／数が合わない: ${want.join('・')}（選択肢: ${ch.options.map((o) => o.label).join('・')}）`, consumed: true }
+      // core が答えを受け付けない（割り振りの上限など）も合法でない
+      if (!keys || !apply(run, { type: 'procChoose', id: ch.id, pick: keys })) {
+        run.steps[i] = { legal: false, reason: `選択肢に無い／数が合わない／受け付けられない: ${mapPick(run, pick).join('・')}（選択肢: ${ch.options.map((o) => o.label).join('・')}）`, consumed: true }
         autoStep(run)
         return
       }
-      apply(run, { type: 'procChoose', id: ch.id, pick: keys })
       driveRun(run)
       run.steps[i] = { legal: true, consumed: true }
       return
     }
+    if (ch && lookaheadChoose(run, i, ch.by)) continue
     if (!autoStep(run)) break
   }
-  run.steps[i] = { consumed: false, reason: 'その席の選択が来なかった' }
+  // 選択が最後まで来なかった＝その選択はできない（F12）
+  run.steps[i] = { legal: false, consumed: true, reason: 'その席の選択が来なかった（その選択はできない）' }
 }
 
 function finish(run: Run) {
@@ -277,14 +420,22 @@ function finish(run: Run) {
 }
 
 const ZONE_OF: Record<string, (c: CardInstance) => boolean> = {
-  field: (c) => c.zone === 'char' || c.zone === 'leader',
+  // フィールド＝キャラ（付いているアイテム含む）・バトルカード・フィールドカードの置き場
+  field: (c) => c.zone === 'char' || c.zone === 'leader' || c.zone === 'battle' || c.zone === 'field',
   hand: (c) => c.zone === 'hand',
   trash: (c) => c.zone === 'trash',
   deck: (c) => c.zone === 'deck',
 }
 
+const SIDE_NAME: Record<Seat, Side> = { A: 'you', B: 'opponent' }
+
 function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'; msg: string } {
-  const s = run.state
+  let s = run.state
+  if (e.at) {
+    const sn = run.snaps.find((x) => x.at === e.at)
+    if (!sn?.state) return { ok: false, msg: `at ${e.at.proc}[${e.at.step}] に止まらなかった` }
+    s = sn.state
+  }
   const card = (ref: string) => s.cards[run.refs[ref] ?? ref]
   if ('kiryoku' in e) {
     const v = card(e.kiryoku[0])?.kiryoku
@@ -328,16 +479,20 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     return { ok: !!hit, msg: `steps[${e.fizzled.step}] の立ち消え: ${hit ? hit.reason : 'なし'}` }
   }
   if ('stat' in e) {
+    // 能力値＝印刷値＋記録した能力値修正（R2b。層 K3 は R3）
     const x = card(e.stat[0])
-    const v = x ? run.ctx.cards[x.cardId]?.stats?.[e.stat[1]] : undefined
-    return { ok: v === e.stat[2], msg: `能力値 ${e.stat[0]} ${e.stat[1]} = ${v}（印刷値。修正の層は R3）（期待 ${e.stat[2]}）` }
+    const v = x ? currentStat(run.ctx, s, x.iid, e.stat[1]) : undefined
+    return { ok: v === e.stat[2], msg: `能力値 ${e.stat[0]} ${e.stat[1]} = ${v}（印刷値＋能力値修正の記録）（期待 ${e.stat[2]}）` }
   }
   if ('order' in e) {
     const names = run.trace.filter((t) => t.kind === 'name')
+    // バトルの名前は席でなく側で書く（「バトル（you が挑んだ）」）
+    const norm = (t: string) => t.replace(/バトル（([AB]) が挑んだ）/, (_, seat: Seat) => `バトル（${SIDE_NAME[seat]} が挑んだ）`)
     const hitOf = (t: ProcTrace, want: string) => {
       const iid = run.refs[want]
       if (iid) return !!t.id && t.id.endsWith(`:${iid}`)
-      return t.text === want || t.text.startsWith(`${want}:`)
+      const text = norm(t.text)
+      return text === want || text.startsWith(`${want}:`)
     }
     const seq: string[] = []
     for (const t of names) {
@@ -346,9 +501,17 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     }
     return { ok: JSON.stringify(seq) === JSON.stringify(e.order), msg: `処理の順 = ${seq.join('→') || '（なし）'}（期待 ${e.order.join('→')}）` }
   }
+  if ('battleCard' in e) {
+    const last = s.procMeta.battles[s.procMeta.battles.length - 1]
+    const want = run.refs[e.battleCard] ?? e.battleCard
+    return { ok: last?.battleCard === want, msg: `バトル種目 = ${last?.battleCard ?? '（無し）'}（期待 ${e.battleCard}）` }
+  }
+  if ('battleAborted' in e) {
+    const last = s.procMeta.battles[s.procMeta.battles.length - 1]
+    const got = !!last?.aborted
+    return { ok: !!last && got === e.battleAborted, msg: `バトルの中断 = ${last ? (last.aborted ?? 'なし') : '（バトルが終わっていない）'}（期待 ${e.battleAborted ? '中断' : '中断しない'}）` }
+  }
   if ('note' in e) return { ok: 'pending', msg: `型で書けない期待（note）: ${e.note}` }
-  if ('battleCard' in e) return { ok: 'pending', msg: 'バトル種目の期待（R2b）' }
-  if ('battleAborted' in e) return { ok: 'pending', msg: 'バトルの中断の期待（R2b）' }
   void c
   return { ok: 'pending', msg: '知らない期待' }
 }
@@ -359,27 +522,22 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
     res.reasons.push('setup・steps・expect がそろっていない')
     return res
   }
-  if (c.setup.battle) {
-    res.reasons.push('範囲外の手順: バトル中から始める（R2b）')
-    return res
-  }
-  const unsupported = c.steps.find((s) => 'challenge' in s || 'answer' in s || 'advancePhase' in s)
+  const unsupported = c.steps.find((s) => 'answer' in s)
   if (unsupported) {
-    res.reasons.push(`範囲外の手順: ${Object.keys(unsupported)[0]}（${'challenge' in unsupported ? 'バトル R2b' : 'advancePhase' in unsupported ? 'フェイズの進行 R2b/R2u' : '相手への問い R4'}）`)
-    return res
-  }
-  if (c.setup.phase && c.setup.phase !== 'メイン') {
-    res.reasons.push(`範囲外の手順: ${c.setup.phase}フェイズの処理（ターンの進行 10-2 は R2b/R2u）`)
+    res.reasons.push('範囲外の手順: answer（相手への問い R4）')
     return res
   }
   const { state, refs } = buildBoard(c.setup, ctx)
   // 盤面に置いたアイテム・フィールドで記述の無いもの（常時効果が効くかもしれない）
   const noDef = [...new Set(Object.values(state.cards).filter((x) => { const k = ctx.cards[x.cardId]?.kind; return (k === 'i' || k === 'f') && !ctx.defs[x.cardId] }).map((x) => x.cardId))]
-  const run: Run = { state, ctx, refs, actions: [], trace: [], warnings: [], steps: [], pending: [] }
+  const snaps = (c.expect as Expect[]).filter((e) => e.at).map((e) => ({ at: e.at!, state: null as BoardState | null }))
+  const run: Run = { state, ctx, refs, actions: [], trace: [], warnings: [], steps: [], pending: [], intent: {}, snaps, all: c.steps }
   try {
+    snap(run)
     driveRun(run)
     c.steps.forEach((step: Step, i) => {
       if (run.pending.length) return
+      if (run.steps[i]?.consumed) return // 先に使った（F10・F11）
       if ('force' in step) {
         const bind: Record<string, string[]> = {}
         for (const [k, v] of Object.entries(refs)) bind[k] = [v]
@@ -387,8 +545,18 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
         driveRun(run)
         run.steps[i] = { legal: true, consumed: true }
       } else if ('declare' in step) doDeclare(run, i, step.declare)
-      else if ('generateCost' in step) doDeclare(run, i, { by: step.generateCost.by, source: step.generateCost.source, at: step.generateCost.at, costGen: true })
-      else if ('pass' in step) {
+      else if ('challenge' in step) {
+        run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
+        doDeclare(run, i, { by: step.challenge.by, source: step.challenge.participant, battle: true })
+        run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
+      } else if ('generateCost' in step) doDeclare(run, i, { by: step.generateCost.by, source: step.generateCost.source, at: step.generateCost.at, costGen: true })
+      else if ('advancePhase' in step) {
+        // フェイズを進める（10-2-2）。今の手順を終えてから
+        for (let g = 0; g < 600 && (run.state.proc.length || baseOpen(run.state)) && !run.state.result; g++) if (!autoStep(run)) break
+        const ok = apply(run, { type: 'procPhase', to: step.advancePhase.to })
+        driveRun(run)
+        run.steps[i] = ok ? { legal: true, consumed: true } : { legal: false, consumed: true, reason: 'フェイズを進められない' }
+      } else if ('pass' in step) {
         const p = typeof step.pass === 'string' ? { side: step.pass, at: undefined } : step.pass
         doPass(run, i, p.side, p.at)
       } else if ('choose' in step) doChoose(run, i, step.choose.by, step.choose.pick)
@@ -431,6 +599,28 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
 }
 
 /** pool.json の1枚からエンジン用の欄を取る */
-export function cardInfoOf(p: { id: string; name: string; kind: CardInfo['kind']; kiryoku: number | null; stats: Record<string, number> | null; cost: string; attr: string; abilities: { header: string; cost: string }[] }): CardInfo {
-  return { id: p.id, name: p.name, kind: p.kind, kiryoku: p.kiryoku, stats: p.stats, cost: p.cost, attr: p.attr, abilities: p.abilities.map((a) => ({ header: a.header, cost: a.cost })) }
+export function cardInfoOf(p: {
+  id: string
+  name: string
+  kind: CardInfo['kind']
+  kiryoku: number | null
+  stats: Record<string, number> | null
+  cost: string
+  attr: string
+  abilities: { header: string; cost: string }[]
+  battleAtk?: string
+  battleDef?: string
+  cells?: string[]
+}): CardInfo {
+  return {
+    id: p.id,
+    name: p.name,
+    kind: p.kind,
+    kiryoku: p.kiryoku,
+    stats: p.stats,
+    cost: p.cost,
+    attr: p.attr,
+    abilities: p.abilities.map((a) => ({ header: a.header, cost: a.cost })),
+    ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),
+  }
 }

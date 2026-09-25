@@ -71,7 +71,7 @@ export type Step =
   | { force: Op }
 
 /** FAQ の答えに書いてある結果だけ */
-export type Expect =
+export type Expect = (
   | { kiryoku: [ref: string, value: number] }
   | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'gone', owner?: Side] }
   /** steps の index 番目の宣言が立ち消え（11-4）た */
@@ -93,6 +93,10 @@ export type Expect =
   | { battleAborted: boolean }
   /** 型で書けない期待（実行器は「保留」と数える。増えたら型を足す） */
   | { note: string }
+) & {
+  /** その手順がその段以降で最初に止まった点の盤面で確かめる（バトル中の値など。R2b） */
+  at?: WindowRef
+}
 
 export interface FaqCase {
   id: string                   // 'faq-1800'

@@ -4,7 +4,7 @@
 
 import { applyAction, type BoardAction } from '../src/core/actions'
 import { EMPTY_BOARD, fillBoardDefaults, type BoardState, type CardInstance, type Seat } from '../src/core/board'
-import { awaitingSeat, currentWindow, topFrame, type ProcDecl, type ProcTrace } from '../src/core/proc'
+import { awaitingSeat, battleDecl, currentWindow, startBattleAt, topFrame, validChoicePick, type ProcChoice, type ProcDecl, type ProcTrace } from '../src/core/proc'
 import { assignments, matchTokens, parseCostText, payNow } from '../src/engine/cost'
 import type { EngineCtx } from '../src/engine/ctx'
 
@@ -49,7 +49,7 @@ function act(sim: Sim, a: BoardAction) {
 /** 今どこで止まっているか（記録用の短い名前） */
 function where(s: BoardState): string {
   if (s.result) return 'result'
-  if (s.procMeta.choice) return `choice:${s.procMeta.choice.kind}`
+  if (s.procMeta.choice) return `choice:${s.procMeta.choice.purpose ?? s.procMeta.choice.kind}`
   const top = topFrame(s)
   if (!top) return s.procMeta.base ? 'base' : 'idle'
   if (top.status === 'window') return `${top.kind}[${top.step}]窓:${awaitingSeat(s)}`
@@ -57,14 +57,20 @@ function where(s: BoardState): string {
   return `${top.kind}[${top.step}]${top.status}`
 }
 /** エンジンの代役: 窓は両者見送り、エンジンの段は「何もない・払えた・確かめた」で返す。止まった点を記録する */
-function runAll(sim: Sim, opts: { onEngine?: (sim: Sim) => boolean } = {}) {
+function runAll(
+  sim: Sim,
+  opts: { onEngine?: (sim: Sim) => boolean; pick?: (ch: ProcChoice) => string[] | undefined; values?: Record<Seat, { atk: number; def: number } | null>; kiryoku?: number | null } = {},
+) {
   for (let g = 0; g < 500; g++) {
     const w = where(sim.s)
     if (w === 'result' || w === 'idle' || w === 'base') return
     sim.stops.push(w)
     const top = topFrame(sim.s)!
     if (sim.s.procMeta.choice) {
-      act(sim, { type: 'procChoose', id: sim.s.procMeta.choice.id, pick: [] })
+      const ch = sim.s.procMeta.choice
+      // core の手順の選択は既定で先頭（参加キャラ・種目・[21] は「次へ」）、それ以外は選ばない
+      const pick = opts.pick?.(ch) ?? (ch.purpose && ch.kind === 'select' ? ch.options.slice(0, ch.min).map((o) => o.key) : [])
+      act(sim, { type: 'procChoose', id: ch.id, pick })
       continue
     }
     if (top.status === 'window') {
@@ -89,6 +95,14 @@ function runAll(sim: Sim, opts: { onEngine?: (sim: Sim) => boolean } = {}) {
         case 'item':
           act(sim, { type: 'procItemDone', frameId: top.id })
           break
+        case 'battleValues':
+          act(sim, { type: 'procBattle', frameId: top.id, values: opts.values ?? { A: { atk: 3, def: 2 }, B: { atk: 3, def: 2 } } })
+          break
+        case 'place':
+          act(sim, { type: 'procPlace', frameId: top.id, kiryoku: opts.kiryoku ?? null })
+          break
+        default:
+          return
       }
       continue
     }
@@ -182,25 +196,45 @@ function decl(id: string, by: Seat, kind: ProcDecl['kind'], sourceIid: string, e
 //    7-3「発生したコストの種類は、割り込み型アクションを行ったアクション内に限り有効です。…ターン終了時までその他のコストとして扱われます。」
 // =============================================================================
 {
+  // 統括11 の検証（C19 の直し）: 7-2 は「宣言---[1][2][3]」。[3] の窓は宣言の段で開き、処理は [4] から
   const sim: Sim = { s: board([card('a1', 'A', 'char'), card('a2', 'A', 'char')]), trace: [], stops: [] }
   act(sim, { type: 'procOpenMain' })
   const cg: ProcDecl = decl('C', 'A', 'costGen', 'a2', { sources: [{ iid: 'a2', from: 'field', icon: 'G', attrs: ['賢'] }] })
   act(sim, { type: 'procDeclare', by: 'A', decl: cg })
-  act(sim, { type: 'procPass', by: 'B' })
-  eq(where(sim.s), 'costGen[3]窓:A', '4a: [3]《コストを発生するとき》の窓')
+  eq(where(sim.s), 'costGen[3]窓:A', '4a: 宣言の段で [3]《コストを発生するとき》の窓（相手の 11-2[2] の機会より前）')
   eq(currentWindow(sim.s)?.window.only, 'A', '4b: その窓はコストを発生させたプレイヤーだけ（7-2[3]）')
   act(sim, { type: 'procPass', by: 'A' })
   eq(where(sim.s), 'costGen[3]timing', '4c: 相手の番は無く、そのまま《〜とき》の処理へ')
+  act(sim, { type: 'procTimingDone', frameId: topFrame(sim.s)!.id, items: [] })
+  eq([where(sim.s), awaitingSeat(sim.s)], ['base', 'B'], '4c2: 宣言が終わってから 11-2[2] ノンアクティブプレイヤーの機会')
+  act(sim, { type: 'procPass', by: 'B' })
   runAll(sim)
   eq(sim.s.cards.a2.orientation, 'rested', '4d: [4] 発生源のキャラを消耗させる')
   eq(sim.s.costs.A.map((t) => [t.icon, t.attrs]), [['G', ['賢']]], '4e: [9] 発生したコストを得る（種類 G・属性 賢）')
   eq(sim.stops.filter((x) => x.startsWith('costGen[7]')), ['costGen[7]timing'], '4f: [7]《コストを発生する場合》は処理だけ（窓は無い）')
+  eq(sim.stops.some((x) => x.startsWith('costGen[3]')), false, '4i: 処理の段では [3] の窓を開かない（処理は [4] から）')
 }
 {
+  // 7-2「[5] 手順[3]で宣言したコストを発生させるアクションの処理を行う。」: [3] で宣言した行動は宣言の段では処理せず、[5] で処理する
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), card('a2', 'A', 'char')]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('C', 'A', 'costGen', 'a2', { sources: [{ iid: 'a2', from: 'field', icon: 'G', attrs: ['賢'] }] }) })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('C2', 'A', 'costGen', 'a1', { sources: [{ iid: 'a1', from: 'field', icon: 'G', attrs: ['力'] }] }) })
+  eq(where(sim.s), 'costGen[3]窓:A', '4j: [3] で宣言したコスト発生にもその宣言の [3] の窓')
+  eq(sim.s.cards.a1.orientation, 'ready', '4k: [3] で宣言した行動は宣言の段では処理しない')
+  runAll(sim) // 宣言の段の窓を見送る → メインの窓の NAP の番
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq(sim.s.costs.A.map((t) => t.attrs[0]), ['力', '賢'], '4l: [3] で宣言した行動は [5] で処理される（先に発生）→ その後 [9] で元のコスト')
+}
+{
+  // 15-13-1[4]「このとき、このアクションを行ったプレイヤーはコストを発生させるアクションの宣言が行える」: その宣言の中で 7-2 の [1]〜[3]（NH-4 の解決）
   // 特殊能力の[4]で宣言したコスト発生は[7]で処理し、その種類はその特殊能力の中だけ（終わればその他のコスト W）
   const sim: Sim = { s: board([card('a1', 'A', 'char')]), trace: [], stops: [] }
   act(sim, { type: 'procOpenMain' })
   act(sim, { type: 'procDeclare', by: 'A', decl: decl('X', 'A', 'ability', 'a1', { costGens: [[{ iid: 'a1', from: 'field', icon: 'R', attrs: ['力'] }]] }) })
+  eq(where(sim.s), 'costGen[3]窓:A', '4m: 特殊能力の宣言[4]の中で《コストを発生するとき》の窓（宣言の段）')
+  runAll(sim)
   act(sim, { type: 'procPass', by: 'B' })
   let seenR = false
   runAll(sim, {
@@ -433,6 +467,299 @@ function decl(id: string, by: Seat, kind: ProcDecl['kind'], sourceIid: string, e
   // 既存の優先権の窓は proc と独立に今までどおり動く
   const r = applyAction(EMPTY_BOARD, { type: 'declareAction', action: { by: 'A', sourceIid: null, kind: 'その他', actionType: '通常型', label: 'x' } })
   eq([r.state.priority?.frames.length, r.state.proc.length], [1, 0], '10c: 既存の declareAction は priority の窓を開き、proc には触れない')
+}
+
+// =============================================================================
+// 11. 20-4 バトルの処理手順（oldrule.txt:1062-1127）: 段の順と止まる点
+//    「[4]《バトルを挑まれたとき》…[6]…[7] …バトル参加キャラ１体を指定する。その後、そのキャラを消耗させる。…[8]…[10]…[11]…[13]…
+//     [15]《バトルカードを選択するとき》[16] 未使用状態のバトルカードの中からバトルカード１枚を指定する。[17]…
+//     [18] 1.バトル種目となったバトルカードを使用済み状態にする。…[19]…[20]…[21] 手順[19]に戻るか、次の手順に進むかを選択する。[22]…
+//     [23] 攻撃能力値、防御能力値の決定。[24] バトルの結果の計算を行う。[25]…[26] 必要ならば、ダメージ処理、ダウン処理を行う。[27]…[28]…[29]」
+// =============================================================================
+function battleBoard(extra: CardInstance[] = []): BoardState {
+  return board([card('la', 'A', 'leader'), card('a1', 'A', 'char'), card('lb', 'B', 'leader'), card('b1', 'B', 'char'), card('bc', 'B', 'battle', { used: false }), ...deck('A', 5), ...deck('B', 5), ...extra])
+}
+{
+  const sim: Sim = { s: battleBoard(), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: battleDecl('BT', 'A') })
+  eq(awaitingSeat(sim.s), 'B', '11a: [2] 相手プレイヤーの同時アクションの宣言の機会（20-1）')
+  act(sim, { type: 'procPass', by: 'B' })
+  let restedAfter7: unknown = null
+  let usedAfter18: unknown = null
+  runAll(sim, {
+    pick: (ch) => (ch.purpose === 'battleParticipant' ? [ch.by === 'A' ? 'a1' : 'b1'] : undefined),
+    onEngine: (s) => {
+      const top = topFrame(s.s)!
+      if (top.kind === 'battle' && top.step === 8 && restedAfter7 === null) restedAfter7 = s.s.cards.a1.orientation
+      if (top.kind === 'battle' && top.step === 23) usedAfter18 = s.s.cards.bc.used
+      return false
+    },
+  })
+  const bs = sim.stops.filter((x) => x.startsWith('battle[') || x.startsWith('choice:battle')).filter((x, i, xs) => x !== xs[i - 1])
+  eq(
+    bs,
+    [
+      'battle[4]窓:A', 'battle[4]窓:B', 'battle[4]timing',
+      'battle[6]窓:A', 'battle[6]窓:B', 'battle[6]timing', 'choice:battleParticipant',
+      'battle[8]窓:A', 'battle[8]窓:B', 'battle[8]timing',
+      'battle[10]窓:A', 'battle[10]窓:B', 'battle[10]timing', 'choice:battleParticipant',
+      'battle[13]窓:A', 'battle[13]窓:B', 'battle[13]timing',
+      'battle[15]窓:A', 'battle[15]窓:B', 'battle[15]timing', 'choice:battleCard',
+      'battle[17]窓:A', 'battle[17]窓:B', 'battle[17]timing',
+      'battle[19]窓:A', 'battle[19]窓:B', 'battle[19]timing',
+      'battle[20]窓:A', 'battle[20]窓:B', 'battle[20]timing', 'choice:battleLoop',
+      'battle[22]窓:A', 'battle[22]窓:B', 'battle[22]timing',
+      'battle[23]battleValues',
+      'battle[25]窓:A', 'battle[25]窓:B', 'battle[25]timing',
+      'battle[27]窓:A', 'battle[27]窓:B', 'battle[27]timing',
+      'battle[28]timing',
+      'battle[29]窓:A', 'battle[29]窓:B', 'battle[29]timing',
+    ],
+    '11b: 窓は [4][6][8][10][13][15][17][19][20][22][25][27][29]、[28] は処理だけ。選択は [7][11][16][21]',
+  )
+  eq(restedAfter7, 'rested', '11c: [7] 指定したらそのキャラを消耗させる（指定した瞬間 FAQ:3465）')
+  eq(usedAfter18, true, '11d: [18] 1. バトル種目となったバトルカードを使用済み状態にする')
+  eq([sim.s.cards.a1.kiryoku, sim.s.cards.b1.kiryoku], [4, 4], '11e: [24][26] 結果ダメージ＝相手の攻撃能力値−自分の防御能力値（3−2＝1 ずつ・同時 FAQ:3461）')
+  eq([sim.s.procMeta.battles.length, sim.s.procMeta.battles[0]?.aborted, sim.s.proc.length], [1, null, 0], '11f: バトルが終わった（中断していない）')
+}
+{
+  // [11] 20-8「待機状態のキャラか、リーダーキャラを１体選択します。リーダーキャラの場合は、待機状態ではなく消耗状態であっても選択可能です。」
+  const sim: Sim = { s: battleBoard(), trace: [], stops: [] }
+  sim.s = { ...sim.s, cards: { ...sim.s.cards, lb: { ...sim.s.cards.lb, orientation: 'rested' }, b1: { ...sim.s.cards.b1, orientation: 'rested' } } }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: battleDecl('BT', 'A') })
+  act(sim, { type: 'procPass', by: 'B' })
+  let opts11: string[] = []
+  runAll(sim, {
+    pick: (ch) => {
+      if (ch.purpose === 'battleParticipant' && ch.by === 'B') opts11 = ch.options.map((o) => o.key)
+      return ch.purpose === 'battleParticipant' ? [ch.options[0].key] : undefined
+    },
+  })
+  eq(opts11, ['lb'], '11g: [11] 消耗状態のキャラは選べない・リーダーは消耗状態でも選べる（20-8）')
+}
+{
+  // [21]「バトルを挑んだプレイヤーは手順[19]に戻るか、次の手順に進むかを選択する。」（窓の回数は実行時に上限なし）
+  const sim: Sim = { s: applyAction(startBattleAt(battleBoard(), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' }), { type: 'procRun' }).state, trace: [], stops: [] }
+  let loops = 0
+  runAll(sim, { pick: (ch) => (ch.purpose === 'battleLoop' ? [loops++ < 2 ? 'back' : 'next'] : undefined) })
+  eq(sim.stops.filter((x) => x === 'battle[19]窓:A').length, 3, '11h: [21] で [19] に戻ると [19][20] の機会がもう一度ある（2回戻れば3回）')
+}
+{
+  // [19]「お互いのプレイヤーがイベントカードを複数回使用できる機会」: 宣言があったら同じ段の機会をもう一度開く
+  // 最初の [19] の窓で B がイベントを宣言
+  const s0 = startBattleAt(battleBoard([card('ev', 'B', 'hand')]), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' })
+  const sim2: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  act(sim2, { type: 'procPass', by: 'A' })
+  act(sim2, { type: 'procDeclare', by: 'B', decl: decl('EV', 'B', 'event', 'ev') })
+  act(sim2, { type: 'procPass', by: 'A' })
+  runAll(sim2)
+  eq(sim2.stops.filter((x) => x.startsWith('battle[19]窓')).length >= 2, true, '11i: [19] で宣言があったら [19] の機会をもう一度開く（両者が見送るまで）')
+}
+
+// =============================================================================
+// 12. 20-6 中断・20-6-1「処理を中断する場合、手順[28]の処理を行いますが、バトルが終了したときに行う手順[29]の処理は行いません。」
+//     [28]「・攻防修正値を失わせる処理・バトル終了時に失われる効果の処理・バトル終了時に処理される効果の処理」
+// =============================================================================
+{
+  const s0 = startBattleAt(battleBoard(), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  const bt = topFrame(sim.s)!.id
+  act(sim, { type: 'procMod', iid: 'a1', stat: 'atk', delta: 2, kind: '攻防修正', until: 'battle' })
+  act(sim, { type: 'procMod', iid: 'a1', stat: '力', delta: 1, kind: '能力値修正', until: 'battle' })
+  act(sim, { type: 'procMod', iid: 'a1', stat: '早', delta: 1, kind: '能力値修正', until: 'turn' })
+  act(sim, { type: 'procBattle', frameId: bt, abort: 'テスト（放棄）' })
+  act(sim, { type: 'procPass', by: 'A' })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  const bs = sim.stops.filter((x) => x.startsWith('battle['))
+  eq([bs.includes('battle[28]timing'), bs.some((x) => x.startsWith('battle[29]')), bs.some((x) => x.startsWith('battle[20]'))], [true, false, false], '12a: 中断したら [28] だけ（[29] も残りの段も無い）')
+  eq(sim.s.procMeta.mods.map((m) => `${m.stat}${m.kind}`), ['早能力値修正'], '12b: [28] で攻防修正と「バトル終了時まで」の効果は失われ、能力値修正（ターン終了時まで）は残る')
+  eq(sim.s.procMeta.battles[0]?.aborted, 'テスト（放棄）', '12c: 中断の記録')
+}
+{
+  // 20-6「手順[19]～手順[28]の間に…どちらかのプレイヤーのバトル参加キャラが失われる（バトルの結果でダウンした場合を除く）」
+  const s0 = startBattleAt(battleBoard(), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  act(sim, { type: 'procMove', iid: 'b1', to: 'trash' })
+  act(sim, { type: 'procPass', by: 'A' })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq([sim.s.procMeta.battles[0]?.aborted, sim.stops.some((x) => x.startsWith('battle[29]'))], ['バトル参加キャラが失われた（20-6）', false], '12d: 参加キャラが失われたら中断（[28] だけ）')
+}
+{
+  // バトルの結果でダウンしたら中断しない（[29] がある）
+  const sim: Sim = { s: startBattleAt(battleBoard(), { challenger: 'A', at: 22, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' }), trace: [], stops: [] }
+  sim.s = applyAction(sim.s, { type: 'procRun' }).state
+  runAll(sim, { values: { A: { atk: 9, def: 0 }, B: { atk: 0, def: 0 } } })
+  eq([sim.s.cards.b1.zone, sim.s.procMeta.battles[0]?.aborted, sim.stops.some((x) => x.startsWith('battle[29]'))], ['trash', null, true], '12e: 結果ダメージでダウンした参加キャラは中断に数えない')
+}
+{
+  // [5]「この段階で、バトルを行うため条件を満たせない場合は処理を中断する。」20-3「いずれかのフィールドに選択可能なバトルカードが１枚以上」
+  const sim: Sim = { s: battleBoard(), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: battleDecl('BT', 'A') })
+  sim.s = { ...sim.s, cards: { ...sim.s.cards, bc: { ...sim.s.cards.bc, zone: 'trash' } } }
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq([sim.s.procMeta.battles[0]?.aborted?.includes('20-4[5]'), sim.s.cards.a1.orientation], [true, 'ready'], '12f: [5] で中断（参加キャラはまだ指定していない＝消耗しない FAQ:1186）')
+}
+
+// =============================================================================
+// 13. 複数参加（K9・DESIGN §5.2「参加キャラは複数持てる形」）: 参加キャラは陣営ごとの配列。攻防の値と結果ダメージは人が入れる（R4）
+// =============================================================================
+{
+  const s0 = startBattleAt(battleBoard([card('a2', 'A', 'char')]), { challenger: 'A', at: 22, participants: { A: ['a1', 'a2'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  runAll(sim, { values: { A: null, B: { atk: 3, def: 2 } } })
+  eq(sim.s.procMeta.battles[0]?.participants.A, ['a1', 'a2'], '13a: 参加キャラを複数持てる')
+  eq(sim.trace.some((t) => t.kind === 'manual'), true, '13b: 複数参加・値の無いバトルの結果は人が処理（manual の記録）')
+}
+
+// =============================================================================
+// 14. 17-3 アイテムカードの装備（oldrule.txt:864-889）
+//    「[11] 手順[3]で提示したアイテムカードが手順[3]で指定した装備対象に装備される。[12] …装備制限を満たせない場合は、そのアイテムカードをゴミ箱送りにする。
+//     [13] 《アイテムカードを装備したとき》のタイミングでの処理、アクション宣言の機会。」
+// =============================================================================
+{
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), card('it', 'A', 'hand')]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('EQ', 'A', 'equip', 'it', { equipTo: 'a1', targets: ['a1'] }) })
+  eq(sim.s.cards.it.zone, 'pending', '14a: [3] 提示したアイテムは提示エリアへ（使用したと見なされる）')
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq(sim.stops.filter((x) => x.startsWith('equip[')).filter((x, i, xs) => x !== xs[i - 1]), ['equip[8]窓:A', 'equip[8]窓:B', 'equip[8]timing', 'equip[9]pay', 'equip[13]窓:A', 'equip[13]窓:B', 'equip[13]timing'], '14b: [8]窓→[9]支払い→[13]窓')
+  eq([sim.s.cards.it.attachedTo, sim.s.cards.it.zone], ['a1', 'char'], '14c: [11] 装備対象に装備される')
+}
+{
+  // 17-2「１つの装備対象に、同じカード名のアイテムカードを２枚以上装備することはできません」→ [12] でゴミ箱送り
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), card('it1', 'A', 'char', { attachedTo: 'a1', cardId: 'x', kiryoku: null }), card('it2', 'A', 'hand', { cardId: 'x' })]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('EQ', 'A', 'equip', 'it2', { equipTo: 'a1', targets: ['a1'] }) })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq([sim.s.cards.it2.zone, sim.stops.some((x) => x.startsWith('equip[13]'))], ['trash', false], '14d: [12] 同名制限を満たせなければゴミ箱送り（[13] は無い）')
+}
+{
+  // [10]「構成要素が満たされていない場合（…使用代償を支払えない…）…中断する。処理が中断する場合、手順[3]で提示したアイテムカードをゴミ箱送りにする。」
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), card('it', 'A', 'hand')]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('EQ', 'A', 'equip', 'it', { equipTo: 'a1', targets: ['a1'] }) })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim, { onEngine: (s) => (topFrame(s.s)!.engineWhat === 'pay' ? (act(s, { type: 'procPay', frameId: topFrame(s.s)!.id, ok: false, consume: [], kiryoku: [], trash: [], down: [] }), true) : false) })
+  eq(sim.s.cards.it.zone, 'trash', '14e: [10] 支払えなければ中断してゴミ箱送り')
+}
+{
+  // 移し替え（「アイテムの装備と同じ扱い」FAQ:804・2874）: [11] から＝[13]《装備したとき》がある
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), card('a2', 'A', 'char'), card('it', 'A', 'char', { attachedTo: 'a1', kiryoku: null })]), trace: [], stops: [] }
+  act(sim, { type: 'procTransfer', by: 'A', item: 'it', to: 'a2', id: 'MV' })
+  runAll(sim)
+  eq([sim.s.cards.it.attachedTo, sim.stops.includes('equip[13]窓:A'), sim.stops.some((x) => x.startsWith('equip[8]'))], ['a2', true, false], '14f: 移し替えは装備の [11]〜[13]（[13]《装備したとき》の窓あり）')
+}
+
+// =============================================================================
+// 15. 18-2 フィールドカードの配置・19-2 バトルカードの配置
+//    18-2「[11] フィールド上にフィールドカードがある場合はそれをゴミ箱送りにする。[12] …フィールドに配置される。」
+//    19-2「[11] 手順[3]で提示したバトルカードがフィールドに配置される。[12]《バトルカードを配置したとき》」
+// =============================================================================
+{
+  const sim: Sim = { s: board([card('f0', 'B', 'field'), card('f1', 'A', 'hand')]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('FD', 'A', 'field', 'f1') })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq([sim.s.cards.f0.zone, sim.s.cards.f1.zone, sim.stops.includes('field[13]窓:A')], ['trash', 'field', true], '15a: 出ていたフィールドカードはゴミ箱・新しいカードを配置・[13] の窓')
+}
+{
+  const sim: Sim = { s: board([card('b0', 'A', 'hand')]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('BC', 'A', 'battleCard', 'b0') })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq([sim.s.cards.b0.zone, sim.s.cards.b0.used, sim.stops.includes('battleCard[12]窓:A')], ['battle', false, true], '15b: バトルカードは未使用状態で配置・[12] の窓')
+}
+
+// =============================================================================
+// 16. 15-10-1 キャラクターの呼び出し・15-10-2 タッグ化
+//    15-10-1「[13] 手順[3]で提示したキャラクターカードを消耗状態でフィールドに出す。[14]《キャラクターカードが呼び出されたとき》」
+//    15-10-2「[12] 手順[4]で提示した２枚のキャラクターカードをゴミ箱へ移動させる。[13] …タッグキャラクターカードを待機状態でフィールドに出す。」
+//    「タッグ化を行った場合、フィールドの構成要素キャラが装備していたアイテムとダメージ（気力の上限－気力）を引き継ぎます。」
+// =============================================================================
+{
+  const sim: Sim = { s: board([card('c1', 'A', 'hand', { kiryoku: 4 })]), trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('CL', 'A', 'call', 'c1') })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim, { kiryoku: 4 })
+  eq(sim.stops.filter((x) => x.startsWith('call[')).map((x) => x.replace(/窓:[AB]/, '窓')).filter((x, i, xs) => x !== xs[i - 1]), ['call[8]窓', 'call[8]timing', 'call[9]pay', 'call[11]窓', 'call[11]timing', 'call[13]place', 'call[14]窓', 'call[14]timing'], '16a: 呼び出しの段 [8]窓→[9]支払い→[11]窓→[13]出す→[14]窓')
+  eq([sim.s.cards.c1.zone, sim.s.cards.c1.orientation, sim.s.cards.c1.kiryoku], ['char', 'rested', 4], '16b: [13] 消耗状態でフィールドに出す')
+}
+{
+  const sim: Sim = {
+    s: board([card('p', 'A', 'char', { kiryoku: 2 }), card('q', 'A', 'hand', { kiryoku: 5 }), card('it', 'A', 'char', { attachedTo: 'p', kiryoku: null }), card('tg', 'A', 'hand', { kiryoku: 6 }), ...deck('B', 3)]),
+    trace: [],
+    stops: [],
+  }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: decl('TG', 'A', 'tag', 'tg', { components: ['p', 'q'], targets: ['p', 'q'] }) })
+  act(sim, { type: 'procPass', by: 'B' })
+  let rec: unknown = null
+  runAll(sim, { onEngine: (s) => ((topFrame(s.s)!.engineWhat === 'place' ? (rec = topFrame(s.s)!.eng.componentKiryoku) : null), false), kiryoku: 3 })
+  eq([sim.s.cards.p.zone, sim.s.cards.q.zone, sim.s.cards.it.attachedTo, sim.s.cards.tg.orientation, sim.s.cards.tg.kiryoku], ['trash', 'trash', 'tg', 'ready', 3], '16c: 構成要素はゴミ箱・アイテムはタッグが引き継ぐ・待機状態で出す（気力はエンジンの値）')
+  eq(rec, { p: 2 }, '16d: [12] フィールドの構成要素の気力を記録（ダメージの引き継ぎはエンジンが計算）')
+  const sim2: Sim = { s: board([card('p', 'A', 'char', { kiryoku: 1 }), card('q', 'A', 'hand'), card('tg', 'A', 'hand'), ...deck('B', 3)]), trace: [], stops: [] }
+  act(sim2, { type: 'procOpenMain' })
+  act(sim2, { type: 'procDeclare', by: 'A', decl: decl('TG', 'A', 'tag', 'tg', { components: ['p', 'q'], targets: ['p', 'q'] }) })
+  act(sim2, { type: 'procPass', by: 'B' })
+  runAll(sim2, { kiryoku: 0 })
+  eq([sim2.s.cards.tg.zone, sim2.s.downs.A], ['trash', 1], '16e: 気力0以下で出たらその瞬間にダウン（FAQ:3266）')
+}
+
+// =============================================================================
+// 17. 10-4 エントリーフェイズ・10-7 手札調整フェイズ・10-8 ターン終了
+//    10-4「[1]《エントリー開始時》[2] AP は任意に消耗状態の自分のキャラを待機状態にする。[3] AP は必ずフィールド上のすべてのバトルカードを未使用状態にする。
+//     [4] AP は、必ず自分のデッキからカードを１枚ドローする。[5]《エントリー終了時》」
+//    10-7「[3] 手札の上限枚数を超えている場合、手札が上限枚数になるように手札のカードを選んでゴミ箱送りにする。」4-2-1「手札の上限枚数は７枚です。」
+//    10-8「・コストの破棄・能力値修正を失わせる処理・《ターン終了時》に失われる効果の処理・《ターン終了時》に処理される効果の処理」
+// =============================================================================
+{
+  const sim: Sim = { s: board([card('a1', 'A', 'char', { orientation: 'rested' }), card('a2', 'A', 'char', { orientation: 'rested' }), card('bA', 'A', 'battle', { used: true }), card('bB', 'B', 'battle', { used: true }), ...deck('A', 3)], { turn: { active: 'A', phase: 'エントリー' } }), trace: [], stops: [] }
+  act(sim, { type: 'procPhaseStart' })
+  runAll(sim, { pick: (ch) => (ch.purpose === 'entryReady' ? ['a1'] : undefined) })
+  eq(sim.stops.filter((x) => x.startsWith('entry[') || x.startsWith('choice:entry')).map((x) => x.replace(/窓:[AB]/, '窓')).filter((x, i, xs) => x !== xs[i - 1]), ['entry[1]窓', 'entry[1]timing', 'choice:entryReady', 'entry[5]窓', 'entry[5]timing'], '17a: [1]窓→[2]AP の任意の選択→[5]窓')
+  eq([sim.s.cards.a1.orientation, sim.s.cards.a2.orientation], ['ready', 'rested'], '17b: [2] 選んだキャラだけ待機状態に（任意 FAQ:510）')
+  eq([sim.s.cards.bA.used, sim.s.cards.bB.used], [false, false], '17c: [3] お互いのすべてのバトルカードを未使用状態に（FAQ:3452）')
+  eq([sim.s.cards.deckA0.zone, sim.s.turn?.phase], ['hand', 'メイン'], '17d: [4] AP が1枚ドロー・エントリーが終わったらメインフェイズ')
+}
+{
+  const hand = Array.from({ length: 8 }, (_, i) => card(`h${i}`, 'A', 'hand'))
+  const sim: Sim = { s: board([card('a1', 'A', 'char'), ...hand], { turn: { active: 'A', phase: '手札調整' }, costs: { A: [{ id: 'k', icon: 'W', attrs: [], frameId: null }], B: [] } }), trace: [], stops: [] }
+  sim.s = { ...sim.s, procMeta: { ...sim.s.procMeta, mods: [{ id: 'm', iid: 'a1', stat: '力', delta: 2, kind: '能力値修正', until: 'turn', battleId: null }] } }
+  act(sim, { type: 'procPhaseStart' })
+  runAll(sim, { pick: (ch) => (ch.purpose === 'handDiscard' ? ['h0'] : undefined) })
+  eq([sim.s.cards.h0.zone, Object.values(sim.s.cards).filter((c) => c.zone === 'hand').length], ['trash', 7], '17e: [3] 上限7枚を超えた分を選んでゴミ箱送り')
+  eq(sim.stops.includes('turnEnd[1]timing'), true, '17f: 手札調整フェイズの後にターン終了（10-8）《ターン終了時》の処理')
+  eq([sim.s.costs.A.length, sim.s.procMeta.mods.length], [0, 0], '17g: 10-8 コストの破棄・能力値修正を失わせる')
+}
+
+// =============================================================================
+// 18. 割り振りの選択（《サバイバル》FAQ:4109「キャラの気力が０より小さくならないように」）: 選択肢ごとの上限
+// =============================================================================
+{
+  const ch: ProcChoice = { id: 'c', by: 'A', kind: 'select', prompt: '', options: [{ key: 'x', label: 'x' }, { key: 'z', label: 'z' }], min: 3, max: 3, repeat: true, caps: { x: 1, z: 5 }, frameId: null }
+  eq([validChoicePick(ch, ['x', 'x', 'x']), validChoicePick(ch, ['x', 'z', 'z']), validChoicePick(ch, ['z', 'z'])], [false, true, false], '18a: 上限を超える割り振り・数の足りない割り振りは受け付けない')
+}
+
+// =============================================================================
+// 19. 旧データ（R2b より前に保存された盤面）: 新しい欄（修正の記録・バトルの記録・フェイズの段）は既定値で補う
+// =============================================================================
+{
+  const f = fillBoardDefaults({ procMeta: { seq: 1, base: null, mainClosed: false, choice: null, answers: {}, used: {}, leaderLost: [], aborted: [] } } as unknown as Partial<BoardState>)
+  eq([f.procMeta.mods, f.procMeta.battles, f.procMeta.phaseRun], [[], [], null], '19a: procMeta.mods・battles・phaseRun を既定値で補う')
+  // 既存の画面のバトル（battle.ts・battleFlow.ts）は proc と独立に今までどおり動く
+  const r = applyAction(board([card('a1', 'A', 'char'), card('bx', 'A', 'battle', { used: false })]), { type: 'declareBattle', challenger: 'A' })
+  eq([r.state.battle !== null, r.state.proc.length], [true, 0], '19b: 既存の declareBattle は battle を開き、proc には触れない')
 }
 
 console.log(failures === 0 ? '\n✅ 全成功' : `\n❌ ${failures} 件失敗`)

@@ -4,7 +4,7 @@
  */
 
 import type { BoardState, CardInstance, Seat } from '../core/board'
-import { activeSeat, findFrame } from '../core/proc'
+import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
 import type { CardRef, Cond, Expr, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 
@@ -19,8 +19,15 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
         return activeSeat(state)
       case 'nonActive':
         return other(activeSeat(state))
+      case 'challenger':
+      case 'battleUser': // H-9c 仮の既定＝挑んだ側
+        return nearestBattle(state)?.battle?.challenger ?? env.you
+      case 'challenged': {
+        const b = nearestBattle(state)?.battle
+        return b ? other(b.challenger) : other(env.you)
+      }
       default:
-        return env.you // バトルの役（R2b）
+        return env.you
     }
   }
   if ('controllerOf' in p) return controllerOf(state, resolveRef(state, env, p.controllerOf)[0] ?? '') ?? env.you
@@ -52,16 +59,63 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
           return f.down ? [f.down.iid] : []
         case 'declaredAction':
           return f.decl?.sourceIid ? [f.decl.sourceIid] : []
+        case 'selectedBattleCard':
+          return f.battle?.battleCard ? [f.battle.battleCard] : []
         default:
           return []
       }
     }
+    case 'battle': {
+      const b = nearestBattle(state)?.battle
+      if (!b) return []
+      if (r.role === 'battleCard') return b.battleCard ? [b.battleCard] : []
+      return b.participants[r.role === 'challengerParticipants' ? b.challenger : other(b.challenger)]
+    }
+    case 'participants': {
+      const b = nearestBattle(state)?.battle
+      return b ? b.participants[resolvePlayer(state, env, r.side)] : []
+    }
+    case 'opponentChar':
+      return opponentChars(state, env, resolveRef(state, env, r.of)[0])
     case 'named':
       // 名前で指す参照は R2a の記述では使わない（名前の照合は nameIs 条件）。K7（コピー）と一緒に作る
       return []
     default:
       return []
   }
+}
+
+/** 対戦キャラ: バトル参加キャラなら相手側の参加キャラ。参加していないキャラが身代わりでバトルの結果ダメージを受けたら、
+ *  元の受け手の対戦キャラ（H-13 仮の既定）＝そのダメージの発生元の側の参加キャラ */
+function opponentChars(state: BoardState, env: Env, iid: string | undefined): string[] {
+  if (!iid) return []
+  const bf = nearestBattle(state)
+  const b = bf?.battle
+  if (!b) return []
+  for (const seat of ['A', 'B'] as Seat[]) if (b.participants[seat].includes(iid)) return b.participants[other(seat)]
+  const f = env.trigger ? findFrame(state, env.trigger) : undefined
+  const d = f?.damage
+  if (d?.battle && d.recipient === iid && d.origRecipient) {
+    for (const seat of ['A', 'B'] as Seat[]) if (b.participants[seat].includes(d.origRecipient)) return b.participants[other(seat)]
+  }
+  return []
+}
+
+/** 今の能力値＝印刷値＋記録した能力値修正（R2b。層 K3・性格反転などは R3） */
+export function currentStat(ctx: EngineCtx, state: BoardState, iid: string, stat: string): number {
+  const c = state.cards[iid]
+  if (!c) return 0
+  const base = ctx.cards[c.cardId]?.stats?.[stat] ?? 0
+  return base + state.procMeta.mods.filter((m) => m.iid === iid && m.kind === '能力値修正' && m.stat === stat).reduce((a, m) => a + m.delta, 0)
+}
+
+/** 攻防修正の合計（atk・def） */
+export function battleModOf(state: BoardState, iid: string, side: 'atk' | 'def'): number {
+  return state.procMeta.mods.filter((m) => m.iid === iid && m.kind === '攻防修正' && m.stat === side).reduce((a, m) => a + m.delta, 0)
+}
+
+function triggerFrame(state: BoardState, env: Env): ProcFrame | undefined {
+  return env.trigger ? findFrame(state, env.trigger) : undefined
 }
 
 function zoneCards(state: BoardState, sel: Selector, seats: Seat[]): CardInstance[] {
@@ -152,7 +206,48 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.targets)
     return !!f?.decl && xs.length > 0 && xs.every((x) => f.decl!.targets.includes(x))
   }
-  // バトルの条件（inBattle・battleAt・isParticipant）と pureAttrs は R2b 以降。R2a ではバトル中でない
+  // ── バトル（R2b）
+  if ('inBattle' in c) return inBattle(state)
+  if ('battleAt' in c) {
+    const b = nearestBattle(state)
+    return !!b && c.battleAt.includes(b.step)
+  }
+  if ('isParticipant' in c) {
+    const b = nearestBattle(state)?.battle
+    const xs = resolveRef(state, env, c.isParticipant)
+    if (!b || xs.length === 0) return false
+    const seats: Seat[] = c.side === 'challenger' ? [b.challenger] : c.side === 'challenged' ? [other(b.challenger)] : ['A', 'B']
+    return xs.every((x) => seats.some((st) => b.participants[st].includes(x)))
+  }
+  if ('joined' in c) {
+    // 20-4[8]＝挑んだ側・[13]＝挑まれた側の参加キャラが「バトルに参加したとき」
+    const f = triggerFrame(state, env)
+    const b = f?.battle
+    if (!f || !b || (f.step !== 8 && f.step !== 13)) return false
+    const seat = f.step === 8 ? b.challenger : other(b.challenger)
+    const xs = resolveRef(state, env, c.joined)
+    return xs.length > 0 && xs.every((x) => b.participants[seat].includes(x))
+  }
+  if ('battleResult' in c) {
+    const f = triggerFrame(state, env)
+    return !!(f?.damage?.battle || f?.down?.byBattle)
+  }
+  if ('activeIs' in c) return activeSeat(state) === resolvePlayer(state, env, c.activeIs)
+  if ('battlePlace' in c) {
+    const xs = resolveRef(state, env, c.battlePlace[0])
+    return xs.length > 0 && xs.every((x) => ctx.cards[state.cards[x]?.cardId ?? '']?.place === c.battlePlace[1])
+  }
+  if ('joinedReady' in c) {
+    const b = nearestBattle(state)?.battle
+    const xs = resolveRef(state, env, c.joinedReady)
+    return !!b && xs.length > 0 && xs.every((x) => b.joinedReady.includes(x))
+  }
+  if ('attachedTo' in c) {
+    const items = resolveRef(state, env, c.attachedTo[0])
+    const host = resolveRef(state, env, c.attachedTo[1])[0]
+    return !!host && items.length > 0 && items.every((x) => state.cards[x]?.attachedTo === host)
+  }
+  // pureAttrs は R4 以降
   return false
 }
 
@@ -171,11 +266,18 @@ export function evalExpr(ctx: EngineCtx, state: BoardState, env: Env, e: Expr): 
     return c ? [...(ctx.cards[c.cardId]?.cost ?? '')].filter((ch) => 'WRGLT'.includes(ch)).length : 0
   }
   if ('stat' in e) {
-    // 能力値（R2a は印刷値だけ。修正の層は R3 の K3）
+    // 能力値（印刷値＋記録した能力値修正。層は R3 の K3）。base＝元の能力値
     const c = state.cards[resolveRef(state, env, e.of)[0] ?? '']
     const stat = typeof e.stat === 'string' ? e.stat : env.slots[e.stat.slot]?.[0]
     if (!c || !stat) return 0
-    return ctx.cards[c.cardId]?.stats?.[stat] ?? 0
+    return e.basis === 'base' ? ctx.cards[c.cardId]?.stats?.[stat] ?? 0 : currentStat(ctx, state, c.iid, stat)
+  }
+  if ('battleDamage' in e) {
+    const b = nearestBattle(state)?.battle
+    const x = resolveRef(state, env, e.battleDamage)[0]
+    if (!b || !b.damage || !x) return 0
+    for (const seat of ['A', 'B'] as Seat[]) if (b.participants[seat].includes(x)) return Math.max(0, b.damage[seat])
+    return 0
   }
   return 0
 }

@@ -43,6 +43,7 @@ export type Timing =
   | 'バトルを受けるとき' | 'バトルを受けるキャラを選ぶとき' | 'バトルを受けたとき' | 'バトルを受けるキャラを選んだとき'
   | 'バトルカードを選択するとき' | 'バトルカードを選択したとき' | 'バトルを選択したとき'
   | 'バトルの結果の計算をしたとき' | 'バトルの結果を出したとき' | 'バトル終了時' | 'バトルが終了したとき'
+  | 'バトル終了後'   // 20-4[29]（oldrule.txt:1126-1127。interrupt-timings.md の一覧に無いが原典にある。R2b で足した）
 
 // ───────────────────────────────────────────────────────────────
 // §1 参照（誰が／どのカードが）
@@ -68,6 +69,9 @@ export type CardRef =
   | { ref: 'battle'; role: 'challengerParticipants' | 'challengedParticipants' | 'battleCard' }
   | { ref: 'it' }                   // Selector の where の中で「いま調べている1枚」
   | { ref: 'named'; name: string }    // 名前で指す（『HM-12』等）。コピーしても self にならない（FAQ oldfaq.txt:2172-2173）
+  // ── R2b で足した（HANDOFF-R2b「決めたこと」）
+  | { ref: 'participants'; side: PlayerRef }  // 進行中のバトルのそのプレイヤーのバトル参加キャラ
+  | { ref: 'opponentChar'; of: CardRef }      // 対戦キャラ（相手側のバトル参加キャラ）。参加していないキャラが身代わりで結果ダメージを受けたら元の受け手の対戦キャラ（H-13）
 
 /** 進行中の処理オブジェクトの役。ダメージ・ダウン・宣言・バトル種目選択など */
 export type EventRole = 'damageRecipient' | 'damageDealer' | 'downedChar' | 'declaredAction' | 'selectedBattleCard'
@@ -94,6 +98,7 @@ export type Expr =
   | { count: Selector }
   | { eventAmount: 'damage' }    // 進行中のダメージの値
   | { callCost: CardRef }        // 呼び出しコスト（印刷されたコストアイコンの数。R2a で足した・《恐怖の抱擁》）
+  | { battleDamage: CardRef }    // そのキャラが受けるバトルの結果ダメージ（20-4[24] の計算。無ければ 0。R2b）
   | { add: Expr[] }
   | { sub: [Expr, Expr] }
 
@@ -112,6 +117,13 @@ export type Cond =
   // ── R2a で足した（HANDOFF-R2a「決めたこと」）
   | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
   | { targets: CardRef }                       // 進行中の宣言（イベントの役 declaredAction）がこのカードを対象にしている（《すっとぼけ》）
+  // ── R2b で足した
+  | { joined: CardRef }                        // いまの段（20-4[8]・[13]）でバトルに参加したキャラ（「バトルに参加したとき」）
+  | { battleResult: true }                     // 進行中のダメージ（・ダウン）がバトルの結果ダメージ（20-10。FAQ:3978「攻と防から計算されたもの」）
+  | { activeIs: PlayerRef }                    // そのプレイヤーのターン（「自分のターンの終了時」）
+  | { battlePlace: [CardRef, '屋内' | '屋外'] } // バトルカードの分類
+  | { joinedReady: CardRef }                   // 待機状態でバトルに参加したキャラ（《エキサイト》）
+  | { attachedTo: [CardRef, CardRef] }        // アイテムがそのキャラに装備されている（「このキャラが装備しているアイテム」）
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -137,6 +149,8 @@ export interface Choice {
   /** 選ぶときの優先（満たす候補があればその中から選ぶ）。対象の条件ではないので立ち消えの判定には使わない
    *  （《マジカルサンダー》「相手プレイヤーが待機状態のキャラを優先的に選ぶ」FAQ:1995・1998。R2a で足した） */
   prefer?: Cond
+  /** 割り振り: 同じカードを何度も選べる。capBy kiryoku＝気力が0より小さくならない回数まで（《サバイバル》FAQ:4109。R2b で足した） */
+  repeat?: { capBy: 'kiryoku' }
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -211,6 +225,18 @@ export type Op =
   | { op: 'cancelDown' }                                                            // 進行中のダウン（役 downedChar）を起こさない（「ダウンせずに」）
   | { op: 'addDowns'; player: PlayerRef; n: number }                                // そのプレイヤーのダウン数を増やす（「相手プレイヤーは勝利条件を＋１」9-2-1）
   | { op: 'setKiryoku'; who: CardRef; value: number }                               // 気力を N にする（ダメージでも気力の減少でもない FAQ:2516）
+  // ── R2b で足した（HANDOFF-R2b「決めたこと」。バトルの手順の状態を変える・手順を起こす）
+  /** バトルの結果ダメージ（to が受ける分）を増減・固定する。計算前なら計算の後に当てる。0以下は増減しない（20-10）。evenIfZero はカードの表記（21） */
+  | { op: 'battleDamage'; to: CardRef | 'all'; delta?: Expr; set?: number; evenIfZero?: boolean }
+  | { op: 'firstStrike' }                                                           // このバトルの結果で味方キャラが先にダメージを与える（《先手必勝》）
+  | { op: 'skipBattleActions' }                                                     // [19]〜[22] を行わずに結果を出す（《出会い頭》FAQ:1375）
+  | { op: 'abortBattle' }                                                           // そのバトルは中断する（「放棄」「遅刻」）
+  | { op: 'startBattle' }                                                           // 相手にバトルを挑む（《抜き打ち》）。20-4[3] から
+  | { op: 'setBattleCard'; card: CardRef }                                          // バトル種目をこのバトルカードにする（《虎の子バトル》）
+  | { op: 'putBattleCard'; what: CardRef }                                          // 手札のバトルカードを自分のフィールドに出す（配置のアクション 19-2 ではない）
+  | { op: 'atBattleEnd'; do: Op[] }                                                 // [28]《バトル終了時》に処理する
+  | { op: 'moveItem'; item: CardRef; to: CardRef }                                  // アイテムを移し替える（装備と同じ扱い 17-3[11] から FAQ:804・2874）
+  | { op: 'down'; who: CardRef }                                                    // キャラをダウンさせる（15-5 のダウン処理。《サクリファイス》）
 
 // ───────────────────────────────────────────────────────────────
 // §7 継続効果（常時効果 12-2。エンジンは毎回「盤面＋継続効果の一覧」から現在値を導出する）
@@ -275,7 +301,9 @@ export type Ability =
   /** 常時効果（12-2・15-13-2・アイテム・フィールド・バトルカード） */
   | { kind: 'static'; name?: string; effects: Continuous[] }
   /** 処理条件がある常時効果（12-2-1）。宣言しない・割り込み型アクションでもない。該当タイミングで自動で処理される */
-  | { kind: 'conditional'; name?: string; trigger: Trigger; optional: boolean; effect: Op[] }
+  | { kind: 'conditional'; name?: string; trigger: Trigger; optional: boolean; effect: Op[]
+      /** フィールドカードの効果を両プレイヤーそれぞれのものとして処理する（18-1「お互いのプレイヤーや場に及ぼします」・FAQ:4105。R2b で足した）。AP→NAP */
+      eachPlayer?: boolean }
   /** カード本体のプレイ（イベントの効果など）。16-1 の14段を通る。name は「次のうち１つ」の選択肢の名前（declare.option で選ぶ・R2a で足した） */
   | { kind: 'play'; name?: string; cost?: Cost; speed: '通常型' | '割込型'; trigger?: Trigger; usableIf?: Cond; choices: Choice[]; effect: Op[] }
   /** DSL で書けない／書かない。エンジンは本文を出すだけ */

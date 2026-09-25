@@ -17,6 +17,8 @@ import {
   awaitingSeat,
   currentWindow,
   findFrame,
+  battleDecl,
+  nearestBattle,
   topFrame,
   type ProcChoice,
   type ProcDecl,
@@ -28,7 +30,7 @@ import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activa
 import { controllerOf, isCharOnField, maxKiryoku, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, parseCostText, payNow, planPayment } from './cost'
 import type { Choice, Op } from './dsl'
-import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
+import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
 
 // ───────────────────────────────────────────────────────────────
@@ -49,8 +51,8 @@ interface ItemEng {
   env: Env
   started: boolean
   optional: boolean
-  /** 処理条件がある常時効果: 始めるときに《〜とき》を確かめ直す（K10） */
-  recheck: { iid: string; index: number } | null
+  /** 処理条件がある常時効果: 始めるときに《〜とき》を確かめ直す（K10）。seat＝eachPlayer のそのプレイヤー */
+  recheck: { iid: string; index: number; seat?: Seat } | null
   /** 選択の答えを待っている */
   awaiting: { id: string; kind: 'use' | 'choose' | 'order'; slot?: string; optional?: boolean; ops?: Op[]; bind?: Record<string, string[]> } | null
   seq: number
@@ -79,6 +81,8 @@ export interface DeclareReq {
   option?: string
   /** コストを発生させるアクション（7-2）として宣言する */
   costGen?: boolean
+  /** バトルを行うアクション（20-4[1]）として宣言する。source は挑むつもりのキャラ（[7] の指定は処理のとき） */
+  battle?: boolean
 }
 
 export type DeclareOutcome =
@@ -138,6 +142,9 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     return { ok: true, actions: [{ type: 'procDeclare', by: req.by, decl }], decl, warnings: [] }
   }
 
+  if (req.battle) return declareBattle(ctx, state, req, id)
+  if (!req.ability && src.zone === 'hand' && info && ['c', 't', 'i', 'f', 'b'].includes(info.kind)) return declareCardUse(ctx, state, req, id)
+
   if (!ctx.defs[src.cardId]) return { ok: false, reason: `カードの記述が無い: ${nameOf(ctx, state, src.iid)}`, missingDef: true }
   const found = findAbility(ctx, src.cardId, req.ability ?? null, req.option)
   if (!found) return { ok: false, reason: `能力が無い: ${req.ability ?? req.option ?? '（本体）'}`, missingDef: true }
@@ -153,7 +160,16 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: frame?.id ?? null, declId: id, declared: { [src.iid]: src.orientation === 'ready' ? 'ready' : 'rested' } }
   // タイミング（11-1）: 通常型はメインフェイズの窓（手順の外）だけ。割込型は記載のタイミングの窓だけ
   const speed = ab.speed
-  if (speed === '通常型') {
+  // 20-4[19][20][22]: バトル中のアクションの機会（特殊能力は決まった側が1回・イベントは両者が複数回。その他のアクションは行えない FAQ:318・3318）
+  const battleAct = frame?.kind === 'battle' && [19, 20, 22].includes(frame.step)
+  if (speed === '通常型' && battleAct) {
+    const b = frame!.battle!
+    if (!isEvent) {
+      const who = frame!.step === 20 ? other(b.challenger) : b.challenger
+      if (req.by !== who) return { ok: false, reason: `この機会に特殊能力を使えるのは${frame!.step === 20 ? '挑まれた' : '挑んだ'}プレイヤー（20-4[${frame!.step}]）` }
+      if (b.abilityUsed) return { ok: false, reason: 'この機会の特殊能力は1回（20-4[19][20][22]）' }
+    }
+  } else if (speed === '通常型') {
     if (frame) return { ok: false, reason: '通常型は処理の途中に宣言できない（11-1）' }
   } else {
     if (!frame) return { ok: false, reason: '割込型の使用タイミングでない（手順の外）' }
@@ -229,7 +245,9 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     return iids.map((iid) => ({ key: iid, label: nameOf(ctx, state, iid) }))
   }
   if ('option' in p) return p.option.map((o) => ({ key: o, label: o }))
-  return [] // 能力・能力値を選ぶ（模写など）は R2a の外
+  // 能力値を1つ選ぶ（「このキャラの能力値１つを＋２」）。rule any だけ（maxBase・minBase は R4）
+  if ('stat' in p && p.rule === 'any') return ['力', '早', '賢', '根', '感'].map((a) => ({ key: a, label: a }))
+  return [] // 能力を選ぶ（模写など）は R4
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -259,7 +277,20 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
         apply({ type: 'procOpenMain' })
         continue
       }
+      // エントリーフェイズ（10-4）・手札調整フェイズ（10-7）の段を始める
+      const ph = s.turn?.phase
+      if ((ph === 'エントリー' || ph === '手札調整') && s.procMeta.phaseRun === null) {
+        apply({ type: 'procPhaseStart' })
+        continue
+      }
       break
+    }
+    if (top.status === 'enter' || top.status === 'resume' || top.status === 'done') {
+      // 積んだだけの手順（盤面を直接作ったとき）は core に進めさせる
+      const before = out.state
+      apply({ type: 'procRun' })
+      if (out.state === before) break
+      continue
     }
     if (top.status !== 'engine') break
     const acts = engineStep(ctx, s, top, out.warnings)
@@ -333,10 +364,145 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
     }
     case 'item':
       return itemStep(ctx, state, top, warnings)
+    case 'battleValues':
+      return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings) }]
+    case 'place':
+      return [{ type: 'procPlace', frameId: top.id, kiryoku: placeKiryoku(ctx, state, top) }]
     default:
       return []
   }
 }
+
+/**
+ * 20-4[18] 2.3.・[23]: 攻撃能力値・防御能力値。バトルカードの攻撃属性・防御属性（[16] で決まる。場を離れても有効 20-9）の
+ * 今の能力値＋攻防修正。属性が能力値アイコン1つでない（特殊な攻防）・複数参加は人が入れる（K13・K9 は R4）
+ */
+function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, { atk: number; def: number } | null> {
+  const b = frame.battle!
+  const out: Record<Seat, { atk: number; def: number } | null> = { A: null, B: null }
+  const info = b.battleCard ? ctx.cards[state.cards[b.battleCard]?.cardId ?? ''] : undefined
+  const one = (x: string | undefined) => (x && x.length === 1 && '力早賢根感'.includes(x) ? x : null)
+  const atkAttr = one(info?.battleAtk)
+  const defAttr = one(info?.battleDef)
+  if (!atkAttr || !defAttr) {
+    warnings.push(`manual: バトルの攻防の値（${info?.name ?? 'バトル種目なし'}: 攻 ${info?.battleAtk ?? '?'}・防 ${info?.battleDef ?? '?'}）を人が入れる`)
+    return out
+  }
+  for (const seat of ['A', 'B'] as Seat[]) {
+    const ps = b.participants[seat]
+    if (ps.length !== 1) {
+      if (ps.length > 1) warnings.push('manual: 複数参加のバトルの攻防の値（K9 は R4）')
+      continue
+    }
+    const p = ps[0]
+    out[seat] = { atk: currentStat(ctx, state, p, atkAttr) + battleModOf(state, p, 'atk'), def: currentStat(ctx, state, p, defAttr) + battleModOf(state, p, 'def') }
+  }
+  return out
+}
+
+/** 15-10-1[13]: 呼び出しは印刷された気力。15-10-2[13]: タッグは構成要素のダメージ（気力の上限－気力）を引き継ぐ（oldrule.txt:715・FAQ:3266） */
+function placeKiryoku(ctx: EngineCtx, state: BoardState, frame: ProcFrame): number | null {
+  const d = frame.decl!
+  const info = ctx.cards[state.cards[d.sourceIid ?? '']?.cardId ?? '']
+  if (!info || info.kiryoku === null) return null
+  if (frame.kind === 'call') return info.kiryoku
+  // [12] でゴミ箱へ移った後なので、フィールドにいた構成要素は [12] の直前の気力を frame.eng に持つ（core が記録）
+  const was = (frame.eng.componentKiryoku as Record<string, number | null> | undefined) ?? {}
+  let dmg = 0
+  for (const x of d.components ?? []) {
+    const k = was[x]
+    const max = ctx.cards[state.cards[x]?.cardId ?? '']?.kiryoku
+    if (k !== undefined && k !== null && max !== null && max !== undefined) dmg += max - k
+  }
+  return info.kiryoku - dmg
+}
+
+/** 20-2・20-3: バトルを行うアクションの宣言（自分のメインフェイズにアクションとして・待機状態のキャラ・選択可能なバトルカード） */
+function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOutcome {
+  const cur = currentWindow(state)
+  if (!cur || cur.frame) return { ok: false, reason: 'バトルの宣言はメインフェイズにアクションとしてのみ（20-2）' }
+  if (req.by !== activeSeat(state) || state.turn?.phase !== 'メイン') return { ok: false, reason: '自分のメインフェイズでない（20-2・20-3）' }
+  if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used)) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
+  if (!Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === req.by && c.orientation === 'ready')) return { ok: false, reason: '待機状態のキャラがいない（20-3）' }
+  void ctx
+  const decl = battleDecl(id, req.by)
+  return { ok: true, actions: [{ type: 'procDeclare', by: req.by, decl }], decl, warnings: [] }
+}
+
+/**
+ * 手札のカードを使う行動: キャラの呼び出し（15-10-1）・タッグ化（15-10-2）・アイテムの装備（17-3）・フィールドの配置（18-2）・
+ * バトルカードの配置（19-2）。どれも AP がメインフェイズに行う（10-5-1）。カードの記述は要らない（原典の手順だけ）
+ */
+function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOutcome {
+  const cur = currentWindow(state)!
+  const src = state.cards[req.source]
+  const info = ctx.cards[src.cardId]
+  if (cur.frame) return { ok: false, reason: '処理の途中には行えない（通常型 11-1）' }
+  if (req.by !== activeSeat(state) || src.owner !== req.by) return { ok: false, reason: 'アクティブプレイヤーが自分の手札から行う（10-5-1）' }
+  const kind = ({ c: 'call', t: 'tag', i: 'equip', f: 'field', b: 'battleCard' } as const)[info.kind as 'c' | 't' | 'i' | 'f' | 'b']
+  const mine = Object.values(state.cards).filter((c) => isCharOnField(c) && c.owner === req.by)
+  const targets = (req.targets ?? []).filter((t) => t in state.cards)
+  const eng: Record<string, unknown> = { cardId: src.cardId, usePool: true }
+  let equipTo: string | null = null
+  let components: string[] | undefined
+  if (kind === 'call') {
+    // 15-2 同名キャラ制限・キャラ数制限（宣言時の制限 15-10-1）
+    if (mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
+    if (mine.filter((c) => c.zone !== 'leader').length >= 5) return { ok: false, reason: 'キャラ数制限（15-2）' }
+  } else if (kind === 'tag') {
+    // 15-10-2[4]: 構成要素の2枚（フィールドの待機状態のキャラ1体以上＋残りは手札）。名前はタッグの名前（「＆」の前後）
+    const names = info.name.split('＆')
+    if (targets.length !== 2) return { ok: false, reason: '構成要素の2枚を提示できない（15-10-2[4][5]）' }
+    const used: string[] = []
+    let onFieldN = 0
+    for (const t of targets) {
+      const c = state.cards[t]
+      const nm = ctx.cards[c.cardId]?.name ?? ''
+      if (c.owner !== req.by || !names.includes(nm) || used.includes(nm)) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
+      used.push(nm)
+      if (isCharOnField(c)) {
+        if (c.orientation !== 'ready') return { ok: false, reason: `構成要素のキャラが待機状態でない: ${nm}（15-10-2）` }
+        onFieldN++
+      } else if (state.cards[t].zone !== 'hand') return { ok: false, reason: `構成要素が自分のフィールドにも手札にも無い: ${nm}` }
+    }
+    if (onFieldN === 0) return { ok: false, reason: '構成要素のキャラが自分のフィールドに1体もいない（15-10-2）' }
+    if (mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
+    components = targets
+  } else if (kind === 'equip') {
+    // 17-3[3] 装備対象（フィールドのキャラ。装備対象の種類の制限 17-1 は K4＝R3）
+    equipTo = targets[0] ?? null
+    if (!equipTo || !isCharOnField(state.cards[equipTo])) return { ok: false, reason: '装備対象を指定できない（17-3[5]）' }
+    if (Object.values(state.cards).some((c) => c.attachedTo === equipTo && c.cardId === src.cardId)) return { ok: false, reason: '同名のアイテムを装備している（17-2・宣言時の制限）' }
+  } else if (kind === 'battleCard') {
+    if (Object.values(state.cards).filter((c) => c.zone === 'battle' && c.owner === req.by).length >= 3) return { ok: false, reason: 'バトルカードは3枚まで（19-1・宣言時の制限）' }
+  }
+  // [4] 使用代償の支払い方法の宣言（タッグ化は使用代償なし 15-10-2）
+  const cost = kind === 'tag' ? { icons: [], attrs: [] } : costOfAbility(ctx, src.cardId, null).cost
+  const plan = planPayment(ctx, state, req.by, null, cost, req.payWith?.length ? req.payWith : null)
+  if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]）' }
+  eng.usePool = plan.usePool
+  const label = kind === 'call' ? `呼び出し:${info.name}` : kind === 'tag' ? `タッグ化:${info.name}` : kind === 'equip' ? `装備:${info.name}` : kind === 'field' ? `フィールド配置:${info.name}` : `バトルカード配置:${info.name}`
+  const decl: ProcDecl = {
+    id,
+    by: req.by,
+    kind,
+    actionType: '通常型',
+    label,
+    sourceIid: src.iid,
+    targets,
+    costGens: plan.costGens,
+    sources: [],
+    trigger: null,
+    usageKey: null,
+    eng,
+    equipTo,
+    components,
+  }
+  return { ok: true, actions: [{ type: 'procDeclare', by: req.by, decl }], decl, warnings: plan.warn }
+}
+
+/** 今の能力値（印刷値＋記録した能力値修正）。画面・FAQ テスト用 */
+export { currentStat }
 
 function optionOf(ctx: EngineCtx, d: ProcDecl): string | undefined {
   const idx = d.eng.index as number
@@ -366,7 +532,16 @@ function checkTargets(ctx: EngineCtx, state: BoardState, frame: ProcFrame): stri
 function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<SimulItem, 'status' | 'type'>[] {
   const applied = (frame.eng.applied as string[] | undefined) ?? []
   const condRedirected = !!frame.eng.condRedirected
-  return conditionalHits(ctx, state, frame)
+  // [28]《バトル終了時》に処理される効果（atBattleEnd で預けたもの）
+  type AtEnd = { key: string; label: string; by: Seat; sourceIid: string | null; ops: Op[]; env: Env }
+  const atEnd: Omit<SimulItem, 'status' | 'type'>[] =
+    frame.kind === 'battle' && frame.step === 28
+      ? ((frame.eng.atEnd as AtEnd[] | undefined) ?? []).map((x) => {
+          const eng: ItemEng = { tasks: x.ops.map((op) => ({ op })), env: x.env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
+          return { key: x.key, label: x.label, by: x.by, sourceIid: x.sourceIid, eng: eng as unknown as Record<string, unknown> }
+        })
+      : []
+  return [...atEnd, ...conditionalHits(ctx, state, frame)
     .filter((h) => !applied.includes(h.key))
     // H-2: 処理条件がある常時効果による受け渡しは、ダメージ1件につき1回
     .filter((h) => !(condRedirected && h.ab.effect.some((op) => op.op === 'redirectDamage')))
@@ -376,12 +551,12 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
         env: h.env,
         started: false,
         optional: h.ab.optional,
-        recheck: { iid: h.iid, index: h.index },
+        recheck: { iid: h.iid, index: h.index, seat: h.key.includes("@") ? h.env.you : undefined },
         awaiting: null,
         seq: 0,
       }
       return { key: h.key, label: h.ab.name ?? nameOf(ctx, state, h.iid), by: h.env.you, sourceIid: h.iid, eng: eng as unknown as Record<string, unknown> }
-    })
+    })]
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -401,7 +576,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       const trig = findFrame(state, eng.env.trigger)
       // H-2: 処理条件がある常時効果による受け渡しは、ダメージ1件につき1回（先に処理された《尊い犠牲》が受け渡したら、他は読み飛ばす）
       const redirectDone = !!trig?.eng.condRedirected && eng.tasks.some((t) => t.op.op === 'redirectDamage')
-      if (redirectDone || !stillMatches(ctx, state, eng.recheck.iid, eng.recheck.index, eng.env.trigger)) {
+      if (redirectDone || !stillMatches(ctx, state, eng.recheck.iid, eng.recheck.index, eng.env.trigger, eng.recheck.seat)) {
         return [...acts, { type: 'procTrace', entry: { kind: 'name', text: `読み飛ばし:${item.label}` } }, done(true)]
       }
       // この手順（ダメージ1件など）で処理済みの効果として記録する（受け手の差し替えでやり直す段で同じ効果を二度処理しない）
@@ -544,8 +719,20 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         return { tasks: [], actions: [{ type: 'procTrace', entry: { kind: 'abort', text: `${item.label}: 適切な対象が無い（立ち消え）`, id: item.key } }] }
       }
       if (options.length === 0) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [] } } }, actions: [] }
-      const min = task.optionalFirst ? 0 : Math.min(min0, options.length)
       const id = `${frame.id}:${item.key}:${ch.slot}:${eng.seq}`
+      if (ch.repeat) {
+        // 割り振り: 同じカードを何度も選べる。気力が0より小さくならない回数まで（《サバイバル》FAQ:4109）
+        const caps: Record<string, number> = {}
+        for (const o of options) caps[o.key] = Math.max(0, state.cards[o.key]?.kiryoku ?? 0)
+        const total = Object.values(caps).reduce((a, x) => a + x, 0)
+        const n = Math.min(min0, total)
+        return {
+          tasks: rest,
+          patch: { awaiting: { id, kind: 'choose', slot: ch.slot } },
+          actions: [{ type: 'procChoice', choice: { id, by: chooser, kind: 'select', prompt: `${item.label}: ${ch.slot}（割り振り）`, options, min: n, max: Math.min(max, total), repeat: true, caps, frameId: frame.id } }],
+        }
+      }
+      const min = task.optionalFirst ? 0 : Math.min(min0, options.length)
       return {
         tasks: rest,
         patch: { awaiting: { id, kind: 'choose', slot: ch.slot, optional: task.optionalFirst } },
@@ -632,6 +819,64 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // 相手に払うか聞く（K5）。R2a では「払わない」を既定にせず人に聞く
       return manual(`相手への問い「${op.prompt}」`)
     }
+    // ── R2b
+    case 'statMod': {
+      // 修正を記録する（層 K3 は R3）。期間: バトル終了時まで→[28]、それ以外の能力値修正→ターン終了時（12-1・10-8）
+      const stat = typeof op.stat === 'string' ? op.stat : env.slots[op.stat.slot]?.[0]
+      if (!stat) return { tasks: rest, actions: [] }
+      const delta = evalExpr(ctx, state, env, op.delta)
+      const until = op.duration === 'endOfBattle' || op.kind === '攻防修正' ? 'battle' : 'turn'
+      if (op.duration !== 'endOfBattle' && op.duration !== 'endOfTurn' && op.duration !== 'instant') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い（R3）`)
+      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procMod', iid, stat, delta, kind: op.kind, until }) as BoardAction) }
+    }
+    case 'battleDamage': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const b = bf.battle
+      const seats: Seat[] = op.to === 'all' ? ['A', 'B'] : refs(op.to).flatMap((iid) => (['A', 'B'] as Seat[]).filter((st) => b.participants[st].includes(iid)))
+      if (seats.length === 0) return manual('バトル参加キャラでない')
+      const delta = op.delta !== undefined ? evalExpr(ctx, state, env, op.delta) : undefined
+      return { tasks: rest, actions: seats.map((seat) => ({ type: 'procBattle', frameId: bf.id, edit: { seat, delta, set: op.set, evenIfZero: op.evenIfZero } }) as BoardAction) }
+    }
+    case 'firstStrike': {
+      const bf = nearestBattle(state)
+      if (!bf) return manual('バトル中でない')
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, firstStrike: { seat: env.you, key: env.declId ?? item.key } }] }
+    }
+    case 'skipBattleActions': {
+      const bf = nearestBattle(state)
+      if (!bf) return manual('バトル中でない')
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, skipActions: true }] }
+    }
+    case 'abortBattle': {
+      const bf = nearestBattle(state)
+      if (!bf) return manual('バトル中でない')
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, abort: `${item.label}（カードの効果）` }] }
+    }
+    case 'startBattle':
+      return { tasks: rest, actions: [{ type: 'procStartBattle', by: env.you, id: `${env.declId ?? item.key}.battle` }] }
+    case 'setBattleCard': {
+      const bf = nearestBattle(state)
+      const card = refs(op.card)[0]
+      if (!bf || !card) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, battleCard: card }] }
+    }
+    case 'putBattleCard':
+      return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'battle', owner: env.you }) as BoardAction) }
+    case 'atBattleEnd': {
+      const bf = nearestBattle(state)
+      if (!bf) return manual('バトル中でない')
+      const atEnd = [...((bf.eng.atEnd as unknown[]) ?? []), { key: `${item.key}:end${eng.seq}`, label: `${item.label}（バトル終了時）`, by: env.you, sourceIid: env.self, ops: op.do, env }]
+      return { tasks: rest, actions: [{ type: 'procEngine', frameId: bf.id, patch: { atEnd } }] }
+    }
+    case 'moveItem': {
+      const it = refs(op.item)[0]
+      const to = refs(op.to)[0]
+      if (!it || !to) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procTransfer', by: env.you, item: it, to, id: `${env.declId ?? item.key}.mv${eng.seq}` }] }
+    }
+    case 'down':
+      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procDown', iid }) as BoardAction) }
     default:
       return manual(`R2a の範囲外の操作 ${op.op}`)
   }

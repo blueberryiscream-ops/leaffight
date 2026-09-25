@@ -58,11 +58,14 @@ for (const f of files) {
   for (const c of mod.cases) cases.push({ ...c, file: f })
 }
 
-/** 原典の「アクション宣言の機会」がある段（15-13-1・16-1・15-4-2・15-5-1・7-2）。空配列＝段の確かめをしない（R2b 以降の手順） */
+/** 原典の「アクション宣言の機会」がある段（15-13-1・16-1・15-4-2・15-5-1・17-3・18-2・19-2・20-4・10-4・10-7）。phase の空配列＝段の確かめをしない */
 const WINDOW_STEPS: Record<string, number[]> = {
   ability: [8, 11, 13], event: [8, 11, 13], damage: [1, 3, 4, 5], down: [2, 4],
-  item: [], field: [], battleCard: [], battle: [], phase: [],
+  item: [8, 13], field: [8, 13], battleCard: [8, 12],
+  battle: [2, 4, 6, 8, 10, 13, 15, 17, 19, 20, 22, 25, 27, 29], phase: [],
 }
+/** 期待の at（その段以降で最初に止まった点）: 手順の段の範囲（R2b） */
+const LAST_STEPS: Record<string, number> = { ability: 14, event: 14, damage: 6, down: 7, item: 13, field: 13, battleCard: 12, battle: 29, phase: 5 }
 
 const squash = (s: string) => s.replace(/\s+/g, '')
 const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(s) && s !== 'you' && s !== 'opponent'
@@ -153,6 +156,7 @@ for (const c of cases) {
     else if (ok.length && !ok.includes(at.step)) fail(id, `steps[${i}] の at が宣言の機会の段でない: ${at.proc}[${at.step}]`)
   }
   for (const e of (c.expect ?? []) as Expect[]) {
+    if (e.at && !(e.at.proc in LAST_STEPS && e.at.step >= 1 && e.at.step <= LAST_STEPS[e.at.proc])) fail(id, `expect の at が手順の段でない: ${e.at.proc}[${e.at.step}]`)
     if ('fizzled' in e) { const s = c.steps?.[e.fizzled.step]; if (s && !('declare' in s)) fail(id, `fizzled の step が宣言でない: ${e.fizzled.step}`) }
   }
   // 4. grade
@@ -215,8 +219,13 @@ if (existsSync(cardsDir)) {
 }
 for (const p of defProblems) console.error(`❌ 記述: ${p}`)
 
-const scopePath = join(faqDir, '_r2a-scope.json')
-const scope = new Set<string>(existsSync(scopePath) ? (JSON.parse(readFileSync(scopePath, 'utf8')) as { ids: string[] }).ids : [])
+const readScope = (name: string) => {
+  const p = join(faqDir, name)
+  return new Set<string>(existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as { ids: string[] }).ids : [])
+}
+const scopeA = readScope('_r2a-scope.json')
+const scopeB = readScope('_r2b-scope.json')
+const scope = new Set<string>([...scopeA, ...scopeB])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
   const results: (CaseResult & { inScope: boolean })[] = []
@@ -225,17 +234,24 @@ if (Object.keys(cardInfos).length) {
     const inScope = scope.has(c.id)
     if (!inScope && r.verdict === '❌') {
       r.verdict = '保留'
-      r.reasons.unshift('対象外（R2a の外）の参考実行で期待と違った')
+      r.reasons.unshift('対象外（R2a・R2b の外）の参考実行で期待と違った')
     }
     results.push({ ...r, inScope })
   }
   const count = (xs: typeof results) => ({ total: xs.length, ok: xs.filter((r) => r.verdict === '✅').length, hold: xs.filter((r) => r.verdict === '保留').length, ng: xs.filter((r) => r.verdict === '❌').length })
-  const inS = results.filter((r) => r.inScope)
-  const missing = [...scope].filter((id) => !results.some((r) => r.id === id))
-  const summary = { scope: count(inS), outOfScope: count(results.filter((r) => !r.inScope)), scopeMissing: missing, okWithManual: inS.filter((r) => r.verdict === '✅' && r.manual.length).map((r) => r.id) }
-  writeFileSync(join(faqDir, '_r2a-result.json'), JSON.stringify({ generatedBy: 'scripts/test-faq.ts', summary, results }, null, 1) + String.fromCharCode(10))
-  console.log(`実行（R2a の対象 ${scope.size}件）: ✅ ${summary.scope.ok}／保留 ${summary.scope.hold}／❌ ${summary.scope.ng}${missing.length ? `／見つからない ${missing.length}` : ''}（✅ のうち manual を含む ${summary.okWithManual.length}）`)
-  console.log(`実行（対象の外・参考）: ✅ ${summary.outOfScope.ok}／保留 ${summary.outOfScope.hold}`)
-  for (const r of inS.filter((r) => r.verdict !== '✅')) console.log(`  ${r.verdict} ${r.id}: ${[...r.reasons, ...r.failures].join(' / ')}`)
-  if (summary.scope.ng || missing.length || defProblems.length) process.exit(1)
+  // R2a・R2b の対象ごとに結果のファイルを書く（inScope はそのフェイズの対象か）
+  let ng = 0
+  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB]] as const) {
+    const rs = results.map((r) => ({ ...r, inScope: sc.has(r.id) }))
+    const inS = rs.filter((r) => r.inScope)
+    const missing = [...sc].filter((id) => !rs.some((r) => r.id === id))
+    const summary = { scope: count(inS), outOfScope: count(rs.filter((r) => !r.inScope)), scopeMissing: missing, okWithManual: inS.filter((r) => r.verdict === '✅' && r.manual.length).map((r) => r.id) }
+    writeFileSync(join(faqDir, `_${name.toLowerCase()}-result.json`), JSON.stringify({ generatedBy: 'scripts/test-faq.ts', summary, results: rs }, null, 1) + String.fromCharCode(10))
+    console.log(`実行（${name} の対象 ${sc.size}件）: ✅ ${summary.scope.ok}／保留 ${summary.scope.hold}／❌ ${summary.scope.ng}${missing.length ? `／見つからない ${missing.length}` : ''}（✅ のうち manual を含む ${summary.okWithManual.length}）`)
+    for (const r of inS.filter((r) => r.verdict !== '✅')) console.log(`  ${r.verdict} ${r.id}: ${[...r.reasons, ...r.failures].join(' / ')}`)
+    ng += summary.scope.ng + missing.length
+  }
+  const out = results.filter((r) => !r.inScope)
+  console.log(`実行（対象の外・参考 ${out.length}件）: ✅ ${out.filter((r) => r.verdict === '✅').length}／保留 ${out.filter((r) => r.verdict === '保留').length}`)
+  if (ng || defProblems.length) process.exit(1)
 } else console.log('実行: pool.json が無いのでスキップ')
