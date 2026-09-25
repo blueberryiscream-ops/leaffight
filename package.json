@@ -19,7 +19,8 @@
     "test:setup": "node --import ./scripts/register-ts-loader.mjs scripts/test-setup.ts",
     "test:visibility": "node --import ./scripts/register-ts-loader.mjs scripts/test-visibility.ts",
     "test:ability-split": "node scripts/test-ability-split.mjs",
-    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare && npm run test:battle && npm run test:battle-flow && npm run test:battle-values && npm run test:deck && npm run test:setup && npm run test:visibility && npm run test:ability-split",
+    "test:faq": "node --import ./scripts/register-ts-loader.mjs scripts/test-faq.ts",
+    "test": "npm run test:core-priority && npm run test:timing && npm run test:play-declare && npm run test:battle && npm run test:battle-flow && npm run test:battle-values && npm run test:deck && npm run test:setup && npm run test:visibility && npm run test:ability-split && npm run test:faq",
     "verify": "npm run build && npm run test"
   },
   "dependencies": {
