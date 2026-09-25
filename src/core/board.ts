@@ -84,7 +84,8 @@ export interface BoardState {
   /** 手順の付帯状態（メインフェイズの窓・選択・連番・使用回数など） */
   procMeta: ProcMeta
   /** 手番（アクティブプレイヤー）とフェイズ。null＝未設定（今は priority.activePlayer で代用している） */
-  turn: { active: Seat; phase: Phase } | null
+  /** n: ターンの番号（1＝先攻の1ターン目・10-2-4 の制限に使う。R2u）。無い盤面（R2a/R2b のテスト・旧データ）は制限なし */
+  turn: { active: Seat; phase: Phase; n?: number } | null
   /** 確定したキャラのダウン数（9-2）。ダウン処理[3]で加えた分は[6]の後に確定する（H-12） */
   downs: Record<Seat, number>
   /** 発生済みのコスト（7-3） */

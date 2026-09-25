@@ -422,6 +422,7 @@ function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: s
   const cur = currentWindow(state)
   if (!cur || cur.frame) return { ok: false, reason: 'バトルの宣言はメインフェイズにアクションとしてのみ（20-2）' }
   if (req.by !== activeSeat(state) || state.turn?.phase !== 'メイン') return { ok: false, reason: '自分のメインフェイズでない（20-2・20-3）' }
+  if (state.turn?.n === 1) return { ok: false, reason: '先攻の1ターン目はバトルを行えない（10-2-4）' }
   if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used)) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
   if (!Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === req.by && c.orientation === 'ready')) return { ok: false, reason: '待機状態のキャラがいない（20-3）' }
   void ctx

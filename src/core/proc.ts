@@ -1155,7 +1155,8 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
         return setFrame({ ...state, cards }, advance(frame))
       }
       case 4:
-        // [4] AP は必ず自分のデッキからカードを1枚ドローする（先攻1ターン目の制限 10-2-4 は R2u）
+        // [4] AP は必ず自分のデッキからカードを1枚ドローする。先攻の1ターン目はドローできない（10-2-4 oldrule.txt:376-378）
+        if (state.turn?.n === 1) return setFrame(state, advance(frame))
         trace.push({ kind: 'name', text: `ドロー:${ap}:1` })
         return setFrame(drawCard(state, ap), advance(frame))
       default:
@@ -1423,6 +1424,8 @@ function popFrame(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boar
   }
   // ターンの進行: エントリーが終わったらメインフェイズ（13-3-1 の窓を開き直す）。手札調整が終わったらターン終了（10-8）
   if (frame.kind === 'entry' && s.turn) s = setMeta({ ...s, turn: { ...s.turn, phase: 'メイン' } }, { base: null, mainClosed: false, phaseRun: null })
+  // ターン終了（10-8）の後は相手のターン（10-2 交互に進行）。10-3 ターン開始の《ターン開始時》の処理は R3（タイミングの表に無い）【決めたこと】
+  if (frame.kind === 'turnEnd' && s.turn) s = setMeta({ ...s, turn: { active: s.turn.active === 'A' ? 'B' : 'A', phase: 'エントリー', ...(s.turn.n !== undefined ? { n: s.turn.n + 1 } : {}) } }, { base: null, mainClosed: false, phaseRun: null })
   if (frame.kind === 'handAdjust') s = pushFrame(setMeta(s, { phaseRun: 'ターン終了' }), { kind: 'turnEnd', step: 1, status: 'enter', window: null, by: activeSeat(s), label: 'ターン終了', eng: {} }, 'phase')[0]
   return s
 }

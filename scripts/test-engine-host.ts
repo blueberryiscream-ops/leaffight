@@ -52,6 +52,46 @@ if (r3.ok) eq(undo(r3.history).present === s0, true, '④ Undo 1回で要求の�
 // ⑤ assist の旧データは free で読む（PHASE-R2u §1）
 eq(fillBoardDefaults({ mode: 'assist' } as Partial<BoardState>).mode, 'free', '⑤ mode: assist の保存盤面は free として読む')
 
+// ⑥ ターンの進行: 先攻の1ターン目のエントリーはドローしない・2ターン目以降はする（10-2-4 oldrule.txt:376-378・10-4[4]）
+function runEntry(n: number): { hand: number; phase: string | undefined } {
+  let h: History = { ...emptyHistory(), present: board([card('dA0', 'A', 'deck'), card('dA1', 'A', 'deck'), card('dB0', 'B', 'deck')]) }
+  h = { ...h, present: { ...h.present, turn: { active: 'A', phase: 'エントリー', n } } }
+  h = { ...h, present: drive(h.present, ctx).state }
+  for (let i = 0; i < 20 && h.present.turn?.phase === 'エントリー'; i++) {
+    const seat = awaitingSeat(h.present)
+    if (!seat) break
+    const r = applyEngineReq(h, ctx, { kind: 'pass', by: seat })
+    if (!r.ok) break
+    h = r.history
+  }
+  return { hand: Object.values(h.present.cards).filter((c) => c.owner === 'A' && c.zone === 'hand').length, phase: h.present.turn?.phase }
+}
+eq(runEntry(1), { hand: 0, phase: 'メイン' }, '⑥ 先攻1ターン目: エントリーのドロー無しでメインへ（10-2-4）')
+eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エントリーで1枚ドローしてメインへ（10-4[4]）')
+
+// ⑦ フェイズを進める要求はアクティブプレイヤーだけ（10-2-2）。メイン→終了（10-2-3）
+{
+  const h1 = r3.ok ? r3.history : h0
+  eq(applyEngineReq(h1, ctx, { kind: 'phase', by: 'B' }).ok, false, '⑦ NAP はフェイズを進められない（10-2-2）')
+  const r = applyEngineReq(h1, ctx, { kind: 'phase', by: 'A' })
+  eq(r.ok && r.history.present.turn?.phase, '終了', '⑦ AP がメインを終えると終了フェイズ（10-2-3）')
+}
+
+// ⑧ 手札調整→ターン終了（10-8）→相手のターンのエントリー（10-2 交互に進行）
+{
+  let h: History = { ...emptyHistory(), present: { ...board([card('dA0', 'A', 'deck'), card('dB0', 'B', 'deck'), card('dB1', 'B', 'deck')]), turn: { active: 'A', phase: '終了', n: 1 } } }
+  const r = applyEngineReq(h, ctx, { kind: 'phase', by: 'A' })
+  if (r.ok) h = r.history
+  for (let i = 0; i < 30 && h.present.turn?.active === 'A'; i++) {
+    const seat = awaitingSeat(h.present)
+    if (!seat) break
+    const x = applyEngineReq(h, ctx, { kind: 'pass', by: seat })
+    if (!x.ok) break
+    h = x.history
+  }
+  eq({ active: h.present.turn?.active, n: h.present.turn?.n }, { active: 'B', n: 2 }, '⑧ ターン終了の後は相手の2ターン目（10-2・10-8）')
+}
+
 if (failures) {
   console.error(`\n${failures} 件失敗`)
   process.exit(1)

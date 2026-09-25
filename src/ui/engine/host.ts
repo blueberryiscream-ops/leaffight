@@ -13,7 +13,7 @@ import { activeSeat, awaitingSeat, currentWindow, type ProcTrace } from '../../c
 import type { CardInfo, EngineCtx } from '../../engine/ctx'
 import { declare, drive, validPick, type DeclareReq } from '../../engine/drive'
 import type { CardDef } from '../../engine/dsl'
-import type { EngineReq } from '../../net/session'
+import type { EngineReq, PublicStep } from '../../net/session'
 
 // ───────────────────────────────────────────────────────────────
 // EngineCtx を data 層の中身から作る（形は scripts/lib/faq-run.ts の cardInfoOf と同じ）
@@ -58,7 +58,7 @@ export function buildEngineCtx(pool: PoolCardLike[], defs: Record<string, CardDe
 // 要求
 // ───────────────────────────────────────────────────────────────
 
-export type { EngineReq }
+export type { EngineReq, PublicStep }
 
 export interface EngineApplied {
   ok: true
@@ -73,12 +73,11 @@ export interface EngineRejected {
   manual?: boolean
 }
 
-/** 次のフェイズ（10-1: エントリー→メイン→手札調整→ターン終了） */
-function nextPhase(state: BoardState): 'メイン' | '手札調整' | 'ターン終了' | null {
+/** 次のフェイズ（10-2-3: エントリー→メイン→終了→手札調整）。エントリー・手札調整は core が段を進めて自分で次へ行く */
+function nextPhase(state: BoardState): 'メイン' | '終了' | '手札調整' | null {
   const ph = state.turn?.phase
-  if (ph === 'エントリー') return 'メイン'
-  if (ph === 'メイン') return '手札調整'
-  if (ph === '手札調整') return 'ターン終了'
+  if (ph === 'メイン') return '終了'
+  if (ph === '終了') return '手札調整'
   return null
 }
 
@@ -211,4 +210,24 @@ export function shouldAutoPass(state: BoardState, ctx: EngineCtx, seat: Seat): b
   if (state.result || state.procMeta.choice || !currentWindow(state) || awaitingSeat(state) !== seat) return false
   // 【決めたこと】コスト発生だけの宣言は数えない（支払いの中で選ぶもの §2-1。数えると手札にキャラがある限り止まってしまう）
   return legalDeclarations(state, ctx, seat).filter((d) => !d.req.costGen).length === 0
+}
+
+// ───────────────────────────────────────────────────────────────
+// 段ごとの表示（§2-4）: drive の trace を公開してよい形にする
+// ───────────────────────────────────────────────────────────────
+
+
+/**
+ * trace の文に入っている iid を取り出し、文からは iid を伏せる（カード名は入れない。画面が iid から
+ * 名前を出すときに isPublicCard で確かめる）。非公開のカードの名前はここでは作らない。
+ */
+export function toPublicSteps(trace: ProcTrace[], state: BoardState): PublicStep[] {
+  return trace
+    .filter((t) => t.kind !== 'warn')
+    .map((t) => {
+      const parts = t.text.split(':')
+      const iids = parts.filter((p) => p in state.cards)
+      const text = parts.filter((p) => !(p in state.cards)).join(':')
+      return { text, iids }
+    })
 }
