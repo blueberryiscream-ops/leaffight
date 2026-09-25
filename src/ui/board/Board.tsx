@@ -24,12 +24,14 @@ import { LogPanel } from './LogPanel'
 import { StackedCardSlot } from './StackedCardSlot'
 import { StartWithDeckDialog } from './StartWithDeckDialog'
 import { StackPanel } from './StackPanel'
-import { TodoBand } from './TodoBand'
+import { SetupBand, TodoBand } from './TodoBand'
 import { cellSizeForB, portraitCell, squareCell, useMeasuredHeight, useMeasuredWidth } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
-import { EngineBar } from '../engine/EngineBar'
+import { EngineBar, stepLine } from '../engine/EngineBar'
 import { buildEngineCtx } from '../engine/host'
+import { ProcPanel } from '../engine/ProcPanel'
+import { useEngineUI } from '../engine/useEngineUI'
 import type { CardDef } from '../../engine/dsl'
 
 /**
@@ -166,6 +168,10 @@ export function Board({
     [cards, cardDefs],
   )
   useEffect(() => setEngineCtx(engineCtx), [engineCtx, setEngineCtx])
+  // R2u §3-3: 宣言の入口・対象・支払い・選択肢を盤面のクリックで（このクライアントだけの状態）
+  const ui = useEngineUI({ board, ctx: engineCtx, localSeat, solo: mode === 'solo', engineRequest })
+  const engineActionsFor = (iid: string | null) => (iid && ui.on ? ui.declsFor(iid).map((d) => ({ label: d.label, onClick: () => ui.start(d) })) : [])
+  const nameOfId = (id: string) => cardMap.get(id)?.name ?? id
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -210,6 +216,11 @@ export function Board({
     setBattleSelected((cur) => (cur.includes(iid) ? cur.filter((i) => i !== iid) : [...cur, iid]))
 
   function handleCardClick(iid: string) {
+    // エンジンモード: 対象・支払い・選択肢の候補なら、そのクリックはエンジンの入力（R2u §2-1・§3-3）
+    if (ui.click(iid)) {
+      setSelectedIid(iid)
+      return
+    }
     const kind = battleCandidateKind(board, iid, localSeat)
     if (kind === 'participant') {
       toggleBattleSelected(iid)
@@ -226,6 +237,8 @@ export function Board({
 
   /** リング表示（§1）。候補でなければ何も返さない（対象カードの見た目は変えない） */
   function battleRingProps(iid: string): { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string } {
+    const e = ui.ring(iid)
+    if (e.battleRing) return e
     const kind = battleCandidateKind(board, iid, localSeat)
     if (kind === 'participant') {
       return battleSelected.includes(iid) ? { battleRing: 'selected', battleRingLabel: '参加' } : { battleRing: 'candidate' }
@@ -272,6 +285,12 @@ export function Board({
     if (samePlace) return
 
     const cardName = cardOf(instance.cardId)?.name ?? instance.cardId
+
+    // エンジンモード: 手札から盤面へのドラッグ＝そのカードを使う宣言（R2u §3-3）。カードは動かさない（行き先は手順が決める）
+    if (board.mode === 'engine' && instance.zone === 'hand' && PLAY_DECLARE_TARGET_ZONES.has(target.toZone)) {
+      ui.startFor(iid)
+      return
+    }
 
     const isPlayDeclare =
       board.mode === 'assist' && instance.zone === 'hand' && PLAY_DECLARE_TARGET_ZONES.has(target.toZone)
@@ -444,11 +463,12 @@ export function Board({
             imageUrlOf={imageUrlOf}
             board={board}
             dispatch={dispatch}
-            onCardClick={setSelectedIid}
+            onCardClick={handleCardClick}
             onCardContextMenu={openMenu}
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={inst.owner !== mySeat}
+            {...battleRingProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -468,7 +488,7 @@ export function Board({
       cardOf={cardOf}
       imageUrlOf={imageUrlOf}
       dispatch={dispatch}
-      onCardClick={setSelectedIid}
+      onCardClick={handleCardClick}
       onCardContextMenu={openMenu}
       onShuffle={opts.onShuffle}
       fanOut={opts.fanOut}
@@ -477,6 +497,7 @@ export function Board({
       size={cellPortrait}
       handSize={handCardSize}
       selectedIid={selectedIid}
+      ringOf={ui.on ? ui.ring : undefined}
     />
   )
 
@@ -725,8 +746,10 @@ export function Board({
         <EngineBar
           board={board}
           localSeat={localSeat}
+          solo={mode === 'solo'}
           ctx={engineCtx}
-          nameOf={(id) => cardOf(id)?.name ?? id}
+          ui={ui}
+          nameOf={nameOfId}
           engineRequest={engineRequest}
           dispatch={dispatch}
           steps={engineSteps}
@@ -735,6 +758,10 @@ export function Board({
         />
         {board.mode !== 'engine' && (
           <TodoBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} battleSelection={battleSelected} />
+        )}
+        {/* エンジンの間も開始準備（P5b: マリガン・リーダーを表にする）の帯は出す。済んだら EngineBar の「先攻 A/B で始める」 */}
+        {board.mode === 'engine' && board.setup[localSeat] && !board.setup[localSeat]!.leaderRevealed && (
+          <SetupBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} />
         )}
 
         {dragNotice && (
@@ -752,18 +779,19 @@ export function Board({
           <div className="flex min-h-0 flex-col gap-1.5">
             <div className="lf-panel shrink-0 p-2 text-[10px] text-ink-muted">
               <div className="mb-1 font-semibold text-ink-muted">システム</div>
-              <div>ダウン数 -/-（P4）</div>
-              <div>ターン -（P4）</div>
-              <div>フェイズ -（P4）</div>
+              <div>ダウン数 A:{board.downs.A} / B:{board.downs.B}</div>
+              <div>ターン {board.turn?.n ?? '-'}（AP {board.turn?.active ?? '-'}）</div>
+              <div>フェイズ {board.turn?.phase ?? '-'}</div>
             </div>
-            <LogPanel log={log} />
+            <LogPanel log={log} stepText={(s) => stepLine(board, localSeat, nameOfId, s)} />
           </div>
 
           {/* 中央: 盤面。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
           {layout === 'A' ? renderLayoutA() : renderLayoutB()}
 
           {/* Bのみ: スタック処理中置き場（PHASE2.10.md §1の予約枠。P3a-2aで実装） */}
-          {layout === 'B' && (
+          {layout === 'B' && board.mode === 'engine' && <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />}
+          {layout === 'B' && board.mode !== 'engine' && (
             <StackPanel
               board={board}
               localSeat={localSeat}
@@ -797,13 +825,19 @@ export function Board({
                 imageUrlOf={imageUrlOf}
                 annotationsOf={annotationsOf}
                 dispatch={dispatch}
+                engineActions={engineActionsFor(selectedIid)}
               />
             </div>
             {/* h-56: 提示エリア（PHASE3a-4.md §1-4）のカード1枚分＋ラベルを足したぶん高くした。
                 上のDetailPanel（flex-1・内部でoverflow-y-auto）が縮むだけでページのスクロールは増えない */}
             <div className="flex h-56 shrink-0 gap-1.5">
               {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}
-              {layout === 'A' && (
+              {layout === 'A' && board.mode === 'engine' && (
+                <div className="flex-1 min-h-0">
+                  <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />
+                </div>
+              )}
+              {layout === 'A' && board.mode !== 'engine' && (
                 <div className="flex-1 min-h-0">
                   <StackPanel
                     board={board}
@@ -843,6 +877,7 @@ export function Board({
           cardOf={cardOf}
           dispatch={dispatch}
           onClose={() => setMenuTarget(null)}
+          engineActions={engineActionsFor(menuTarget.iid)}
         />
       )}
 

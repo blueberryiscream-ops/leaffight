@@ -17,8 +17,13 @@ export type EngineReq =
   | { kind: 'declare'; req: DeclareReq }
   | { kind: 'pass'; by: Seat }
   | { kind: 'choose'; by: Seat; id: string; pick: string[] }
-  /** フェイズを進める（10-2-2 のフェイズ終了の合意の後。アクティブプレイヤーが出す） */
-  | { kind: 'phase'; by: Seat }
+  /**
+   * フェイズの終了（10-2-2 oldrule.txt:367-369）: AP は answer 無しで「フェイズ終了を宣言」（フェイズの窓での見送りと同じ）。
+   * NAP は answer で「認める」（＝見送り）／「認めない」（宣言は無効・フェイズは続く）
+   */
+  | { kind: 'phase'; by: Seat; answer?: 'accept' | 'deny' }
+  /** 手動からエンジンに戻す（mode を engine にして、今の proc から drive で続ける）。どちらの席も出せる */
+  | { kind: 'engineOn'; by: Seat }
   /** [23] の人の入力（R2u-2 で中身を作る） */
   | { kind: 'values'; by: Seat; values: Record<string, number> }
   /** 開始準備の後にターンを置く（先攻の1ターン目・エントリー）。R2u-1 の暫定: 誰でも出せる */

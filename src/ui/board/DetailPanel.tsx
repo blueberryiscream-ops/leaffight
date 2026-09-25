@@ -26,6 +26,7 @@ export function DetailPanel({
   imageUrlOf,
   annotationsOf,
   dispatch,
+  engineActions = [],
 }: {
   iid: string | null
   board: BoardState
@@ -34,6 +35,8 @@ export function DetailPanel({
   imageUrlOf: (cardId: string) => string | undefined
   annotationsOf: (cardId: string) => AbilityAnnotation[] | undefined
   dispatch: (action: BoardAction) => void
+  /** エンジンモード（R2u §3-3）: このカードで今宣言できるもの（declare の答え）。押すと宣言を組み立て始める */
+  engineActions?: { label: string; onClick: () => void }[]
 }) {
   const instance = iid ? board.cards[iid] : undefined
 
@@ -137,6 +140,19 @@ export function DetailPanel({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {engineActions.length > 0 && (
+            <div className="mb-2">
+              <div className="mb-1 font-semibold text-ink-muted">宣言（エンジン）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {engineActions.map((a, i) => (
+                  <button key={i} type="button" onClick={a.onClick} className="rounded border border-accent px-2 py-1 text-accent hover:bg-accent/15">
+                    {a.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

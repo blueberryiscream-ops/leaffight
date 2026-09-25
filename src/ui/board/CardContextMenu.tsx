@@ -21,6 +21,7 @@ export function CardContextMenu({
   cardOf,
   dispatch,
   onClose,
+  engineActions = [],
 }: {
   iid: string
   board: BoardState
@@ -31,6 +32,8 @@ export function CardContextMenu({
   cardOf: (cardId: string) => PoolCard | undefined
   dispatch: (action: BoardAction) => void
   onClose: () => void
+  /** エンジンモード（R2u §3-3）: このカードで今宣言できるもの（declare の答え） */
+  engineActions?: { label: string; onClick: () => void }[]
 }) {
   const instance = board.cards[iid]
   // すべてのHooksは早期returnより前で呼ぶこと（Rules of Hooks）。
@@ -103,6 +106,20 @@ export function CardContextMenu({
             {instance.faceUp ? '表 → 裏' : '裏 → 表'}
           </button>
         </div>
+
+        {engineActions.map((a, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => {
+              a.onClick()
+              onClose()
+            }}
+            className="rounded border border-accent py-1.5 text-accent hover:bg-accent/15"
+          >
+            ⚡ 宣言: {a.label}
+          </button>
+        ))}
 
         {board.mode === 'assist' && !hidden && (
           <button

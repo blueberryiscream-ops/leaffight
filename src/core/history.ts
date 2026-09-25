@@ -8,6 +8,8 @@ import { EMPTY_BOARD, type BoardState } from './board'
 export interface LogEntry {
   id: string
   text: string
+  /** エンジンが進めた段（R2u §2-4「ログに1行ずつ」）。カード名は入れず iid だけ（画面が公開かどうかを見て名前にする） */
+  steps?: { text: string; iids: string[] }[]
 }
 
 interface Snapshot {

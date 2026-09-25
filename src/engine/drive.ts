@@ -12,6 +12,7 @@
 import { applyAction, type BoardAction } from '../core/actions'
 import type { BoardState, Seat } from '../core/board'
 import {
+  PHASE_ACTIONS,
   STEP_TIMINGS,
   activeSeat,
   awaitingSeat,
@@ -78,6 +79,8 @@ export interface DeclareReq {
   ability?: string
   targets?: string[]
   payWith?: string[]
+  /** 使う発生済みのコストの id（R2u）。payWith と合わせて、指定したものだけで払う（FAQ:2959） */
+  payPool?: string[]
   option?: string
   /** コストを発生させるアクション（7-2）として宣言する */
   costGen?: boolean
@@ -210,7 +213,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const { cost, unknown } = isEvent ? costOfAbility(ctx, src.cardId, null) : costOfAbility(ctx, src.cardId, (ab as Activated).name)
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
-  const plan = planPayment(ctx, state, req.by, isEvent ? null : src.iid, cost, req.payWith?.length ? req.payWith : null)
+  const plan = planPayment(ctx, state, req.by, isEvent ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
   warnings.push(...plan.warn)
@@ -228,10 +231,44 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: src.cardId, index, slots, usePool: plan.usePool, declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: src.cardId, index, slots, usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
+}
+
+/** 宣言[3] で宣言したプレイヤー自身が指定するもの（対象・装備対象・タッグの構成要素）。画面が盤面のクリックで選ばせるのに使う（R2u） */
+export interface TargetSpec {
+  slot: string
+  min: number
+  max: number
+  /** カードなら iid、選択肢の名前・能力値ならその文字列 */
+  options: string[]
+}
+
+export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareReq): TargetSpec[] {
+  const src = state.cards[req.source]
+  if (!src || req.costGen || req.battle) return []
+  const info = ctx.cards[src.cardId]
+  if (!req.ability && src.zone === 'hand' && info) {
+    // 17-3[3] 装備対象（フィールドのキャラ。種類の制限 17-1 は K4＝R3）・15-10-2[4] 構成要素（自分のフィールドの待機状態のキャラか手札の、名前が合う2枚）
+    if (info.kind === 'i') return [{ slot: '装備対象', min: 1, max: 1, options: Object.values(state.cards).filter((c) => isCharOnField(c)).map((c) => c.iid) }]
+    if (info.kind === 't') {
+      const names = info.name.split('＆')
+      const options = Object.values(state.cards)
+        .filter((c) => c.owner === req.by && names.includes(ctx.cards[c.cardId]?.name ?? '') && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
+        .map((c) => c.iid)
+      return [{ slot: '構成要素', min: 2, max: 2, options }]
+    }
+    if (info.kind !== 'e') return []
+  }
+  const found = findAbility(ctx, src.cardId, req.ability ?? null, req.option)
+  if (!found || (found.ab.kind !== 'activated' && found.ab.kind !== 'play')) return []
+  const ab = found.ab as Activated | Play
+  const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: currentWindow(state)?.frame?.id ?? null, declId: null, declared: {} }
+  return ab.choices
+    .filter((c) => c.when === 'declare' && resolvePlayer(state, env, c.chooser) === req.by)
+    .map((c) => ({ slot: c.slot, min: c.count[0], max: c.count[1], options: choiceOptions(ctx, state, env, c).map((o) => o.key) }))
 }
 
 function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, withPrefer = true): { key: string; label: string }[] {
@@ -273,13 +310,15 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
     }
     const top = topFrame(s)
     if (!top) {
-      if (opts.openMain !== false && !s.procMeta.base && !s.procMeta.mainClosed && s.turn?.phase === 'メイン') {
+      // フェイズの窓: メインフェイズ（10-5-1）・終了フェイズの [2]（10-6-1）
+      const actionPhase = s.turn?.phase === 'メイン' || (s.turn?.phase === '終了' && s.procMeta.phaseRun === PHASE_ACTIONS)
+      if (opts.openMain !== false && !s.procMeta.base && !s.procMeta.mainClosed && actionPhase) {
         apply({ type: 'procOpenMain' })
         continue
       }
-      // エントリーフェイズ（10-4）・手札調整フェイズ（10-7）の段を始める
+      // エントリーフェイズ（10-4）・終了フェイズ（10-6）・手札調整フェイズ（10-7）の段を始める
       const ph = s.turn?.phase
-      if ((ph === 'エントリー' || ph === '手札調整') && s.procMeta.phaseRun === null) {
+      if ((ph === 'エントリー' || ph === '終了' || ph === '手札調整') && s.procMeta.phaseRun === null) {
         apply({ type: 'procPhaseStart' })
         continue
       }
@@ -440,6 +479,8 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   const info = ctx.cards[src.cardId]
   if (cur.frame) return { ok: false, reason: '処理の途中には行えない（通常型 11-1）' }
   if (req.by !== activeSeat(state) || src.owner !== req.by) return { ok: false, reason: 'アクティブプレイヤーが自分の手札から行う（10-5-1）' }
+  // 終了フェイズのアクションは特殊能力・イベント・コスト発生・その他だけ（10-6-1 oldrule.txt:422-429）
+  if (state.turn && state.turn.phase !== 'メイン') return { ok: false, reason: `${state.turn.phase}フェイズには行えない（メインフェイズのアクション 10-5-1・10-6-1）` }
   const kind = ({ c: 'call', t: 'tag', i: 'equip', f: 'field', b: 'battleCard' } as const)[info.kind as 'c' | 't' | 'i' | 'f' | 'b']
   const mine = Object.values(state.cards).filter((c) => isCharOnField(c) && c.owner === req.by)
   const targets = (req.targets ?? []).filter((t) => t in state.cards)
@@ -479,9 +520,10 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   }
   // [4] 使用代償の支払い方法の宣言（タッグ化は使用代償なし 15-10-2）
   const cost = kind === 'tag' ? { icons: [], attrs: [] } : costOfAbility(ctx, src.cardId, null).cost
-  const plan = planPayment(ctx, state, req.by, null, cost, req.payWith?.length ? req.payWith : null)
+  const plan = planPayment(ctx, state, req.by, null, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]）' }
   eng.usePool = plan.usePool
+  eng.poolIds = plan.poolIds
   const label = kind === 'call' ? `呼び出し:${info.name}` : kind === 'tag' ? `タッグ化:${info.name}` : kind === 'equip' ? `装備:${info.name}` : kind === 'field' ? `フィールド配置:${info.name}` : `バトルカード配置:${info.name}`
   const decl: ProcDecl = {
     id,

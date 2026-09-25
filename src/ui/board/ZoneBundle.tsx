@@ -29,6 +29,7 @@ export function ZoneBundle({
   size,
   handSize,
   selectedIid,
+  ringOf,
 }: {
   owner: Seat
   zone: Extract<ZoneId, 'deck' | 'hand' | 'trash'>
@@ -59,6 +60,8 @@ export function ZoneBundle({
   /** 手札(fanOut)のカード1枚のサイズ(px)。手札の行は他と高さが違うため別に渡す */
   handSize?: { w: number; h: number }
   selectedIid?: string | null
+  /** エンジンモードの候補・選択のリング（R2u: 支払い・対象・選択肢を盤面のクリックで選ぶ） */
+  ringOf?: (iid: string) => { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string }
 }) {
   const dropId = `${owner}:${zone}`
   const { setNodeRef, isOver } = useDroppable({ id: dropId })
@@ -113,6 +116,7 @@ export function ZoneBundle({
           hideContents={hideContents}
           selectedIid={selectedIid}
           cardSize={handSize ?? size}
+          ringOf={ringOf}
         />
       ) : (
         // 束表示: 一番上(index最小)の1枚だけドラッグ対象として見せる。枚数はバッジで重ねる
@@ -131,6 +135,7 @@ export function ZoneBundle({
             // 🚨 デッキの一番上は、古い盤面がfaceUp:trueで置いていても裏面を描く（PHASE5c.md §4）
             hidden={zone === 'deck' ? hiddenFromViewer(list[0], mySeat) : undefined}
             mySeat={mySeat}
+            {...ringOf?.(list[0].iid)}
           />
           <span className="pointer-events-none absolute -left-1 -top-1 rounded-full bg-surface-3 px-1 text-[8px] font-bold text-ink shadow">
             {list.length}
@@ -163,6 +168,7 @@ function HandFan({
   hideContents,
   selectedIid,
   cardSize,
+  ringOf,
 }: {
   list: ReturnType<typeof cardsInZone>
   board: BoardState
@@ -175,6 +181,7 @@ function HandFan({
   hideContents?: boolean
   selectedIid?: string | null
   cardSize: { w: number; h: number }
+  ringOf?: (iid: string) => { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string }
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [overlapPx, setOverlapPx] = useState(0)
@@ -219,6 +226,7 @@ function HandFan({
             mySeat={mySeat}
             selected={selectedIid === inst.iid}
             size={cardSize}
+            {...(hideContents ? {} : ringOf?.(inst.iid))}
           />
         </div>
       ))}

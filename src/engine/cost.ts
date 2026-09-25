@@ -52,6 +52,9 @@ export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
 
 /** イベント・アイテムなどカード本体の使用代償（cost＝コストアイコン・attr＝属性アイコン） */
 export function cardCost(info: CardInfo): Cost {
+  // キャラ・タッグの attr はそのキャラ自身の属性で、呼び出しの使用代償ではない（DESIGN §4.8「キャラ/タッグ札の「属性」はコストではない」
+  // ユーザー校正 2026-07-18）。i/e/f/b の attr はコスト側の属性アイコン（8-2-1）。R2u で直した
+  if (info.kind === 'c' || info.kind === 't') return parseCostText(info.cost).cost
   return parseCostText(`${info.cost}${info.attr}`).cost
 }
 
@@ -118,7 +121,9 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
 
 /**
  * 15-13-1[4]・16-1[4] 支払い方法の宣言。
- * - payWith（発生源の iid）があれば、それでコストを発生させて払う（宣言前に発生させておいたコストは使わない FAQ:2959）
+ * - payWith（発生源の iid）か payPool（使う発生済みのコストの id）があれば、**指定されたものだけ**で払う
+ *   （payWith でコストを発生させ、payPool の発生済みのコストと合わせる。指定していない発生済みのコストは使わない FAQ:2959
+ *   「宣言時に指定した使用代償の支払い方法以外で支払うことはできません」。R2u で payPool を足した）
  * - 無ければ: 発生済みのコストで払えるものは払い、足りない分はコストを発生させる（R は能力を使うキャラ自身・
  *   L はリーダー・T はタッグ・G/W は待機状態の味方キャラを先頭から）。【決めたこと】自動の支払い方法（HANDOFF-R2a）
  */
@@ -129,7 +134,8 @@ export function planPayment(
   sourceIid: string | null,
   cost: Cost,
   payWith: string[] | null,
-): { ok: boolean; costGens: CostSource[][]; usePool: boolean; warn: string[] } {
+  payPool: string[] | null = null,
+): { ok: boolean; costGens: CostSource[][]; usePool: boolean; poolIds: string[]; warn: string[] } {
   const warn: string[] = []
   const toSource = (iid: string): CostSource | null => {
     const c = state.cards[iid]
@@ -140,11 +146,13 @@ export function planPayment(
     const icon: CostIcon = iid === sourceIid ? 'R' : c.zone === 'leader' ? 'L' : info.kind === 't' ? 'T' : 'G'
     return { iid, from: 'field', icon, attrs: attrsOf(info) }
   }
-  if (payWith) {
-    const srcs = payWith.map(toSource).filter((x): x is CostSource => x !== null)
-    return { ok: true, costGens: srcs.length ? [srcs] : [], usePool: false, warn }
+  if (payWith?.length || payPool?.length) {
+    const srcs = (payWith ?? []).map(toSource).filter((x): x is CostSource => x !== null)
+    const have = new Set(state.costs[by].map((t) => t.id))
+    const poolIds = (payPool ?? []).filter((id) => have.has(id))
+    return { ok: true, costGens: srcs.length ? [srcs] : [], usePool: false, poolIds, warn }
   }
-  if (cost.icons.length === 0) return { ok: true, costGens: [], usePool: true, warn }
+  if (cost.icons.length === 0) return { ok: true, costGens: [], usePool: true, poolIds: [], warn }
   const pool = state.costs[by].map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })) // 他のアクションで発生したコストはその他のコスト（7-3）
   for (const asg of assignments(cost)) {
     // 発生済みのコストで払えない分を、コストを発生させて払う（いちばん厳しい要求から）
@@ -163,9 +171,54 @@ export function planPayment(
     }
     if (failed) continue
     if (gens.some((g) => g.icon !== 'R')) warn.push(`コストを発生させるキャラを自動で選んだ: ${gens.map((g) => g.iid).join('・')}`)
-    return { ok: true, costGens: gens.length ? [gens] : [], usePool: true, warn }
+    return { ok: true, costGens: gens.length ? [gens] : [], usePool: true, poolIds: [], warn }
   }
-  return { ok: false, costGens: [], usePool: true, warn }
+  return { ok: false, costGens: [], usePool: true, poolIds: [], warn }
+}
+
+/** 余った属性アイコン（8-2-1）: その属性を持つキャラが自分のフィールドに待機状態でいるか（exclude＝支払いで消耗させるキャラ） */
+function readyAttrsOk(ctx: EngineCtx, state: BoardState, by: Seat, attrs: Attr[], exclude: string[] = []): boolean {
+  return attrs.every((a) =>
+    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && attrsOf(ctx.cards[c.cardId]).includes(a)),
+  )
+}
+
+/**
+ * 支払いの指定（payWith＋payPool）で使用代償のコストと属性が足りるか（画面の「宣言」を押せるか。R2u §2-1「足りたら宣言」）。
+ * payWith のキャラは消耗する前提で、余った属性の待機状態のキャラから除く。その他の代償（気力－N 等）は [9] で確かめる
+ */
+export function paymentCovers(ctx: EngineCtx, state: BoardState, by: Seat, sourceIid: string | null, cost: Cost, payWith: string[], payPool: string[]): boolean {
+  const plan = planPayment(ctx, state, by, sourceIid, cost, payWith, payPool)
+  const tokens = [
+    ...plan.costGens.flat().map((s, i) => ({ id: `new${i}`, icon: s.icon, attrs: s.attrs })),
+    ...state.costs[by].filter((t) => plan.poolIds.includes(t.id)).map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })),
+  ]
+  const resting = plan.costGens.flat().filter((s) => s.from === 'field').map((s) => s.iid)
+  return assignments(cost).some((asg) => matchTokens(asg.req, tokens) !== null && readyAttrsOk(ctx, state, by, asg.readyAttrs, resting))
+}
+
+/**
+ * 支払いの例外（R2u §2-1）: 発生済みのコストだけで払えて、使う発生済みのコストの組み合わせが1通り（属性の並びで数える）なら
+ * その id の列。そうでなければ null（プレイヤーに選ばせる）
+ */
+export function poolOnlyPayment(ctx: EngineCtx, state: BoardState, by: Seat, cost: Cost): string[] | null {
+  const pool = state.costs[by]
+  const n = cost.icons.length
+  if (n === 0 || pool.length < n || pool.length > 12) return null
+  const found = new Map<string, string[]>()
+  const pick = (start: number, chosen: CostToken[]) => {
+    if (chosen.length === n) {
+      const tokens = chosen.map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs }))
+      if (assignments(cost).some((asg) => matchTokens(asg.req, tokens) !== null && readyAttrsOk(ctx, state, by, asg.readyAttrs))) {
+        const key = JSON.stringify(chosen.map((t) => [...t.attrs].sort().join('')).sort())
+        if (!found.has(key)) found.set(key, chosen.map((t) => t.id))
+      }
+      return
+    }
+    for (let i = start; i < pool.length; i++) pick(i + 1, [...chosen, pool[i]])
+  }
+  pick(0, [])
+  return found.size === 1 ? [...found.values()][0] : null
 }
 
 function candidatesFor(ctx: EngineCtx, state: BoardState, by: Seat, sourceIid: string | null, icon: CostIcon, attr: Attr | null, taken: CostSource[]): CostSource | null {
@@ -202,8 +255,10 @@ export function payNow(
 ): { ok: boolean; reason?: string; consume: string[]; kiryoku: { iid: string; delta: number }[]; trash: string[]; down: string[] } {
   const by = decl.by
   const usePool = decl.eng.usePool !== false
+  // payPool（R2u）: 宣言で指定した発生済みのコストだけを使う
+  const poolIds = (decl.eng.poolIds as string[] | undefined) ?? []
   const tokens = state.costs[by]
-    .filter((t: CostToken) => usePool || t.frameId === frameId)
+    .filter((t: CostToken) => usePool || t.frameId === frameId || poolIds.includes(t.id))
     .map((t) => ({ id: t.id, icon: t.frameId === frameId ? t.icon : ('W' as CostIcon), attrs: t.attrs }))
   const fail = (reason: string) => ({ ok: false, reason, consume: [], kiryoku: [], trash: [], down: [] })
   let consume: string[] | null = null
@@ -211,10 +266,7 @@ export function payNow(
     const m = matchTokens(asg.req, tokens)
     if (!m) continue
     // 余った属性アイコン: その属性を持つキャラが自分のフィールドに待機状態でいる
-    const readyOk = asg.readyAttrs.every((a) =>
-      Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && attrsOf(ctx.cards[c.cardId]).includes(a)),
-    )
-    if (!readyOk) continue
+    if (!readyAttrsOk(ctx, state, by, asg.readyAttrs)) continue
     consume = m
     break
   }

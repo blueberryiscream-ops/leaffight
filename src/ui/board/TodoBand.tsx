@@ -37,7 +37,7 @@ function NextButton({ disabled, onClick }: { disabled?: boolean; onClick: () => 
  * 開始準備中の帯（PHASE5b.md §2-2）。`setup[localSeat]` があって `leaderRevealed` が false の間だけ出す。
  * バトル/優先権の帯より優先する（開始準備の最中はまだバトルが起きていない想定）。
  */
-function SetupBand({
+export function SetupBand({
   board,
   localSeat,
   dispatch,

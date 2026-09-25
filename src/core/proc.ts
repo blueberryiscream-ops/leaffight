@@ -33,8 +33,8 @@ import type { CostKind } from './types'
 
 /** カードを使う手順（宣言は ability・event と同じ [1]〜[5]、処理は [6] から） */
 export type CardUseKind = 'call' | 'tag' | 'equip' | 'field' | 'battleCard'
-/** ターンの進行の段（10-4・10-7・10-8） */
-export type PhaseKind = 'entry' | 'handAdjust' | 'turnEnd'
+/** ターンの進行の段（10-4・10-6・10-7・10-8） */
+export type PhaseKind = 'entry' | 'endPhase' | 'handAdjust' | 'turnEnd'
 
 export type ProcKind = 'costGen' | 'ability' | 'event' | 'damage' | 'down' | 'simul' | CardUseKind | 'battle' | PhaseKind
 
@@ -51,6 +51,8 @@ export interface ProcWindow {
   nonActive: ProcDecl | null
   /** 7-2[3]《コストを発生するとき》はそのプレイヤーだけ */
   only: Seat | null
+  /** 10-2-2: フェイズの窓（base）で AP がフェイズ終了を宣言した。NAP が見送る（認める）とフェイズが終わる（R2u） */
+  phaseEnd?: boolean
 }
 
 /** コストの発生源（7-2[2]）。icon・attrs はエンジンが決めて渡す（core は色・属性の意味を知らない） */
@@ -402,6 +404,11 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
     1: { names: ['エントリー開始時'], window: true },
     5: { names: ['エントリー終了時'], window: true },
   },
+  // 10-6（oldrule.txt:417-421）。[2] はフレームを降ろしてフェイズの窓（procMeta.base・メインと同じ手順の外の窓 10-6-1）を開く
+  endPhase: {
+    1: { names: ['終了フェイズ開始時'], window: true },
+    3: { names: ['終了フェイズ終了時'], window: true },
+  },
   // 10-7（oldrule.txt:430-435）
   handAdjust: {
     1: { names: ['手札調整フェイズ開始時'], window: true },
@@ -428,12 +435,16 @@ const LAST_STEP: Record<ProcKind, number> = {
   battleCard: 12,
   battle: 29,
   entry: 5,
+  endPhase: 3,
   handAdjust: 4,
   turnEnd: 2,
 }
 
 /** 手札の上限枚数（4-2-1 oldrule.txt:169-170） */
 const HAND_LIMIT = 7
+
+/** procMeta.phaseRun: 終了フェイズの [2]（アクションを行う段・10-6-1）に入った。drive がフェイズの窓を開く */
+export const PHASE_ACTIONS = '終了[2]'
 
 const CARD_USE: ProcKind[] = ['call', 'tag', 'equip', 'field', 'battleCard']
 export function isCardUse(kind: ProcKind): kind is CardUseKind {
@@ -836,6 +847,7 @@ function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
     case 'battle':
       return enterBattle(state, frame, trace)
     case 'entry':
+    case 'endPhase':
     case 'handAdjust':
     case 'turnEnd':
       return enterPhase(state, frame, trace)
@@ -1137,9 +1149,11 @@ function battleEndCleanup(state: BoardState, frame: ProcFrame, trace: ProcTrace[
   return s
 }
 
-// ── ターンの進行（10-4 エントリー・10-7 手札調整・10-8 ターン終了）
+// ── ターンの進行（10-4 エントリー・10-6 終了フェイズ・10-7 手札調整・10-8 ターン終了）
 function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
   const ap = activeSeat(state)
+  // 10-6[2]: お互いのプレイヤーは終了フェイズで可能なアクションを行う（10-6-1）＝フレームを降ろし、popFrame がフェイズの窓を開く用意をする
+  if (frame.kind === 'endPhase') return setFrame(state, { ...frame, status: 'done' })
   if (frame.kind === 'entry') {
     switch (frame.step) {
       case 2: {
@@ -1424,6 +1438,10 @@ function popFrame(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boar
   }
   // ターンの進行: エントリーが終わったらメインフェイズ（13-3-1 の窓を開き直す）。手札調整が終わったらターン終了（10-8）
   if (frame.kind === 'entry' && s.turn) s = setMeta({ ...s, turn: { ...s.turn, phase: 'メイン' } }, { base: null, mainClosed: false, phaseRun: null })
+  // 10-6: [2] で降りたらフェイズの窓（drive が procOpenMain で開く）。[3] が終わったら手札調整フェイズ（10-2-3）
+  if (frame.kind === 'endPhase' && s.turn) {
+    s = frame.step === 2 ? setMeta(s, { base: null, mainClosed: false, phaseRun: PHASE_ACTIONS }) : setMeta({ ...s, turn: { ...s.turn, phase: '手札調整' } }, { base: null, mainClosed: false, phaseRun: null })
+  }
   // ターン終了（10-8）の後は相手のターン（10-2 交互に進行）。10-3 ターン開始の《ターン開始時》の処理は R3（タイミングの表に無い）【決めたこと】
   if (frame.kind === 'turnEnd' && s.turn) s = setMeta({ ...s, turn: { active: s.turn.active === 'A' ? 'B' : 'A', phase: 'エントリー', ...(s.turn.n !== undefined ? { n: s.turn.n + 1 } : {}) } }, { base: null, mainClosed: false, phaseRun: null })
   if (frame.kind === 'handAdjust') s = pushFrame(setMeta(s, { phaseRun: 'ターン終了' }), { kind: 'turnEnd', step: 1, status: 'enter', window: null, by: activeSeat(s), label: 'ターン終了', eng: {} }, 'phase')[0]
@@ -1560,6 +1578,8 @@ function windowEnd(state: BoardState, frame: ProcFrame | null, window: ProcWindo
   const closed: ProcWindow = { ...window, state: 'closed' }
   const decls = [window.active, window.nonActive].filter((d): d is ProcDecl => d !== null)
   if (!frame) {
+    // フェイズの窓: AP のフェイズ終了の宣言を NAP が認めた（見送った）＝そのフェイズは終わる（10-2-2 oldrule.txt:367-369）
+    if (decls.length === 0 && window.phaseEnd) return phaseEndAgreed(state)
     // メインフェイズの窓: 何も宣言されなければメインフェイズの宣言の機会は終わり（13-3-1）
     if (decls.length === 0) return setMeta(state, { base: null, mainClosed: true })
     const s = setMeta(state, { base: null })
@@ -1567,6 +1587,33 @@ function windowEnd(state: BoardState, frame: ProcFrame | null, window: ProcWindo
   }
   // タイミングの段: エンジンに《〜とき》の処理を聞く（宣言された行動とまとめて同時処理にする）
   return setFrame(state, { ...frame, window: closed, status: 'engine', engineWhat: 'timing' })
+}
+
+/**
+ * 10-2-2: フェイズ終了の宣言が認められた。メイン→終了フェイズ（10-2-3）。終了フェイズ→ [3]《終了フェイズ終了時》の段
+ * （それが終わると popFrame が手札調整フェイズへ）。エントリー・手札調整は段が終わると自分で次へ進む（R2u-1 の決めたこと）
+ */
+function phaseEndAgreed(state: BoardState): BoardState {
+  const turn = state.turn
+  if (!turn) return setMeta(state, { base: null, mainClosed: true })
+  if (turn.phase === '終了') {
+    const s = setMeta(state, { base: null, mainClosed: false, phaseRun: '終了[3]' })
+    return pushFrame(s, { kind: 'endPhase', step: 3, status: 'enter', window: null, by: activeSeat(s), label: '終了フェイズ', eng: {} }, 'phase')[0]
+  }
+  const next: Phase = turn.phase === 'メイン' ? '終了' : turn.phase
+  return setMeta({ ...state, turn: { ...turn, phase: next } }, { base: null, mainClosed: false, phaseRun: null })
+}
+
+/** 10-2-2: AP がフェイズ終了を宣言できるか（フェイズの窓で AP の番＝まだ誰も宣言していない） */
+export function canDeclarePhaseEnd(state: BoardState, by: Seat): boolean {
+  const b = state.procMeta.base
+  return !!state.turn && !state.result && !state.procMeta.choice && state.proc.length === 0 && !!b && b.state === 'awaitActive' && !b.active && by === activeSeat(state)
+}
+
+/** 10-2-2: NAP がフェイズ終了の宣言に答える番か */
+export function phaseEndPending(state: BoardState): boolean {
+  const b = state.procMeta.base
+  return state.proc.length === 0 && !!b && !!b.phaseEnd && b.state === 'awaitNonActive' && !b.active && !state.procMeta.choice
 }
 
 function applyDeclare(state: BoardState, by: Seat, decl: ProcDecl): BoardState | null {
@@ -1740,6 +1787,10 @@ export type ProcAction =
   | { type: 'procRun' }
   /** 手順を捨てる（詰まったとき用・R2u §2-3）: 手順と選択と窓を空にする。メインなら drive がメインの窓から開き直す */
   | { type: 'procAbandon' }
+  /** 10-2-2: AP がフェイズ終了を宣言する（フェイズの窓での AP の見送りを兼ねる）。NAP が見送る＝認める */
+  | { type: 'procPhaseEnd'; by: Seat }
+  /** 10-2-2: NAP がフェイズ終了の宣言を認めない（宣言は無効になり、フェイズは続く＝フェイズの窓を AP から開き直す） */
+  | { type: 'procPhaseDeny'; by: Seat }
 
 /**
  * 選択の答えが受け付けられるか。割り振り（repeat）は選択肢ごとの上限（caps）を超えられない（《サバイバル》FAQ:4109）。
@@ -1767,7 +1818,16 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
   switch (action.type) {
     case 'procOpenMain': {
       if (state.proc.length || state.procMeta.base || state.result) return null
-      return { state: setMeta(state, { base: openWindow(null, activeSeat(state)), mainClosed: false }), log: 'メインフェイズの宣言の機会' }
+      return { state: setMeta(state, { base: openWindow(null, activeSeat(state)), mainClosed: false }), log: `${state.turn?.phase === '終了' ? '終了' : 'メイン'}フェイズの宣言の機会` }
+    }
+    case 'procPhaseEnd': {
+      if (!canDeclarePhaseEnd(state, action.by)) return null
+      const b = state.procMeta.base!
+      return { state: setMeta(state, { base: { ...b, state: 'awaitNonActive', phaseEnd: true } }), log: `${action.by} が${state.turn!.phase}フェイズの終了を宣言（10-2-2）` }
+    }
+    case 'procPhaseDeny': {
+      if (!phaseEndPending(state) || action.by === activeSeat(state)) return null
+      return { state: setMeta(state, { base: openWindow(null, activeSeat(state)) }), log: `${action.by} がフェイズ終了を認めない（10-2-2）` }
     }
     case 'procDeclare': {
       const s = applyDeclare(state, action.by, action.decl)
@@ -1775,7 +1835,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     }
     case 'procPass': {
       const s = applyPass(state, action.by)
-      return s ? { state: s, log: `${action.by} が通した` } : null
+      // フェイズ終了の宣言への NAP の見送り＝認める（10-2-2）
+      const agreed = phaseEndPending(state) && action.by !== activeSeat(state)
+      return s ? { state: s, log: agreed ? `${action.by} がフェイズ終了を認めた（10-2-2）` : `${action.by} が通した` } : null
     }
     case 'procDeclPatch': {
       const patchDecl = (d: ProcDecl | null) =>
@@ -1945,7 +2007,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     case 'procPhaseStart': {
       const ph = state.turn?.phase
       if (state.proc.length || !ph || state.procMeta.phaseRun !== null) return null
-      const kind: ProcKind | null = ph === 'エントリー' ? 'entry' : ph === '手札調整' ? 'handAdjust' : null
+      const kind: ProcKind | null = ph === 'エントリー' ? 'entry' : ph === '終了' ? 'endPhase' : ph === '手札調整' ? 'handAdjust' : null
       if (!kind) return null
       const s = setMeta(state, { phaseRun: ph, base: null })
       return { state: pushFrame(s, { kind, step: 1, status: 'enter', window: null, by: activeSeat(s), label: `${ph}フェイズ`, eng: {} }, 'phase')[0], log: `${ph}フェイズ` }
