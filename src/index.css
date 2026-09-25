@@ -72,3 +72,9 @@ body {
     'Noto Sans JP',
     sans-serif;
 }
+
+/* R2u §2-4: エンジンが進めた段で関係するカードを一瞬光らせる（EngineBar が付け外しする） */
+.lf-flash {
+  outline: 3px solid var(--color-warn);
+  outline-offset: 1px;
+}

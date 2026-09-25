@@ -71,7 +71,10 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
 
 // ⑦ フェイズを進める要求はアクティブプレイヤーだけ（10-2-2）。メイン→終了（10-2-3）
 {
-  const h1 = r3.ok ? r3.history : h0
+  const h1a = r3.ok ? r3.history : h0
+  eq(applyEngineReq(h1a, ctx, { kind: 'phase', by: 'A' }).ok, false, '⑦ 相手が見送る前はフェイズを進められない（10-2-2 の合意）')
+  const rb = applyEngineReq(h1a, ctx, { kind: 'pass', by: 'B' })
+  const h1 = rb.ok ? rb.history : h1a
   eq(applyEngineReq(h1, ctx, { kind: 'phase', by: 'B' }).ok, false, '⑦ NAP はフェイズを進められない（10-2-2）')
   const r = applyEngineReq(h1, ctx, { kind: 'phase', by: 'A' })
   eq(r.ok && r.history.present.turn?.phase, '終了', '⑦ AP がメインを終えると終了フェイズ（10-2-3）')
@@ -90,6 +93,16 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
     h = x.history
   }
   eq({ active: h.present.turn?.active, n: h.present.turn?.n }, { active: 'B', n: 2 }, '⑧ ターン終了の後は相手の2ターン目（10-2・10-8）')
+}
+
+// ⑨ 手順を捨てる（§2-3）: 手順と選択が空になり、メインならメインの窓から（drive が開き直す）
+{
+  const withEntry: History = { ...emptyHistory(), present: drive({ ...board([card('dA0', 'A', 'deck')]), turn: { active: 'A', phase: 'エントリー', n: 2 } }, ctx).state }
+  const r = applyEngineReq(withEntry, ctx, { kind: 'abandon', by: 'B' })
+  eq(r.ok && { proc: r.history.present.proc.length, choice: r.history.present.procMeta.choice, phase: r.history.present.turn?.phase, wait: awaitingSeat(r.history.present) }, { proc: 0, choice: null, phase: 'メイン', wait: 'A' }, '⑨ エントリーで捨てると手順と選択が空になり、メインの窓から（§2-3）')
+  const m: History = { ...emptyHistory(), present: s0 }
+  const r2 = applyEngineReq(m, ctx, { kind: 'abandon', by: 'A' })
+  eq(r2.ok && awaitingSeat(r2.history.present), 'A', '⑨ メインで捨てるとメインの窓から（AP の番）')
 }
 
 if (failures) {

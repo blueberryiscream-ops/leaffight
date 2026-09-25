@@ -23,6 +23,8 @@ export type EngineReq =
   | { kind: 'values'; by: Seat; values: Record<string, number> }
   /** 開始準備の後にターンを置く（先攻の1ターン目・エントリー）。R2u-1 の暫定: 誰でも出せる */
   | { kind: 'start'; by: Seat; first: Seat }
+  /** 手順を捨てる（詰まったとき用・確認つき §2-3）。どちらの席も出せる */
+  | { kind: 'abandon'; by: Seat }
 
 /** 段ごとの表示（§2-4）に使う、公開してよい1段（カードの iid と文。非公開のカード名は入れない） */
 export interface PublicStep {

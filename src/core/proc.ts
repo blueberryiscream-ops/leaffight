@@ -1738,6 +1738,8 @@ export type ProcAction =
   | { type: 'procPhase'; to: Phase | 'ターン終了' }
   /** 積んだだけの手順を止まる点まで進める（盤面を直接作ったとき） */
   | { type: 'procRun' }
+  /** 手順を捨てる（詰まったとき用・R2u §2-3）: 手順と選択と窓を空にする。メインなら drive がメインの窓から開き直す */
+  | { type: 'procAbandon' }
 
 /**
  * 選択の答えが受け付けられるか。割り振り（repeat）は選択肢ごとの上限（caps）を超えられない（《サバイバル》FAQ:4109）。
@@ -1937,6 +1939,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     }
     case 'procRun':
       return state.proc.length ? { state, log: '' } : null
+    case 'procAbandon':
+      // 【決めたこと】どのフェイズで捨ててもそのターンのメインの窓から（PHASE-R2u §2-3 の文のまま。エントリーをやり直すとドローが重なるため）
+      return { state: setMeta({ ...state, proc: [], turn: state.turn ? { ...state.turn, phase: 'メイン' } : null }, { choice: null, base: null, mainClosed: false, phaseRun: null }), log: '手順を捨てた' }
     case 'procPhaseStart': {
       const ph = state.turn?.phase
       if (state.proc.length || !ph || state.procMeta.phaseRun !== null) return null

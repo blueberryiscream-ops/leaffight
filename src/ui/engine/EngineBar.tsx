@@ -6,7 +6,7 @@
  * 🚨 合法かどうかは declare（legalDeclarations）の答えだけを使う。非公開のカードの名前は出さない。
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
 import { isPublicCard, type BoardState, type Seat } from '../../core/board'
 import { awaitingSeat, currentWindow, topFrame } from '../../core/proc'
@@ -18,6 +18,8 @@ type AutoPass = 'now' | 'wait'
 const AUTO_PASS_KEY = 'lf.autoPass'
 /** §2-2「待つ」の間（約1.5秒） */
 const WAIT_MS = 1500
+/** §2-4 1段を見せる長さ（約0.6秒） */
+const FLASH_MS = 600
 
 function readAutoPass(): AutoPass {
   try {
@@ -68,14 +70,49 @@ export function EngineBar({
 
   const legal = useMemo(() => (engineOn && ctx ? legalDeclarations(board, ctx, localSeat) : []), [engineOn, ctx, board, localSeat])
 
-  // §2-2 自動見送り: 宣言できるものが1つも無ければ止まらない（即／約1.5秒）
+  // §2-2 自動見送り: 宣言できるものが1つも無ければ止まらない（即／約1.5秒）。
+  // エンジンが進めた直後（steps.n が変わったとき）に1回だけ。Undo で戻した盤面では自動で見送らない（煙試験で
+  // Undo の直後に見送り直して戻れなかった）【決めたこと】
+  const autoDoneN = useRef(-1)
   useEffect(() => {
-    if (!engineOn || !ctx || !shouldAutoPass(board, ctx, localSeat)) return
-    const t = window.setTimeout(() => engineRequest({ kind: 'pass', by: localSeat }), autoPass === 'now' ? 0 : WAIT_MS)
+    if (!engineOn || !ctx || autoDoneN.current === steps.n || !shouldAutoPass(board, ctx, localSeat)) return
+    const n = steps.n
+    const t = window.setTimeout(() => {
+      autoDoneN.current = n
+      engineRequest({ kind: 'pass', by: localSeat })
+    }, autoPass === 'now' ? 0 : WAIT_MS)
     return () => window.clearTimeout(t)
-  }, [engineOn, ctx, board, localSeat, autoPass, engineRequest])
+  }, [engineOn, ctx, board, localSeat, autoPass, engineRequest, steps.n])
 
   useEffect(() => setPick([]), [ch?.id])
+
+  // §2-4 段ごとに一瞬見せる: 関係するカードを約0.6秒ずつ順に光らせる（両方の画面で同じ steps が届く）
+  const [flashText, setFlashText] = useState<string | null>(null)
+  useEffect(() => {
+    const list = steps.steps.filter((x) => x.iids.length > 0)
+    if (list.length === 0) return
+    let i = 0
+    let lit: Element[] = []
+    const off = () => lit.forEach((el) => el.classList.remove('lf-flash'))
+    const tick = () => {
+      off()
+      if (i >= list.length) {
+        setFlashText(null)
+        return
+      }
+      const st = list[i++]
+      lit = st.iids.flatMap((iid) => Array.from(document.querySelectorAll(`[data-iid="${CSS.escape(iid)}"]`)))
+      lit.forEach((el) => el.classList.add('lf-flash'))
+      setFlashText(stepText(st))
+      timer = window.setTimeout(tick, FLASH_MS)
+    }
+    let timer = window.setTimeout(tick, 0)
+    return () => {
+      window.clearTimeout(timer)
+      off()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps.n])
 
   /** 選択肢の表示名: カードなら公開か自分のカードのときだけ名前（非公開は伏せる） */
   const optionLabel = (key: string, label: string) => {
@@ -106,6 +143,17 @@ export function EngineBar({
         <button type="button" className={btn} onClick={() => dispatch({ type: 'setMode', mode: engineOn ? 'free' : 'engine' })}>
           {engineOn ? 'エンジン' : '手動'} ⇄
         </button>
+        {engineOn && (board.proc.length > 0 || ch) && (
+          <button
+            type="button"
+            className={btn}
+            onClick={() => {
+              if (window.confirm('進行中の手順を捨てて、メインの窓からやり直しますか？（Undo で戻せます）')) engineRequest({ kind: 'abandon', by: localSeat })
+            }}
+          >
+            手順を捨てる
+          </button>
+        )}
         {/* 麻雀の「鳴き無し」ボタン（§2-2）。対戦中いつでも切り替えられる */}
         <button type="button" className={btn} onClick={toggleAutoPass} title="宣言できるものが無いとき">
           見送り: {autoPass === 'now' ? '即' : '待つ'}
@@ -198,7 +246,7 @@ export function EngineBar({
       )}
 
       {engineOn && steps.steps.length > 0 && (
-        <div className="truncate text-ink-muted">段: {steps.steps.map(stepText).join(' → ')}</div>
+        <div className="truncate text-ink-muted">段: {flashText ? <span className="font-bold text-warn">{flashText}</span> : steps.steps.map(stepText).join(' → ')}</div>
       )}
     </div>
   )

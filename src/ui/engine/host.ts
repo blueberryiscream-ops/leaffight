@@ -83,7 +83,7 @@ function nextPhase(state: BoardState): 'メイン' | '終了' | '手札調整' |
 
 /** 要求を BoardAction の列にする（合法でなければ理由）。適用はしない（ゲストの先読みにも使える） */
 export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq): { ok: true; actions: BoardAction[]; warnings: string[] } | EngineRejected {
-  if (state.result) return { ok: false, reason: '対戦は終わっている' }
+  if (state.result && req.kind !== 'abandon') return { ok: false, reason: '対戦は終わっている' }
   switch (req.kind) {
     case 'declare': {
       if (state.procMeta.choice) return { ok: false, reason: '選択の答えを待っている' }
@@ -107,7 +107,7 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
     case 'phase': {
       if (!state.turn) return { ok: false, reason: 'ターンが始まっていない' }
       if (activeSeat(state) !== req.by) return { ok: false, reason: 'フェイズを進めるのはアクティブプレイヤー（10-2-2）' }
-      if (state.procMeta.choice || state.proc.length) return { ok: false, reason: '手順の途中（窓を閉じてから）' }
+      if (state.procMeta.choice || state.proc.length || currentWindow(state)) return { ok: false, reason: '宣言の機会が開いている（お互いに見送ってから＝10-2-2 の合意）' }
       const to = nextPhase(state)
       if (!to) return { ok: false, reason: 'このフェイズからは進められない' }
       return { ok: true, actions: [{ type: 'procPhase', to }], warnings: [] }
@@ -116,6 +116,8 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
       return { ok: false, reason: '[23] の人の入力は R2u-2 で作る' }
     case 'start':
       return { ok: false, reason: 'start は applyEngineReq が扱う' }
+    case 'abandon':
+      return { ok: true, actions: [{ type: 'procAbandon' }], warnings: [] }
   }
 }
 
