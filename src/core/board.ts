@@ -130,7 +130,9 @@ export const EMPTY_BOARD: BoardState = {
  */
 export function fillBoardDefaults(saved: Partial<BoardState>): BoardState {
   // R2a で足した手順の状態も、古い保存盤面では既定値で補う（procMeta は欄ごとに補う）
-  return { ...EMPTY_BOARD, ...saved, procMeta: { ...EMPTY_PROC_META, ...(saved.procMeta ?? {}) } }
+  // R2u: 半自動（assist）の保存盤面はフリーとして読む（PHASE-R2u §1。assist は R2u-2 で消える）
+  const mode = (saved.mode as string | undefined) === 'assist' ? 'free' : saved.mode
+  return { ...EMPTY_BOARD, ...saved, ...(mode ? { mode } : {}), procMeta: { ...EMPTY_PROC_META, ...(saved.procMeta ?? {}) } }
 }
 
 /**
