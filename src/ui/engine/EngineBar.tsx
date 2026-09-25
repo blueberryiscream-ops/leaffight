@@ -12,7 +12,8 @@ import { isPublicCard, type BoardState, type Seat } from '../../core/board'
 import { awaitingSeat, currentWindow, topFrame } from '../../core/proc'
 import type { EngineCtx } from '../../engine/ctx'
 import type { EngineReq, PublicStep } from '../../net/session'
-import { legalDeclarations, shouldAutoPass } from './host'
+import { legalDeclarations, paymentNeed, shouldAutoPass, type PaymentNeed } from './host'
+import type { DeclareReq } from '../../engine/drive'
 
 type AutoPass = 'now' | 'wait'
 const AUTO_PASS_KEY = 'lf.autoPass'
@@ -62,6 +63,8 @@ export function EngineBar({
     }
   }
   const [pick, setPick] = useState<string[]>([])
+  // §2-1 支払いを選ぶ状態（宣言を押したあと、発生源を選んで「宣言」）
+  const [paying, setPaying] = useState<{ req: DeclareReq; label: string; need: PaymentNeed; payWith: string[] } | null>(null)
   const engineOn = board.mode === 'engine'
   const ch = board.procMeta.choice
   const win = currentWindow(board)
@@ -85,6 +88,13 @@ export function EngineBar({
   }, [engineOn, ctx, board, localSeat, autoPass, engineRequest, steps.n])
 
   useEffect(() => setPick([]), [ch?.id])
+  useEffect(() => setPaying(null), [board])
+  const startDeclare = (req: DeclareReq, label: string) => {
+    if (!ctx) return
+    const need = paymentNeed(board, ctx, req)
+    if (!need.choose) engineRequest({ kind: 'declare', req })
+    else setPaying({ req, label, need, payWith: [] })
+  }
 
   // §2-4 段ごとに一瞬見せる: 関係するカードを約0.6秒ずつ順に光らせる（両方の画面で同じ steps が届く）
   const [flashText, setFlashText] = useState<string | null>(null)
@@ -206,7 +216,7 @@ export function EngineBar({
             <>
               <span className="font-bold">宣言の機会{win.frame ? `（${win.frame.label ?? win.frame.kind}）` : '（メイン）'}</span>
               {legal.map((d, i) => (
-                <button key={i} type="button" className={btn} onClick={() => engineRequest({ kind: 'declare', req: d.req })}>
+                <button key={i} type="button" className={btn} onClick={() => startDeclare(d.req, d.label)}>
                   {d.label}
                 </button>
               ))}
@@ -224,6 +234,32 @@ export function EngineBar({
         <div className="flex items-center gap-2">
           <button type="button" className={btn} onClick={() => engineRequest({ kind: 'phase', by: localSeat })}>
             {turn.phase}フェイズを終える
+          </button>
+        </div>
+      )}
+
+      {engineOn && paying && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="font-bold">支払いを選ぶ: {paying.label}（コスト {paying.need.costText}）</span>
+          {paying.need.candidates.map((iid) => {
+            const c = board.cards[iid]
+            const on = paying.payWith.includes(iid)
+            return (
+              <button
+                key={iid}
+                type="button"
+                className={`${btn} ${on ? 'ring-2 ring-warn' : ''}`}
+                onClick={() => setPaying({ ...paying, payWith: on ? paying.payWith.filter((x) => x !== iid) : [...paying.payWith, iid] })}
+              >
+                {c ? nameOf(c.cardId) : iid}（{c?.zone === 'hand' ? '捨てる' : '消耗'}）
+              </button>
+            )
+          })}
+          <button type="button" className={btn} disabled={paying.payWith.length === 0} onClick={() => engineRequest({ kind: 'declare', req: { ...paying.req, payWith: paying.payWith } })}>
+            宣言
+          </button>
+          <button type="button" className={btn} onClick={() => setPaying(null)}>
+            やめる
           </button>
         </div>
       )}

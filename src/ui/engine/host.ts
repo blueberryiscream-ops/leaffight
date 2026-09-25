@@ -12,6 +12,7 @@ import type { History } from '../../core/history'
 import { activeSeat, awaitingSeat, currentWindow, type ProcTrace } from '../../core/proc'
 import type { CardInfo, EngineCtx } from '../../engine/ctx'
 import { declare, drive, validPick, type DeclareReq } from '../../engine/drive'
+import { costOfAbility, planPayment } from '../../engine/cost'
 import type { CardDef } from '../../engine/dsl'
 import type { EngineReq, PublicStep } from '../../net/session'
 
@@ -246,4 +247,41 @@ export function toPublicSteps(trace: ProcTrace[], state: BoardState): PublicStep
       const text = parts.filter((p) => !(p in state.cards)).join(':')
       return { text, iids }
     })
+}
+
+// ───────────────────────────────────────────────────────────────
+// 支払いを選ぶ（§2-1 利用者の決定: 毎回自分で選ぶ）
+// ───────────────────────────────────────────────────────────────
+
+export interface PaymentNeed {
+  /** true＝プレイヤーに選ばせる。false＝聞かずに宣言する（コストが無い・発生済みのコストだけで1通りに払える） */
+  choose: boolean
+  /** 必要なコストの表記（印刷どおり。'WG早' など） */
+  costText: string
+  /** 選べる発生源: 手札のキャラ／タッグ（捨てる）・場の待機状態の自分のキャラ（消耗させる） */
+  candidates: string[]
+}
+
+export function paymentNeed(state: BoardState, ctx: EngineCtx, req: DeclareReq): PaymentNeed {
+  const none: PaymentNeed = { choose: false, costText: '', candidates: [] }
+  if (req.costGen || req.battle) return none
+  const src = state.cards[req.source]
+  const info = src ? ctx.cards[src.cardId] : undefined
+  if (!src || !info) return none
+  const { cost } = costOfAbility(ctx, src.cardId, req.ability ?? null)
+  const costText = req.ability ? (info.abilities.find((a) => a.header === req.ability)?.cost ?? '') : `${info.cost}${info.attr}`
+  if (cost.icons.length === 0) return { ...none, costText }
+  // 例外: 発生済みのコストだけで払えて、割り当てが1通り（発生済みのコストを全部使う）なら聞かない
+  const pool = state.costs[req.by]
+  const plan = planPayment(ctx, state, req.by, info.kind === 'e' ? null : src.iid, cost, null)
+  if (plan.ok && plan.costGens.length === 0 && pool.length === cost.icons.length) return { ...none, costText }
+  const candidates = Object.values(state.cards)
+    .filter((c) => {
+      if (c.iid === req.source && src.zone === 'hand') return false
+      const k = ctx.cards[c.cardId]?.kind
+      if (c.zone === 'hand') return c.owner === req.by && (k === 'c' || k === 't')
+      return (c.zone === 'char' || c.zone === 'leader') && c.owner === req.by && c.orientation === 'ready'
+    })
+    .map((c) => c.iid)
+  return { choose: true, costText, candidates }
 }
