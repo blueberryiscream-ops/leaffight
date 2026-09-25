@@ -28,6 +28,9 @@ import { TodoBand } from './TodoBand'
 import { cellSizeForB, portraitCell, squareCell, useMeasuredHeight, useMeasuredWidth } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
+import { EngineBar } from '../engine/EngineBar'
+import { buildEngineCtx } from '../engine/host'
+import type { CardDef } from '../../engine/dsl'
 
 /**
  * 盤面クリックでの参加キャラ・種目選択（PHASE3d-3.md §1）。候補の集合は既存の
@@ -116,11 +119,14 @@ export function Board({
   imageUrls,
   annotations,
   interrupts,
+  cardDefs = {},
 }: {
   cards: PoolCard[]
   imageUrls: Map<string, string>
   annotations: AnnotationsMap
   interrupts: InterruptsMap
+  /** カードの記述（carddefs.json）。R2u のエンジンの材料 */
+  cardDefs?: Record<string, unknown>
 }) {
   const {
     board,
@@ -140,7 +146,26 @@ export function Board({
     disconnect,
     localSeat,
     setLocalSeat,
+    engineRequest,
+    setEngineCtx,
+    engineSteps,
+    engineNotice,
+    clearEngineNotice,
   } = useBoard()
+  // R2u: エンジンの材料。乱数（シャッフル）は ui 側で作って渡す（PHASE-R2u §1）
+  const engineCtx = useMemo(
+    () =>
+      buildEngineCtx(cards, cardDefs as Record<string, CardDef>, (iids) => {
+        const a = [...iids]
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[a[i], a[j]] = [a[j], a[i]]
+        }
+        return a
+      }),
+    [cards, cardDefs],
+  )
+  useEffect(() => setEngineCtx(engineCtx), [engineCtx, setEngineCtx])
   const [selectedIid, setSelectedIid] = useState<string | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -696,7 +721,21 @@ export function Board({
         </div>
 
         {/* 大きな「今やること」帯（PHASE3d-3.md §5）。チロムの直下・盤面の上に全幅で置く。高さ固定（shrink-0） */}
-        <TodoBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} battleSelection={battleSelected} />
+        {/* R2u: エンジン⇄手動・鳴き無し・宣言の番・選択・段の表示（PHASE-R2u §3-3）。エンジンの間は旧 TodoBand を出さない */}
+        <EngineBar
+          board={board}
+          localSeat={localSeat}
+          ctx={engineCtx}
+          nameOf={(id) => cardOf(id)?.name ?? id}
+          engineRequest={engineRequest}
+          dispatch={dispatch}
+          steps={engineSteps}
+          notice={engineNotice}
+          clearNotice={clearEngineNotice}
+        />
+        {board.mode !== 'engine' && (
+          <TodoBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} battleSelection={battleSelected} />
+        )}
 
         {dragNotice && (
           <div className="shrink-0 border-b border-warn bg-warn/20 px-3 py-1 text-center text-xs text-warn">

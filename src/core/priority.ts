@@ -45,7 +45,8 @@ export interface Priority {
   activePlayer: Seat
 }
 
-export type Mode = 'assist' | 'free'
+/** engine: R2u の手順の実行器で進める（assist は R2u-2 で消える） */
+export type Mode = 'assist' | 'free' | 'engine'
 
 export interface PriorityResult {
   priority: Priority | null
@@ -233,8 +234,8 @@ export function setMode(
   mode: Mode,
 ): { priority: Priority | null; mode: Mode; log: string } {
   return {
-    priority: mode === 'free' ? null : priority,
+    priority: mode === 'assist' ? priority : null,
     mode,
-    log: mode === 'free' ? 'フリーモードに切り替えた' : 'アシストモードに切り替えた',
+    log: mode === 'free' ? 'フリー（手動）に切り替えた' : mode === 'engine' ? 'エンジンに切り替えた' : 'アシストモードに切り替えた',
   }
 }

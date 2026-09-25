@@ -114,6 +114,8 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
     }
     case 'values':
       return { ok: false, reason: '[23] の人の入力は R2u-2 で作る' }
+    case 'start':
+      return { ok: false, reason: 'start は applyEngineReq が扱う' }
   }
 }
 
@@ -129,6 +131,18 @@ function reqSeat(req: EngineReq): Seat {
 export function applyEngineReq(history: History, ctx: EngineCtx, req: EngineReq, sender: Seat | null = null): EngineApplied | EngineRejected {
   if (sender !== null && reqSeat(req) !== sender) return { ok: false, reason: '自分の席の要求でない' }
   const before = history.present
+  if (req.kind === 'start') {
+    // 開始準備（P5b）の後にターンを置いてエンジンを動かす（PHASE-R2u §3-2）。手順が残っていれば置かない
+    if (before.turn || before.proc.length) return { ok: false, reason: 'ターンはもう始まっている' }
+    const placed: BoardState = { ...before, mode: 'engine', turn: { active: req.first, phase: 'エントリー', n: 1 } }
+    const d = drive(placed, ctx)
+    return {
+      ok: true,
+      history: { present: d.state, past: [...history.past, { state: before, log: { id: `e${history.past.length}:start`, text: `対戦開始（先攻 ${req.first}）` } }], future: [] },
+      trace: d.trace,
+      warnings: d.warnings,
+    }
+  }
   const plan = reqToActions(before, ctx, req)
   if (!plan.ok) return plan
   let state = before

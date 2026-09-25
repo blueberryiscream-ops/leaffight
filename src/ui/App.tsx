@@ -16,6 +16,7 @@ export function App() {
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map())
   const [annotations, setAnnotations] = useState<AnnotationsMap>({})
   const [interrupts, setInterrupts] = useState<InterruptsMap>({})
+  const [cardDefs, setCardDefs] = useState<Record<string, unknown>>({})
   const [meta, setMeta] = useState<BundleMeta | null>(null)
   const [view, setView] = useState<View>('board')
 
@@ -48,6 +49,7 @@ export function App() {
     setCards(lib.cards)
     setAnnotations(lib.annotations)
     setInterrupts(lib.interrupts)
+    setCardDefs(lib.cardDefs)
     setMeta(saved)
     setPhase('ready')
   }, [])
@@ -107,7 +109,7 @@ export function App() {
           className={`absolute inset-0 ${view === 'board' ? '' : 'pointer-events-none invisible'}`}
           aria-hidden={view !== 'board'}
         >
-          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} interrupts={interrupts} />
+          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} interrupts={interrupts} cardDefs={cardDefs} />
         </div>
         {view === 'deck' && (
           <div className="absolute inset-0">

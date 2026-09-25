@@ -53,6 +53,7 @@ export const db = new LeafFightDb()
 const META_KEY = 'bundle'
 const BOARD_KEY = 'board'
 const ANNOTATIONS_KEY = 'annotations'
+const CARDDEFS_KEY = 'carddefs'
 const INTERRUPTS_KEY = 'interrupts'
 
 export async function readBundleMeta(): Promise<BundleMeta | null> {
@@ -72,6 +73,16 @@ export async function readAnnotations(): Promise<AnnotationsMap> {
 
 export async function writeAnnotations(annotations: AnnotationsMap): Promise<void> {
   await db.meta.put({ key: ANNOTATIONS_KEY, value: annotations })
+}
+
+/** カードの記述（carddefs.json・R2u）。無いzip（旧バンドル）では空＝エンジンは declare で missingDef を返す */
+export async function readCardDefs(): Promise<Record<string, unknown>> {
+  const row = await db.meta.get(CARDDEFS_KEY)
+  return (row?.value as Record<string, unknown> | undefined) ?? {}
+}
+
+export async function writeCardDefs(defs: Record<string, unknown>): Promise<void> {
+  await db.meta.put({ key: CARDDEFS_KEY, value: defs })
 }
 
 /** 割り込みの注釈（PHASE3c.md §1）。interrupts.json が無いzip（旧バンドル）では空のまま */

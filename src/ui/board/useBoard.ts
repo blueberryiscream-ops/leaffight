@@ -6,7 +6,9 @@ import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as
 import { readBoardState, writeBoardState } from '../../data/db'
 import { normalizeModifiers } from './normalize'
 import { PeerJsTransport } from '../../net/PeerJsTransport'
-import { applyGuestAction, applyRemoteState, bumpForBroadcast, helloReply, initialHostMeta, type HostMeta, type NetMessage } from '../../net/session'
+import { applyGuestAction, applyRemoteState, bumpForBroadcast, helloReply, initialHostMeta, type EngineReq, type HostMeta, type NetMessage, type PublicStep } from '../../net/session'
+import type { EngineCtx } from '../../engine/ctx'
+import { applyEngineReq, toPublicSteps } from '../engine/host'
 
 let logSeq = 0
 const nextLogId = () => `log_${++logSeq}_${Date.now()}`
@@ -76,6 +78,15 @@ export function useBoard() {
   }, [])
 
   const transportRef = useRef<PeerJsTransport | null>(null)
+  // R2u: エンジンの材料（data 層から作る）。ホストと一人のときだけ使う（ゲストは要求を送るだけ）
+  const engineCtxRef = useRef<EngineCtx | null>(null)
+  const setEngineCtx = useCallback((ctx: EngineCtx | null) => {
+    engineCtxRef.current = ctx
+  }, [])
+  // 段ごとの表示（§2-4）: 直近の要求でエンジンが進めた段（両方の画面で同じもの）。n は受け取るたびに増える
+  const [engineSteps, setEngineSteps] = useState<{ n: number; steps: PublicStep[] }>({ n: 0, steps: [] })
+  // 要求が通らなかった理由・エンジンの警告（このクライアントにだけ出す）
+  const [engineNotice, setEngineNotice] = useState<{ reason: string; missingDef?: boolean; warnings?: string[] } | null>(null)
   const hostMetaRef = useRef<HostMeta>(initialHostMeta)
   const guestSeqRef = useRef(0)
 
@@ -158,6 +169,40 @@ export function useBoard() {
     })
   }, [mode])
 
+  /** エンジンの要求（PHASE-R2u §3-1）。ホスト・一人のときは applyEngineReq、ゲストはホストに送るだけ */
+  const engineRequest = useCallback(
+    (req: EngineReq) => {
+      if (mode === 'guest') {
+        if (!transportRef.current) return
+        guestSeqRef.current += 1
+        transportRef.current.send({ kind: 'engineReq', seq: guestSeqRef.current, req } satisfies NetMessage)
+        return
+      }
+      const ctx = engineCtxRef.current
+      if (!ctx) {
+        setEngineNotice({ reason: 'エンジンの材料（カードの記述）が読み込まれていない' })
+        return
+      }
+      setHistory((prev) => {
+        const r = applyEngineReq(prev, ctx, req, null)
+        if (!r.ok) {
+          setEngineNotice({ reason: r.reason, missingDef: r.missingDef })
+          return prev
+        }
+        const steps = toPublicSteps(r.trace, r.history.present)
+        setEngineSteps((x) => ({ n: x.n + 1, steps }))
+        setEngineNotice(r.warnings.length ? { reason: '', warnings: r.warnings } : null)
+        if (mode === 'host' && transportRef.current) {
+          const { meta, message } = bumpForBroadcast(hostMetaRef.current, r.history.present, hostMetaRef.current.lastSeq, visibleLog(r.history))
+          hostMetaRef.current = meta
+          transportRef.current.send(message.kind === 'state' ? { ...message, steps } : message)
+        }
+        return r.history
+      })
+    },
+    [mode],
+  )
+
   // 盤面クリアは普通の BoardAction として扱う。ホストなら即配信、ゲストならホストへ送って承認を待つ
   // （フリーモードなので誰が押しても通る＝P3で優先権を足すまでの割り切り）
   const resetBoard = useCallback(() => {
@@ -176,6 +221,25 @@ export function useBoard() {
           setConnStatus('connected')
           return
         }
+        if (msg.kind === 'engineReq') {
+          const ctx = engineCtxRef.current
+          setHistory((prev) => {
+            // ゲスト＝B 固定（PHASE2.5.md §2.2）。他の席を名乗る要求・合法でない要求は捨て、理由をゲストにだけ返す
+            const r = ctx ? applyEngineReq(prev, ctx, msg.req, 'B') : ({ ok: false, reason: 'ホストのエンジンの材料が無い' } as const)
+            if (!r.ok) {
+              hostMetaRef.current = { ...hostMetaRef.current, lastSeq: msg.seq }
+              t.send({ kind: 'engineReject', seq: msg.seq, reason: r.reason, ...('missingDef' in r && r.missingDef ? { missingDef: true } : {}) } satisfies NetMessage)
+              return prev
+            }
+            const steps = toPublicSteps(r.trace, r.history.present)
+            setEngineSteps((x) => ({ n: x.n + 1, steps }))
+            const { meta, message } = bumpForBroadcast(hostMetaRef.current, r.history.present, msg.seq, visibleLog(r.history))
+            hostMetaRef.current = meta
+            t.send(message.kind === 'state' ? { ...message, steps } : message)
+            return r.history
+          })
+          return
+        }
         if (msg.kind === 'action') {
           setHistory((prev) => {
             const next = applyGuestAction(prev, msg.action, nextLogId())
@@ -192,6 +256,14 @@ export function useBoard() {
         return
       }
       // guest
+      if (msg.kind === 'engineReject') {
+        setEngineNotice({ reason: msg.reason, missingDef: msg.missingDef })
+        return
+      }
+      if (msg.kind === 'state' && msg.steps) {
+        const steps = msg.steps
+        setEngineSteps((x) => ({ n: x.n + 1, steps }))
+      }
       const next = applyRemoteState(msg)
       if (next) {
         setHistory(next)
@@ -281,6 +353,11 @@ export function useBoard() {
     disconnect,
     localSeat,
     setLocalSeat,
+    engineRequest,
+    setEngineCtx,
+    engineSteps,
+    engineNotice,
+    clearEngineNotice: () => setEngineNotice(null),
   }
 }
 

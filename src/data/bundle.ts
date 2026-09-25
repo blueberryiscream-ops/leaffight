@@ -1,5 +1,5 @@
 import { strFromU8, unzipSync } from 'fflate'
-import { db, migrateAliasReferences, readAnnotations, readInterrupts, writeAnnotations, writeBundleMeta, writeInterrupts } from './db'
+import { db, migrateAliasReferences, readAnnotations, readCardDefs, readInterrupts, writeAnnotations, writeBundleMeta, writeCardDefs, writeInterrupts } from './db'
 import type { AliasMap, AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
 
 // ZIP展開はブラウザ内で行う（サーバーを持たないため）。fflate は軽くて依存ゼロ。
@@ -74,6 +74,10 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   const interruptsRaw = entries['interrupts.json']
   const interrupts: InterruptsMap = interruptsRaw ? (JSON.parse(strFromU8(interruptsRaw)) as InterruptsMap) : {}
 
+  // カードの記述（R2u）。旧バンドル（carddefs.json未収載）では空扱い
+  const cardDefsRaw = entries['carddefs.json']
+  const cardDefs: Record<string, unknown> = cardDefsRaw ? (JSON.parse(strFromU8(cardDefsRaw)) as Record<string, unknown>) : {}
+
   // 旧id→新idの読み替え表（PHASE-DB.md §2）。旧バンドル（aliases.json未収載）では空扱い
   const aliasesRaw = entries['aliases.json']
   const aliases: AliasMap = aliasesRaw ? (JSON.parse(strFromU8(aliasesRaw)) as AliasMap) : {}
@@ -104,6 +108,7 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: cardImageCount })
     await writeAnnotations(annotations)
     await writeInterrupts(interrupts)
+    await writeCardDefs(cardDefs)
   })
 
   // カードデータ本体とは別トランザクション（db.decks/db.board は clearBundle 同様に触らない設計。
@@ -120,6 +125,7 @@ export async function loadLibrary(): Promise<{
   imageUrls: Map<string, string>
   annotations: AnnotationsMap
   interrupts: InterruptsMap
+  cardDefs: Record<string, unknown>
 }> {
   const cards = await db.cards.toArray()
   cards.sort((a, b) => a.kind.localeCompare(b.kind) || a.kana.localeCompare(b.kana, 'ja'))
@@ -130,5 +136,6 @@ export async function loadLibrary(): Promise<{
   }
   const annotations = await readAnnotations()
   const interrupts = await readInterrupts()
-  return { cards, imageUrls, annotations, interrupts }
+  const cardDefs = await readCardDefs()
+  return { cards, imageUrls, annotations, interrupts, cardDefs }
 }
