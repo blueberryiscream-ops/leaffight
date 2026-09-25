@@ -47,6 +47,12 @@ for (const f of files) {
   for (const c of mod.cases) cases.push({ ...c, file: f })
 }
 
+/** 原典の「アクション宣言の機会」がある段（15-13-1・16-1・15-4-2・15-5-1・7-2）。空配列＝段の確かめをしない（R2b 以降の手順） */
+const WINDOW_STEPS: Record<string, number[]> = {
+  ability: [8, 11, 13], event: [8, 11, 13], damage: [1, 3, 4, 5], down: [2, 4],
+  item: [], field: [], battleCard: [], battle: [], phase: [],
+}
+
 const squash = (s: string) => s.replace(/\s+/g, '')
 const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(s) && s !== 'you' && s !== 'opponent'
 
@@ -73,7 +79,8 @@ function usedRefs(c: FaqCase): string[] {
   const b = c.setup
   if (b?.battle) { if (b.battle.battleCard) out.push(b.battle.battleCard); for (const v of Object.values(b.battle.participants ?? {})) out.push(...(v ?? [])) }
   for (const s of (c.steps ?? []) as Step[]) {
-    if ('declare' in s) { out.push(s.declare.source); out.push(...(s.declare.targets ?? [])) }
+    if ('declare' in s) { out.push(s.declare.source); out.push(...(s.declare.targets ?? [])); out.push(...(s.declare.payWith ?? [])) }
+    else if ('generateCost' in s) out.push(s.generateCost.source)
     else if ('choose' in s) { const p = s.choose.pick; for (const x of Array.isArray(p) ? p : [p]) if (isRef(x)) out.push(x) }
     else if ('challenge' in s) { out.push(s.challenge.participant); if (s.challenge.battleCard) out.push(s.challenge.battleCard) }
     else if ('force' in s) slotRefs(s.force, out)
@@ -84,6 +91,7 @@ function usedRefs(c: FaqCase): string[] {
     else if ('ready' in e) out.push(e.ready[0])
     else if ('stat' in e) out.push(e.stat[0])
     else if ('order' in e) out.push(...e.order.filter(isRef))
+    else if ('battleCard' in e) out.push(e.battleCard)
   }
   return out.filter((r) => r !== 'you' && r !== 'opponent')
 }
@@ -122,8 +130,19 @@ for (const c of cases) {
   } else if (c.steps || c.expect) fail(id, 'setup が無いのに steps/expect がある')
   const nSteps = c.steps?.length ?? 0
   for (const e of (c.expect ?? []) as Expect[]) {
-    const step = 'illegal' in e ? e.illegal.step : 'legal' in e ? e.legal.step : null
+    const step = 'illegal' in e ? e.illegal.step : 'legal' in e ? e.legal.step : 'fizzled' in e ? e.fizzled.step : null
     if (step !== null && (step < 0 || step >= nSteps)) fail(id, `expect の step 番号が範囲外: ${step}`)
+  }
+  // 3'. 窓の指定（WindowRef）: 手順と段番号が原典の「アクション宣言の機会」の段か（R2a で足した形）
+  for (const [i, s] of ((c.steps ?? []) as Step[]).entries()) {
+    const at = 'declare' in s ? s.declare.at : 'generateCost' in s ? s.generateCost.at : 'pass' in s && typeof s.pass === 'object' ? s.pass.at : undefined
+    if (!at) continue
+    const ok = WINDOW_STEPS[at.proc]
+    if (!ok) fail(id, `steps[${i}] の at.proc が不明: ${at.proc}`)
+    else if (ok.length && !ok.includes(at.step)) fail(id, `steps[${i}] の at が宣言の機会の段でない: ${at.proc}[${at.step}]`)
+  }
+  for (const e of (c.expect ?? []) as Expect[]) {
+    if ('fizzled' in e) { const s = c.steps?.[e.fizzled.step]; if (s && !('declare' in s)) fail(id, `fizzled の step が宣言でない: ${e.fizzled.step}`) }
   }
   // 4. grade
   if (c.grade === 'T' && !(c.setup && c.steps?.length && c.expect?.length)) fail(id, 'T なのに setup・steps・expect がそろっていない')
