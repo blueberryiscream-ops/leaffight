@@ -13,8 +13,9 @@
 // 出力: dist-data/leaffight-data.zip … pool.json / images/*.jpg / meta.json
 
 import fs from 'node:fs'
+import { register } from 'node:module'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zipSync } from 'fflate'
 import { CHAR_TYPES, collectCharTypes, splitAbilities } from './lib/ability-split.mjs'
 
@@ -702,6 +703,23 @@ zipFiles['interrupts.json'] = [enc.encode(JSON.stringify(interrupts)), { level: 
 zipFiles['aliases.json'] = [enc.encode(JSON.stringify(overrides.aliases ?? {})), { level: 9 }]
 
 // ---------------------------------------------------------------------------
+// 4.11. カードの記述（ルールエンジン・DESIGN.md §5.4・PHASE-R2a §2-5）。_local/rules/cards/*.ts（非公開）の
+// `export const def` を JSON にして carddefs.json に入れる。_ で始まるファイルは小道具なので読まない。
+// フォルダが無ければ空の {} を入れる（data 層の読み込みは R2u）。
+// ---------------------------------------------------------------------------
+const cardDefsDir = path.join(LOCAL, 'rules', 'cards')
+const cardDefs = {}
+if (fs.existsSync(cardDefsDir)) {
+  register('./ts-extensionless-loader.mjs', import.meta.url) // 記述は TS（型を外して読む）
+  for (const f of fs.readdirSync(cardDefsDir).filter((f) => f.endsWith('.ts') && !f.startsWith('_')).sort()) {
+    const mod = await import(pathToFileURL(path.join(cardDefsDir, f)).href)
+    if (mod.def?.id) cardDefs[mod.def.id] = mod.def
+    else console.warn(`⚠ カードの記述に def が無い: ${f}`)
+  }
+}
+zipFiles['carddefs.json'] = [enc.encode(JSON.stringify(cardDefs)), { level: 9 }]
+
+// ---------------------------------------------------------------------------
 // 4.7. カード裏面（PHASE2.11.md §4）。_local/card-back.jpg（利用者提供・権利物）が
 // あれば back.jpg として同梱する。無ければ入れずに続行（annotations.json と同じ流儀＝旧ZIP互換）。
 // ---------------------------------------------------------------------------
@@ -722,6 +740,7 @@ const KIND_LABEL = { c: 'キャラ', t: 'タッグ', b: 'バトル', i: 'アイ�
 const withImage = cards.filter((c) => c.image).length
 const pct = (n, d) => (d === 0 ? '  -  ' : `${((n / d) * 100).toFixed(0).padStart(3)}%`)
 
+console.log(`カードの記述（carddefs.json）: ${Object.keys(cardDefs).length} 枚`)
 console.log(`プール: ${meta.poolSets.length} セット (${meta.poolSets.join(', ')})`)
 console.log(`  刷り              : ${pool.length} 件`)
 console.log(`  ユニークカード    : ${cards.length} 種  (kind + 正規化名 ベース)`)

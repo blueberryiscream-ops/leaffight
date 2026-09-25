@@ -373,6 +373,8 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
     return res
   }
   const { state, refs } = buildBoard(c.setup, ctx)
+  // 盤面に置いたアイテム・フィールドで記述の無いもの（常時効果が効くかもしれない）
+  const noDef = [...new Set(Object.values(state.cards).filter((x) => { const k = ctx.cards[x.cardId]?.kind; return (k === 'i' || k === 'f') && !ctx.defs[x.cardId] }).map((x) => x.cardId))]
   const run: Run = { state, ctx, refs, actions: [], trace: [], warnings: [], steps: [], pending: [] }
   try {
     driveRun(run)
@@ -423,6 +425,7 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
   } else {
     res.verdict = '❌'
     res.reasons.push(...pendings)
+    if (noDef.length) res.reasons.push(`盤面に記述の無いアイテム・フィールド: ${noDef.join('・')}`)
   }
   return res
 }

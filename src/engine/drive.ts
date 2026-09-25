@@ -195,6 +195,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
   const plan = planPayment(ctx, state, req.by, isEvent ? null : src.iid, cost, req.payWith?.length ? req.payWith : null)
+  // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
+  if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
   warnings.push(...plan.warn)
 
   const label = isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name

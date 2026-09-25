@@ -129,7 +129,7 @@ export function planPayment(
   sourceIid: string | null,
   cost: Cost,
   payWith: string[] | null,
-): { costGens: CostSource[][]; usePool: boolean; warn: string[] } {
+): { ok: boolean; costGens: CostSource[][]; usePool: boolean; warn: string[] } {
   const warn: string[] = []
   const toSource = (iid: string): CostSource | null => {
     const c = state.cards[iid]
@@ -142,9 +142,9 @@ export function planPayment(
   }
   if (payWith) {
     const srcs = payWith.map(toSource).filter((x): x is CostSource => x !== null)
-    return { costGens: srcs.length ? [srcs] : [], usePool: false, warn }
+    return { ok: true, costGens: srcs.length ? [srcs] : [], usePool: false, warn }
   }
-  if (cost.icons.length === 0) return { costGens: [], usePool: true, warn }
+  if (cost.icons.length === 0) return { ok: true, costGens: [], usePool: true, warn }
   const pool = state.costs[by].map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })) // 他のアクションで発生したコストはその他のコスト（7-3）
   for (const asg of assignments(cost)) {
     // 発生済みのコストで払えない分を、コストを発生させて払う（いちばん厳しい要求から）
@@ -163,10 +163,9 @@ export function planPayment(
     }
     if (failed) continue
     if (gens.some((g) => g.icon !== 'R')) warn.push(`コストを発生させるキャラを自動で選んだ: ${gens.map((g) => g.iid).join('・')}`)
-    return { costGens: gens.length ? [gens] : [], usePool: true, warn }
+    return { ok: true, costGens: gens.length ? [gens] : [], usePool: true, warn }
   }
-  warn.push('使用代償を払う方法が見つからない（[9] で支払えず中断する）')
-  return { costGens: [], usePool: true, warn }
+  return { ok: false, costGens: [], usePool: true, warn }
 }
 
 function candidatesFor(ctx: EngineCtx, state: BoardState, by: Seat, sourceIid: string | null, icon: CostIcon, attr: Attr | null, taken: CostSource[]): CostSource | null {
