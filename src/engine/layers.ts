@@ -15,7 +15,7 @@
 import type { BoardAction } from '../core/actions'
 import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
 import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
-import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Op, Selector } from './dsl'
+import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 
@@ -319,9 +319,11 @@ export interface Violation {
   text: string
   /** 根拠の層（効果）の名前 */
   source: string
+  /** 根拠の効果の発生源の iid（D9: この iid のカードの記述が tested なら declare が断る）。無ければカードに基づかない違反 */
+  sourceIid: string | null
 }
 
-const ACTION_KIND: Record<ProcDecl['kind'], ActionPattern['kinds'][number]> = {
+export const ACTION_KIND: Record<ProcDecl['kind'], ActionPattern['kinds'][number]> = {
   ability: '特殊能力',
   event: 'イベント',
   costGen: 'コスト発生',
@@ -344,20 +346,54 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     if (f.ce !== 'prohibit' || !f.action.kinds.includes(kind)) continue
     if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
     if (!patternHits(ctx, state, e, f.action, decl)) continue
-    out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label })
+    out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label, sourceIid: e.layer.source })
   }
   for (const t of decl.targets) {
     const u = untargetableBy(ctx, state, t, kind)
-    if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label })
+    if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
   }
   if (decl.kind === 'ability' && decl.sourceIid && d.lost.has(decl.sourceIid)) {
-    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っている（【特殊能力を失う】）`, source: '特殊能力を失う' })
+    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っている（【特殊能力を失う】）`, source: '特殊能力を失う', sourceIid: decl.sourceIid })
   }
   if (decl.kind === 'equip' && decl.sourceIid && decl.equipTo) {
     const why = equipProblem(ctx, state, state.cards[decl.sourceIid], decl.equipTo, decl.by)
-    if (why) out.push({ kind: 'equipTarget', text: `${name(decl.sourceIid)}は${name(decl.equipTo)}に装備できない（${why}・17-1）`, source: name(decl.sourceIid) })
+    if (why) out.push({ kind: 'equipTarget', text: `${name(decl.sourceIid)}は${name(decl.equipTo)}に装備できない（${why}・17-1）`, source: name(decl.sourceIid), sourceIid: decl.sourceIid })
   }
   return out
+}
+
+// ───────────────────────────────────────────────────────────────
+// 使用代償の増減（K6・D3・D4）
+// ───────────────────────────────────────────────────────────────
+
+/** 当てはまる costMod を全部（層の順）集めて足し合わせる。宣言前（declareOne）は decl がまだ無いので軽い形で渡す。
+ *  printedCost: applies.costIsZero（《ライジング・コスト》）の判定に使う印刷値の使用代償 */
+export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern['kinds'][number], by: Seat, sourceIid: string | null, targets: string[] = [], printedCost?: Cost): { icons: Partial<Record<CostIcon, number>>; kiryoku: number } {
+  const icons: Partial<Record<CostIcon, number>> = {}
+  let kiryoku = 0
+  const pseudo = { by, sourceIid, targets } as ProcDecl
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'costMod' || !f.applies.kinds.includes(kind)) continue
+    if (f.applies.costIsZero && (printedCost?.icons.length ?? 0) !== 0) continue
+    if (!patternHits(ctx, state, e, f.applies, pseudo)) continue
+    for (const [icon, delta] of Object.entries(f.icons ?? {})) icons[icon as CostIcon] = (icons[icon as CostIcon] ?? 0) + (delta ?? 0)
+    kiryoku += f.kiryoku ?? 0
+  }
+  return { icons, kiryoku }
+}
+
+/** D3: 印刷値のコストアイコン枚数・気力コストへ増減をまとめて適用し、下限をとる（アイコンは種類ごとに0未満にならない・気力コストの最終値は0未満にならない） */
+export function applyCostMod(cost: Cost, mod: { icons: Partial<Record<CostIcon, number>>; kiryoku: number }): Cost {
+  const hasIcons = Object.values(mod.icons).some((n) => n)
+  if (!hasIcons && mod.kiryoku === 0) return cost
+  const counts: Partial<Record<CostIcon, number>> = {}
+  for (const ic of cost.icons) counts[ic] = (counts[ic] ?? 0) + 1
+  for (const [icon, delta] of Object.entries(mod.icons)) counts[icon as CostIcon] = (counts[icon as CostIcon] ?? 0) + (delta ?? 0)
+  const icons: CostIcon[] = []
+  for (const [icon, n] of Object.entries(counts)) for (let i = 0; i < Math.max(0, n ?? 0); i++) icons.push(icon as CostIcon)
+  const other = mod.kiryoku === 0 ? cost.other : cost.other?.map((o) => ('kiryoku' in o ? { ...o, kiryoku: Math.max(0, o.kiryoku + mod.kiryoku) } : o))
+  return { ...cost, icons, other }
 }
 
 function patternHits(ctx: EngineCtx, state: BoardState, e: Eff, p: ActionPattern, decl: ProcDecl): boolean {

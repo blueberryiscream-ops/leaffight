@@ -260,6 +260,8 @@ export interface ActionPattern {
   sourceWhere?: Cond
   /** 対象のどれかがこの条件を満たす（it＝対象。「参加キャラを対象にとる特殊能力」FAQ:600・603）。R3 */
   targetWhere?: Cond
+  /** 印刷された使用代償にコストアイコンが無い（「０コストの～」《ライジング・コスト》FAQ:4225）。costMod（K6）専用。R4a で足した */
+  costIsZero?: boolean
 }
 
 export type Continuous =
@@ -272,7 +274,10 @@ export type Continuous =
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }
   | { ce: 'controller'; who: CardRef; to: PlayerRef }                                     // 使用権の移動（14-4）
   | { ce: 'exemptLimit'; who: CardRef | Selector; limit: 'charCount' | 'sameName' | 'component' }
-  | { ce: 'costMod'; applies: ActionPattern; removeIcons: CostIcon[]; floor: 'keepSomePayment' }
+  /** 使用代償の増減（K6・D3・D4）。払うとき（15-13-1[9]・16-1[9]）の状態で評価する: 印刷値のコストアイコン枚数・気力コストへ、
+   *  当てはまる costMod を全部（層の順で）まとめて加算してから下限をとる（アイコンは種類ごとに0未満にならない。気力コストは最終値が0未満にならない）。
+   *  icons: アイコン種類ごとの増減（＋で増える・－で減る）。kiryoku: 気力コストの増減（気力－N型の N に足す）。R4a で足した */
+  | { ce: 'costMod'; applies: ActionPattern; icons?: Partial<Record<CostIcon, number>>; kiryoku?: number }
   | { ce: 'prohibit'; action: ActionPattern; when?: Cond }                                // 「～できない」
   /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
   | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }

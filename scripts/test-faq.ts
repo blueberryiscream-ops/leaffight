@@ -226,6 +226,11 @@ const readScope = (name: string) => {
 const scopeA = readScope('_r2a-scope.json')
 const scopeB = readScope('_r2b-scope.json')
 const scopeC = readScope('_r3-scope.json')
+// R4a（_r4a-scope.json）はまだ正式に組み込まない。faq-2956・2959（臨時収入の書き直し・新しい K6 のコスト発生 Op が要る）が
+// 残っている間は組み込むと verify が赤くなる（PHASE-R4a §1「原典に書いていない細部」の前に「verify は常に緑」を守る）。
+// 対象の実行結果は下の scopeD で「対象外・参考」として出す（❌ は参考扱いで保留に落ちる）。臨時収入が片付いたら
+// [...scopeA, ...scopeB, ...scopeC, ...scopeD] と ['R4a', scopeD] を足すだけで正式に組み込める（HANDOFF-R4a 参照）
+const scopeD = readScope('_r4a-scope.json')
 const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
@@ -254,5 +259,15 @@ if (Object.keys(cardInfos).length) {
   }
   const out = results.filter((r) => !r.inScope)
   console.log(`実行（対象の外・参考 ${out.length}件）: ✅ ${out.filter((r) => r.verdict === '✅').length}／保留 ${out.filter((r) => r.verdict === '保留').length}`)
+  // R4a（診断のみ・verify のゲートには入れない。上の demote 前の生の verdict を確かめるため runCase を独立に回す。
+  // 臨時収入の書き直し（faq-2956・2959）が片付いたら正式に scope へ入れて上のループへ合流させる）
+  if (scopeD.size) {
+    const rD = [...cases].filter((c) => scopeD.has(c.id)).map((c) => runCase(c, ctx))
+    const missingD = [...scopeD].filter((id) => !rD.some((r) => r.id === id))
+    const sD = count(rD as (CaseResult & { inScope: boolean })[])
+    writeFileSync(join(faqDir, '_r4a-result.json'), JSON.stringify({ generatedBy: 'scripts/test-faq.ts', summary: { scope: sD, scopeMissing: missingD }, results: rD }, null, 1) + String.fromCharCode(10))
+    console.log(`実行（R4a の対象 ${scopeD.size}件・診断のみ）: ✅ ${sD.ok}／保留 ${sD.hold}／❌ ${sD.ng}${missingD.length ? `／見つからない ${missingD.length}` : ''}`)
+    for (const r of rD.filter((r) => r.verdict !== '✅')) console.log(`  ${r.verdict} ${r.id}: ${[...r.reasons, ...r.failures].join(' / ')}`)
+  }
   if (ng || defProblems.length) process.exit(1)
 } else console.log('実行: pool.json が無いのでスキップ')

@@ -14,6 +14,7 @@ import type { CardInfo } from '../src/engine/ctx'
 import { applyAction } from '../src/core/actions'
 import { currentStat, declare, drive } from '../src/engine/drive'
 import { staticSourceActive } from '../src/engine/layers'
+import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 
@@ -403,6 +404,7 @@ function battleStart(battleCard: string): History {
     st('Denpa', 'i', null, null),
     st('Plain', 'i', null, null),
     st('NoEv', 'f', null, null),
+    st('NoEvT', 'f', null, null),
     st('Hit', 'e', null, null),
   ]
   const self = { ref: 'self' as const }
@@ -413,6 +415,7 @@ function battleStart(battleCard: string): History {
     LOnly: { id: 'LOnly', name: 'LOnly', kind: 'i', status: 'draft', equip: { targetKind: 'キャラ', leaderOnly: true }, abilities: [] },
     Denpa: { id: 'Denpa', name: 'Denpa', kind: 'i', status: 'draft', equip: { targetKind: 'キャラ', bound: true }, abilities: [{ kind: 'static', effects: [{ ce: 'whenLost', do: [{ op: 'down', who: equipped }] }] }] },
     NoEv: { id: 'NoEv', name: 'NoEv', kind: 'f', status: 'draft', abilities: [{ kind: 'static', effects: [{ ce: 'prohibit', action: { kinds: ['イベント'], by: 'any' } }] }] },
+    NoEvT: { id: 'NoEvT', name: 'NoEvT', kind: 'f', status: 'tested', abilities: [{ kind: 'static', effects: [{ ce: 'prohibit', action: { kinds: ['イベント'], by: 'any' } }] }] },
     P: { id: 'P', name: 'P', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Zap', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [{ slot: 't', chooser: 'you', pick: { cards: { zone: 'field', side: 'opponent', class: 'キャラ', excludeLeader: true } }, count: [1, 1], mode: 'target', when: 'declare' }], effect: [{ op: 'damage', to: { ref: 'slot', slot: 't' }, amount: 1 }] }] },
     Hit: DEFS.Hit,
   }
@@ -470,6 +473,17 @@ function battleStart(battleCard: string): History {
   // 「宣言できるもの」に数えない＝legalDeclarations（withWarned なし）に出ない。shouldAutoPass 自体は R3⑤ で自分のメインフェイズは常に false（別に検証済み・③）
   eq([hit.ok, hit.ok && hit.violations.map((v) => v.kind), legalDeclarations(k, ctx3, 'A').filter((d) => !d.req.costGen).length], [true, ['prohibit'], 0], '⑰d 「〜できない」（prohibit）も警告・自動見送りでは宣言できないものとして数える')
   eq(shouldAutoPass(k, ctx3, 'A'), false, '⑰d′ 自分のメインフェイズなので shouldAutoPass 自体は R3⑤ により常に false')
+
+  // D9・enforce.ts（R4a §3-6）: tested のカードの禁止（K4）は declare を断る（ok:false）。draft のカードは今までどおり警告
+  const kT = drive(base3([card('Hit', 'A', 'hand'), card('Y', 'B', 'char'), card('NoEvT', 'B', 'field')]), ctx3).state
+  const hitT = declare(kT, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
+  eq([hitT.ok, !hitT.ok && !!hitT.blocked?.length], [false, true], '⑳a ENFORCE既定 tested: tested のカード（NoEvT）の禁止は declare を断る（ok:false・根拠つき）')
+  setEnforce('warn')
+  const hitTWarn = declare(kT, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
+  eq([hitTWarn.ok, hitTWarn.ok && hitTWarn.violations.map((v) => v.kind)], [true, ['prohibit']], '⑳b ENFORCE=warn: tested のカードでも断らず警告だけ（人の手直し・フリーモード用）')
+  setEnforce('tested')
+  const hitAgain = declare(k, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
+  eq([hitAgain.ok, hitAgain.ok && hitAgain.violations.map((v) => v.kind)], [true, ['prohibit']], '⑳c ENFORCE既定 tested に戻しても draft のカード（NoEv）は引き続き警告のまま（断らない）')
 
   // ⑱ K12: 場の制限を満たせない→使用権者が1体ずつ選んでゴミ箱送り（15-2）。候補が1枚なら聞かない（17-1）
   let l = drive(base3([card('Same1', 'A', 'char'), card('Same2', 'A', 'char')]), ctx3).state

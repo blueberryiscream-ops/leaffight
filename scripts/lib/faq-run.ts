@@ -291,10 +291,13 @@ function doDeclare(run: Run, i: number, req: DeclReq) {
     }
     // 手順の中を探していて、手順が全部終わった＝ここまでに宣言できる窓が無かった。
     // ただし、1つ前の step が同じ席のメインフェイズの窓での宣言（続けて行う行動）で、開き直したメインフェイズの窓がその席の番なら、
-    // そこで1度だけ試す（《地竜走破》の後に《応援》FAQ:2479。F26・R3）。相手の割り込みの後の step（FAQ:2225）には使わない
+    // そこで1度だけ試す（《地竜走破》の後に《応援》FAQ:2479。F26・R3）。相手の割り込みの後の step（FAQ:2225）には使わない。
+    // 宣言の後に「後で決める対象」の choose（同じ席・使用代償の対象の選択など）が挟まっても、直前の declare を同じ行動の続きとして見る（R4a）
     if (sawProc && s.proc.length === 0 && !baseOpen(s)) {
       const fresh = currentWindow(s)
-      const prev = i > 0 ? run.all[i - 1] : undefined
+      let pj = i - 1
+      while (pj >= 0 && 'choose' in run.all[pj] && seatOf(run.all[pj].choose.by) === by) pj--
+      const prev = pj >= 0 ? run.all[pj] : undefined
       const chained = !!prev && 'declare' in prev && prev.declare.by === req.by && !prev.declare.at && !req.at
       if (chained && !triedFresh && fresh && !fresh.frame && awaitingSeat(s) === by) {
         triedFresh = true
@@ -544,11 +547,6 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
     res.reasons.push('setup・steps・expect がそろっていない')
     return res
   }
-  const unsupported = c.steps.find((s) => 'answer' in s)
-  if (unsupported) {
-    res.reasons.push('範囲外の手順: answer（相手への問い R4）')
-    return res
-  }
   const { state, refs } = buildBoard(c.setup, ctx)
   // 盤面に置いたアイテム・フィールドで記述の無いもの（常時効果が効くかもしれない）
   const noDef = [...new Set(Object.values(state.cards).filter((x) => { const k = ctx.cards[x.cardId]?.kind; return (k === 'i' || k === 'f') && !ctx.defs[x.cardId] }).map((x) => x.cardId))]
@@ -584,6 +582,8 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
         const p = typeof step.pass === 'string' ? { side: step.pass, at: undefined } : step.pass
         doPass(run, i, p.side, p.at)
       } else if ('choose' in step) doChoose(run, i, step.choose.by, step.choose.pick)
+      // K5（D8）: 相手への問い（offer）の答え。エンジンは procChoice kind:'use'（key 'pay'）で問う（drive.ts execOp 'offer'）
+      else if ('answer' in step) doChoose(run, i, step.answer.by, step.answer.accept ? ['pay'] : [])
     })
     if (!run.pending.length) finish(run)
   } catch (err) {

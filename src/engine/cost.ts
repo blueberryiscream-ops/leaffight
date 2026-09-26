@@ -11,6 +11,8 @@ import type { BoardState, Seat } from '../core/board'
 import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
+import { ACTION_KIND, applyCostMod, costModOf } from './layers'
+import { resolveRef } from './eval'
 
 const ICONS = 'WRGLT'
 const ATTRS = '力早賢根感'
@@ -21,31 +23,46 @@ export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
   const other: OtherCost[] = []
   const unknown: string[] = []
   const toNum = (s: string) => Number(s.replace(/[０-９]/g, (d) => String('０１２３４５６７８９'.indexOf(d))))
-  for (const raw of text.split(/[＋+]/)) {
-    const part = raw.trim()
-    if (!part) continue
+  // 1つの部分（+ で区切った1区画）を読む。「Ｒ気力－１」のように + の無いアイコン＋その他代償の連結は、
+  // 先頭のアイコンだけの並びを剥がして残りを同じ規則で読み直す（R4a・カード名に関係ない一般の表記のゆれ）
+  const parsePart = (part: string) => {
+    if (!part) return
     if ([...part].every((ch) => ICONS.includes(ch) || ATTRS.includes(ch))) {
       for (const ch of part) {
         if (ICONS.includes(ch)) cost.icons.push(ch as CostIcon)
         else cost.attrs.push(ch as Attr)
       }
-      continue
+      return
+    }
+    // 「味方キャラ１体の気力－Ｎ」＝払うキャラを宣言時に選ぶ（宣言[3]の選択・slot 't' の約束。R4a）。
+    // 末尾の（…）注記（対象の制限など）はカードごとの選択肢の記述（ability.choices の exclude・where）に持たせる。ここでは読み捨てる
+    const mv = /^味方キャラ１体の気力[－\-−ー]([0-9０-９]+)(?:（[^）]*）)?$/.exec(part)
+    if (mv) {
+      other.push({ kiryoku: toNum(mv[1]), of: { ref: 'slot', slot: 't' } })
+      return
     }
     const m = /^気力[－\-−ー]([0-9０-９]+)$/.exec(part)
     if (m) {
       other.push({ kiryoku: toNum(m[1]) })
-      continue
+      return
     }
     if (part === 'このキャラをゴミ箱送りにする' || part === 'このアイテムをゴミ箱送りにする') {
       other.push({ trash: { ref: 'self' } })
-      continue
+      return
     }
     if (part === 'このキャラをダウンさせる') {
       other.push({ down: { ref: 'self' } })
-      continue
+      return
+    }
+    const iconPrefix = /^[WRGLT]+/.exec(part)
+    if (iconPrefix && iconPrefix[0].length < part.length) {
+      for (const ch of iconPrefix[0]) cost.icons.push(ch as CostIcon)
+      parsePart(part.slice(iconPrefix[0].length))
+      return
     }
     unknown.push(part)
   }
+  for (const raw of text.split(/[＋+]/)) parsePart(raw.trim())
   if (other.length) cost.other = other
   return { cost, unknown }
 }
@@ -117,6 +134,15 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
   if (abilityName === null) return { cost: cardCost(info), unknown: [] }
   const a = info.abilities.find((x) => x.header === abilityName)
   return parseCostText(a?.cost ?? '')
+}
+
+/**
+ * K6（D3・D4）: 払うとき（15-13-1[9]・16-1[9]・17-3 の同じ段）の状態で、印刷値の使用代償へ costMod をまとめて適用したもの。
+ * declareOne の支払い方法の宣言・payNow の支払いの両方が、この一か所を通る（統括「使用代償の構造の算出を一か所に」PHASE §3-7）
+ */
+export function effectiveCost(ctx: EngineCtx, state: BoardState, actionKind: ProcDecl['kind'], by: Seat, sourceIid: string | null, targets: string[], cost: Cost): Cost {
+  const mod = costModOf(ctx, state, ACTION_KIND[actionKind], by, sourceIid, targets, cost)
+  return applyCostMod(cost, mod)
 }
 
 /**
@@ -277,8 +303,11 @@ export function payNow(
   const down: string[] = []
   for (const o of cost.other ?? []) {
     if ('kiryoku' in o) {
-      // 8-3-1: 気力を減らすキャラは1以上の気力でなければならない。0未満になってもよい（FAQ:3263）
-      const c = self ? state.cards[self] : undefined
+      // 8-3-1: 気力を減らすキャラは1以上の気力でなければならない。0未満になってもよい（FAQ:3263）。
+      // of（「味方キャラ１体の気力－１」等）＝宣言[3]で選んだ対象（decl.eng.slots。既定は能力を持つキャラ自身 8-3）
+      const slots = (decl.eng.slots as Record<string, string[]> | undefined) ?? {}
+      const targetIid = o.of ? resolveRef(state, { self, you: by, slots, trigger: null, declId: null, declared: {} }, o.of)[0] : self
+      const c = targetIid ? state.cards[targetIid] : undefined
       if (!c || !isCharOnField(c) || (c.kiryoku ?? 0) < 1) return fail('気力が1以上でない（8-3-1）')
       kiryoku.push({ iid: c.iid, delta: -o.kiryoku })
     } else if ('trash' in o) {

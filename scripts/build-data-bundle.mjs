@@ -692,12 +692,18 @@ zipFiles['aliases.json'] = [enc.encode(JSON.stringify(overrides.aliases ?? {})),
 // ---------------------------------------------------------------------------
 const cardDefsDir = path.join(LOCAL, 'rules', 'cards')
 const cardDefs = {}
+// tested の判定（_local/rules/tools/tested.ts が書く _tested.json・PHASE-R4a §3-5・D10）。カードのファイルの status は
+// 手で書き換えない約束なので、ここで判定結果に差し替える（無ければ記述ファイルの status のまま＝下位互換）
+const testedPath = path.join(LOCAL, 'rules', 'faq', '_tested.json')
+const tested = fs.existsSync(testedPath) ? JSON.parse(fs.readFileSync(testedPath, 'utf8')) : {}
 if (fs.existsSync(cardDefsDir)) {
   register('./ts-extensionless-loader.mjs', import.meta.url) // 記述は TS（型を外して読む）
   for (const f of fs.readdirSync(cardDefsDir).filter((f) => f.endsWith('.ts') && !f.startsWith('_')).sort()) {
     const mod = await import(pathToFileURL(path.join(cardDefsDir, f)).href)
-    if (mod.def?.id) cardDefs[mod.def.id] = mod.def
-    else console.warn(`⚠ カードの記述に def が無い: ${f}`)
+    if (mod.def?.id) {
+      const status = tested[mod.def.id]?.status ?? mod.def.status
+      cardDefs[mod.def.id] = status === mod.def.status ? mod.def : { ...mod.def, status }
+    } else console.warn(`⚠ カードの記述に def が無い: ${f}`)
   }
 }
 zipFiles['carddefs.json'] = [enc.encode(JSON.stringify(cardDefs)), { level: 9 }]

@@ -32,7 +32,8 @@ import {
 } from '../core/proc'
 import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Play } from './abilities'
 import { controllerOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
-import { attrsOf, costOfAbility, parseCostText, payNow, planPayment } from './cost'
+import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
+import { ENFORCE } from './enforce'
 import type { Choice, Op } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
@@ -58,8 +59,8 @@ interface ItemEng {
   optional: boolean
   /** 処理条件がある常時効果: 始めるときに《〜とき》を確かめ直す（K10）。seat＝eachPlayer のそのプレイヤー */
   recheck: { iid: string; index: number; seat?: Seat } | null
-  /** 選択の答えを待っている */
-  awaiting: { id: string; kind: 'use' | 'choose' | 'order'; slot?: string; optional?: boolean; ops?: Op[]; bind?: Record<string, string[]> } | null
+  /** 選択の答えを待っている。offer（K5・D8）: 払うか（'pay' を選べば払う・選ばなければ払わない）の答えを待つ */
+  awaiting: { id: string; kind: 'use' | 'choose' | 'order' | 'offer'; slot?: string; optional?: boolean; ops?: Op[]; bind?: Record<string, string[]>; payOps?: Op[]; ifPaidOps?: Op[]; ifDeclinedOps?: Op[] } | null
   seq: number
   /** 処理条件がある常時効果が受け手を差し替えた（H-2: 受け渡しは1件につき1回） */
   redirects?: boolean
@@ -98,7 +99,7 @@ export interface DeclareReq {
  */
 export type DeclareOutcome =
   | { ok: true; actions: BoardAction[]; decl: ProcDecl; warnings: string[]; violations: Violation[] }
-  | { ok: false; reason: string; missingDef?: boolean; manual?: boolean }
+  | { ok: false; reason: string; missingDef?: boolean; manual?: boolean; blocked?: Violation[] }
 
 /** 今の窓で、その宣言ができるか（できるなら BoardAction の列を返す）。
  *  「次のうち１つ」のカードで option が無ければ、選択肢を順に試して最初に合法なものを使う */
@@ -118,10 +119,20 @@ export function declare(state: BoardState, ctx: EngineCtx, req: DeclareReq): Dec
   return withViolations(state, ctx, declareOne(state, ctx, req))
 }
 
-/** K4（R3）: 宣言[1]〜[5] を済ませた宣言を、層の「禁止・対象にならない・特殊能力を失う」と装備対象（17-1）に照らす */
+/**
+ * K4（R3）: 宣言[1]〜[5] を済ませた宣言を、層の「禁止・対象にならない・特殊能力を失う」と装備対象（17-1）に照らす。
+ * D9（R4a）: ENFORCE==='tested' のとき、tested のカードの記述から来た違反だけ declare を断る（ok:false・根拠つき）。
+ * draft のカードの違反は今までどおり警告（ok:true・violations に残す）
+ */
 function withViolations(state: BoardState, ctx: EngineCtx, out: Omit<Extract<DeclareOutcome, { ok: true }>, 'violations'> | Extract<DeclareOutcome, { ok: false }>): DeclareOutcome {
   if (!out.ok) return out
-  return { ...out, violations: violations(ctx, state, out.decl) }
+  const vs = violations(ctx, state, out.decl)
+  if (ENFORCE === 'tested') {
+    const isTested = (iid: string | null) => !!iid && ctx.defs[state.cards[iid]?.cardId ?? '']?.status === 'tested'
+    const blocked = vs.filter((v) => isTested(v.sourceIid))
+    if (blocked.length) return { ok: false, reason: `断る（tested のカードの効果・K4）: ${blocked.map((v) => v.text).join('／')}`, blocked }
+  }
+  return { ...out, violations: vs }
 }
 
 type DeclareOne = Omit<Extract<DeclareOutcome, { ok: true }>, 'violations'> | Extract<DeclareOutcome, { ok: false }>
@@ -227,9 +238,11 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   }
 
   // 宣言[4] 支払い方法の宣言（コストを発生させるアクションの宣言を含む）
-  const { cost, unknown } = isEvent ? costOfAbility(ctx, src.cardId, null) : costOfAbility(ctx, src.cardId, (ab as Activated).name)
+  const { cost: printedCost, unknown } = isEvent ? costOfAbility(ctx, src.cardId, null) : costOfAbility(ctx, src.cardId, (ab as Activated).name)
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
+  // K6（D3）: costMod（増減）を今の状態でまとめて適用したもので支払い方法を宣言する（払う段 [9] でも同じ一か所を通す＝engineStep 'pay'）
+  const cost = effectiveCost(ctx, state, isEvent ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
   const plan = planPayment(ctx, state, req.by, isEvent ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
@@ -453,7 +466,9 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       return [{ type: 'procTimingDone', frameId: top.id, items: timingItems(ctx, state, top) }]
     case 'pay': {
       const d = top.decl!
-      const { cost } = costOfAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null)
+      const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null)
+      // K6（D3）: 払う段で改めて評価する（declareOne と同じ effectiveCost）
+      const cost = effectiveCost(ctx, state, d.kind, d.by, d.sourceIid, d.targets, printedCost)
       const r = payNow(ctx, state, top.id, d, cost)
       if (!r.ok) warnings.push(`${d.label}: ${r.reason}`)
       return [{ type: 'procPay', frameId: top.id, ok: r.ok, consume: r.consume, kiryoku: r.kiryoku, trash: r.trash, down: r.down }]
@@ -596,8 +611,9 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   } else if (kind === 'battleCard') {
     if (Object.values(state.cards).filter((c) => c.zone === 'battle' && c.owner === req.by).length >= 3) return { ok: false, reason: 'バトルカードは3枚まで（19-1・宣言時の制限）' }
   }
-  // [4] 使用代償の支払い方法の宣言（タッグ化は使用代償なし 15-10-2）
-  const cost = kind === 'tag' ? { icons: [], attrs: [] } : costOfAbility(ctx, src.cardId, null).cost
+  // [4] 使用代償の支払い方法の宣言（タッグ化は使用代償なし 15-10-2）。K6（D3）: costMod をここでも同じ effectiveCost でまとめて適用
+  const printedCost = kind === 'tag' ? { icons: [], attrs: [] } : costOfAbility(ctx, src.cardId, null).cost
+  const cost = kind === 'tag' ? printedCost : effectiveCost(ctx, state, kind, req.by, null, targets, printedCost)
   const plan = planPayment(ctx, state, req.by, null, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]）' }
   eng.usePool = plan.usePool
@@ -734,6 +750,13 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       for (let i = 0; i < ops.length; i++) if (!order.includes(i)) order.push(i)
       const tasks: Task[] = [...order.map((i) => ({ op: ops[i], bind: a.bind })), ...eng.tasks]
       return [save({ awaiting: null, tasks })]
+    }
+    if (a.kind === 'offer') {
+      // K5（D8）: 「pay」を選べば払う（op.pay→op.ifPaid）。選ばなければ払わない（op.ifDeclined）。既定の答えは作らない（必ず問う）
+      const paid = ans.length > 0
+      const chosen = paid ? [...(a.payOps ?? []), ...(a.ifPaidOps ?? [])] : (a.ifDeclinedOps ?? [])
+      const tasks: Task[] = [...chosen.map((op) => ({ op })), ...eng.tasks]
+      return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `${paid ? '払う' : '払わない'}:${item.label}` } }]
     }
     // choose（「〜できる」の最初の選択で何も選ばなければ、その効果は使わない）
     const slots = { ...eng.env.slots, [a.slot!]: ans }
@@ -937,8 +960,17 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: [{ type: 'shuffleDeck', owner: seat, orderedIids: ctx.shuffle ? ctx.shuffle(deck) : deck }] }
     }
     case 'offer': {
-      // 相手に払うか聞く（K5）。R2a では「払わない」を既定にせず人に聞く
-      return manual(`相手への問い「${op.prompt}」`)
+      // K5（D8）: 相手（op.to）に「払うことでこの効果を打ち消せる」等を問う。既定の答えは作らない（必ず procChoice で問う）。
+      // payableIf を満たさなければ問わずに ifDeclined（H-7b: 気力1未満ならただちにダウン等、払えない側の処理は ifDeclined に書く）
+      const to = resolvePlayer(state, env, op.to)
+      const payable = op.payableIf ? evalCond(ctx, state, env, op.payableIf) : true
+      if (!payable) return { tasks: [...op.ifDeclined.map((o) => ({ op: o, bind: task.bind })), ...rest], actions: [] }
+      const id = `${frame.id}:${item.key}:offer${eng.seq}`
+      return {
+        tasks: rest,
+        patch: { awaiting: { id, kind: 'offer', payOps: op.pay, ifPaidOps: op.ifPaid, ifDeclinedOps: op.ifDeclined } },
+        actions: [{ type: 'procChoice', choice: { id, by: to, kind: 'use', prompt: op.prompt, options: [{ key: 'pay', label: op.prompt }], min: 0, max: 1, frameId: frame.id } }],
+      }
     }
     // ── R2b
     case 'statMod': {
