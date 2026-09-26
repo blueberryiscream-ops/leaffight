@@ -280,7 +280,7 @@ export function EngineBar({
               ) : inPhaseWindow && actor === ap && win.window.state === 'awaitActive' ? (
                 <button
                   type="button"
-                  className={`${btn}${apOwnMainWindow && ui.legal.length === 0 ? ' lf-glow' : ''}`}
+                  className={`${btn}${apOwnMainWindow && ui.legal.filter((d) => !d.req.costGen).length === 0 ? ' lf-glow' : ''}`}
                   onClick={() => engineRequest({ kind: 'pass', by: actor })}
                 >
                   {turn?.phase}フェイズ終了を宣言
