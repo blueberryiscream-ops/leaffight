@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BoardAction } from '../../core/actions'
-import { isValidBattleShape } from '../../core/battle'
-import { fillBoardDefaults, type BoardState, type Seat } from '../../core/board'
+import { fillBoardDefaults, type Seat } from '../../core/board'
 import { emptyHistory, dispatch as dispatchHistory, redo as redoHistory, undo as undoHistory, visibleLog, type History, type LogEntry } from '../../core/history'
 import { readBoardState, writeBoardState } from '../../data/db'
 import { normalizeModifiers } from './normalize'
@@ -17,32 +16,6 @@ export type ConnMode = 'solo' | 'host' | 'guest'
 export type ConnStatus = 'idle' | 'connecting' | 'waiting' | 'connected' | 'disconnected' | 'error'
 
 export const otherSeat = (s: Seat): Seat => (s === 'A' ? 'B' : 'A')
-
-/**
- * 旧盤面の priority は形が違う（P3a-1r以前: `stack`ベースのflatモデル。
- * 新モデルは `frames` ベース）。読込時に `frames` を持たない priority は null に正規化する。
- * これをしないと StackPanel が旧shapeを新shapeとして読んで真っ暗クラッシュする
- * （PHASE3a-1r.md §6。P3a-1導入直後に一度実際に踏んだ事故の再発防止）。
- */
-function normalizePriority(board: BoardState): BoardState {
-  const p = board.priority as unknown
-  if (p !== null && (typeof p !== 'object' || !('frames' in p))) {
-    return { ...board, priority: null }
-  }
-  return board
-}
-
-/**
- * 旧盤面の battle は `at` を持たない（P3d-1の形。PHASE3d-2a導入前）。読込時に `at` を
- * 持たない battle は null に正規化する（normalizePriority と同じ流儀・PHASE3d-2a.md §6）。
- * P3d-1にはUIが無かったので実データには存在しないはずだが、念のため。
- */
-export function normalizeBattle(board: BoardState): BoardState {
-  if (board.battle !== null && !isValidBattleShape(board.battle)) {
-    return { ...board, battle: null }
-  }
-  return board
-}
 
 /**
  * 盤面の状態を管理する。IndexedDBに自動保存しリロードで復元する（P1）のに加えて、
@@ -94,14 +67,11 @@ export function useBoard() {
     void (async () => {
       const saved = await readBoardState()
       if (saved) {
-        // 旧バージョンで保存された盤面には priority / mode が無い（P3a-1以前）。
-        // EMPTY_BOARD のデフォルト（priority:null, mode:'assist', setup:{A:null,B:null} 等）で
-        // 補完してから復元する（fillBoardDefaults）。これをしないと StackPanel が undefined な
-        // priority を読んでクラッシュする。さらに priority があっても旧shape（frames無し）の
-        // ことがあるので正規化する（上記コメント参照）。
+        // 旧バージョンで保存された盤面は、新しい欄を既定値で補い、旧 priority・battle の欄を捨て、
+        // assist を free として読む（fillBoardDefaults。R2u-2）
         setHistory((h) => ({
           ...h,
-          present: normalizeModifiers(normalizeBattle(normalizePriority(fillBoardDefaults(saved)))),
+          present: normalizeModifiers(fillBoardDefaults(saved)),
         }))
       }
       loaded.current = true

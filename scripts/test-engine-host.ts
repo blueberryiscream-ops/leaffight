@@ -4,14 +4,16 @@
 //   10-2-4（先攻1ターン目 376-379）・10-4[4]（ドロー 389）・10-6（終了フェイズ [1]〜[3]・10-6-1 417-429）・10-7・10-8（436-441）・
 //   15-10-1（呼び出し 680-706）・16-1（イベント 816-844）・15-4-2（ダメージ 612-632）・15-5-1（ダウン 633-649）・9-2（ダウン数）・
 //   FAQ:2959-2960（宣言時に指定した支払い方法以外では払えない）・PHASE-R2u §1（ホストが正・1要求＝Undo 1回）・§2-2（自動見送り）
+//   R2u-2: 10-5（メインフェイズ [1]〜[3] 391-394）・20-4（バトルの処理手順 1062-1127）・20-6（中断 1133-1136）・20-7／20-8（参加キャラの指定 1140-1145）・
+//   20-10（結果ダメージ 1153-1157）・15-5-1[5]（ボーナスドロー 645-646）・FAQ:3465（参加キャラは指定した瞬間に消耗）・DESIGN §4.10（種目は挑んだ側が選ぶ＝利用者の決定）
 
-import { EMPTY_BOARD, fillBoardDefaults, type BoardState, type CardInstance, type Seat } from '../src/core/board'
+import { EMPTY_BOARD, EMPTY_PROC_META, fillBoardDefaults, type BoardState, type CardInstance, type Seat } from '../src/core/board'
 import { emptyHistory, undo, type History } from '../src/core/history'
-import { PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, topFrame } from '../src/core/proc'
+import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, topFrame } from '../src/core/proc'
 import type { CardInfo } from '../src/engine/ctx'
 import { drive } from '../src/engine/drive'
 import type { CardDef } from '../src/engine/dsl'
-import { applyEngineReq, buildEngineCtx, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
+import { applyEngineReq, buildEngineCtx, foldLog, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 
 let failures = 0
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -31,6 +33,8 @@ function board(cards: CardInstance[]): BoardState {
   cards.forEach((c, i) => (map[c.iid] = { ...c, index: i }))
   return { ...EMPTY_BOARD, cards: map, turn: { active: 'A', phase: 'メイン' } }
 }
+/** ターン n のメインフェイズの [2]（10-5-1 のアクションの窓）から始める盤面（[1]《メインフェイズ開始時》は済んだものとする） */
+const inMain = (n: number, extra: Partial<BoardState['procMeta']> = {}): Pick<BoardState, 'turn' | 'procMeta'> => ({ turn: { active: 'A', phase: 'メイン', n }, procMeta: { ...EMPTY_PROC_META, phaseRun: MAIN_ACTIONS, ...extra } })
 const hist = (s: BoardState): History => ({ ...emptyHistory(), present: s })
 function req(h: History, r: EngineReq, sender: Seat | null = null): History {
   const x = applyEngineReq(h, ctxAll, r, sender)
@@ -167,7 +171,7 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
     card('dA0', 'A', 'deck'),
     card('dB0', 'B', 'deck'),
   ])
-  let h = hist(drive({ ...start, turn: { active: 'A', phase: 'メイン', n: 2 } }, ctxAll).state)
+  let h = hist(drive({ ...start, ...inMain(2) }, ctxAll).state)
   // 呼び出し（15-10-1）: 宣言 → 相手が見送る → [6]〜[14] の窓を両者が見送る → 印刷された気力で消耗状態でフィールドに出る（[13]）
   h = req(h, { kind: 'declare', req: { by: 'A', source: 'X' } })
   h = passUntil(h, (s) => s.proc.length === 0 && s.procMeta.base?.state === 'awaitActive')
@@ -196,7 +200,7 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
 // ⑩ 支払い（§2-1・payPool）: 指定した発生済みのコストだけで払う（FAQ:2959-2960）。発生済みだけで1通りなら聞かない
 {
   const base = board([card('LA', 'A', 'leader', { kiryoku: 8 }), card('Pay1', 'A', 'hand'), card('Pay2', 'A', 'hand'), card('dA0', 'A', 'deck'), card('dA1', 'A', 'deck'), card('dB0', 'B', 'deck')])
-  const withCosts = (attrs: string[][]): BoardState => ({ ...base, turn: { active: 'A', phase: 'メイン', n: 2 }, costs: { A: attrs.map((a, i) => ({ id: `k${i + 1}`, icon: 'W' as const, attrs: a, frameId: null })), B: [] } })
+  const withCosts = (attrs: string[][]): BoardState => ({ ...base, ...inMain(2), costs: { A: attrs.map((a, i) => ({ id: `k${i + 1}`, icon: 'W' as const, attrs: a, frameId: null })), B: [] } })
   const two = drive(withCosts([['根'], []]), ctxAll).state
   const need = paymentNeed(two, ctxAll, { by: 'A', source: 'Pay1' })
   eq([need.choose, need.pool], [true, ['k1', 'k2']], '⑩ 発生済みのコストの組み合わせが2通り（根・無属性）なら支払いを選ばせる（§2-1）')
@@ -221,6 +225,150 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
   const free = { ...board([card('dA0', 'A', 'deck')]), mode: 'free' as const }
   const on = applyEngineReq(hist(free), ctx, { kind: 'engineOn', by: 'B' })
   eq(on.ok && [on.history.present.mode, awaitingSeat(on.history.present), on.history.past.length], ['engine', 'A', 1], '⑪ 手動からエンジンに戻すと今の盤面から drive で続く（メインの窓が開く・history 1件）')
+}
+
+// ⑫ メインフェイズ（10-5 oldrule.txt:391-394）: [1]《メインフェイズ開始時》→ [2] アクションの窓 → フェイズ終了が認められたら [3]《メインフェイズ終了時》→ 終了フェイズ
+{
+  let h = hist(drive({ ...board([card('dA0', 'A', 'deck'), card('dB0', 'B', 'deck')]), turn: { active: 'A', phase: 'メイン', n: 2 } }, ctx).state)
+  eq([topFrame(h.present)?.kind, topFrame(h.present)?.step, awaitingSeat(h.present)], ['mainPhase', 1, 'A'], '⑫ メインフェイズは [1]《メインフェイズ開始時》の宣言の機会から（10-5[1]）')
+  h = passUntil(h, (s) => s.proc.length === 0)
+  eq([h.present.procMeta.phaseRun, !!h.present.procMeta.base, awaitingSeat(h.present)], [MAIN_ACTIONS, true, 'A'], '⑫ [2] メインフェイズのアクションの窓（10-5-1: AP から）')
+  h = req(h, { kind: 'pass', by: 'A' })
+  h = req(h, { kind: 'phase', by: 'B', answer: 'accept' })
+  eq([h.present.turn?.phase, topFrame(h.present)?.kind, topFrame(h.present)?.step], ['メイン', 'mainPhase', 3], '⑫ フェイズ終了が認められると [3]《メインフェイズ終了時》の宣言の機会（10-5[3]）。まだメインフェイズ')
+  h = passUntil(h, (s) => s.turn?.phase !== 'メイン')
+  eq([h.present.turn?.phase, topFrame(h.present)?.kind, topFrame(h.present)?.step], ['終了', 'endPhase', 1], '⑫ [3] が終わると終了フェイズ [1]（10-2-3）')
+  // エントリーの後もメインは [1] から（10-2-3 → 10-5[1]）
+  let e = hist(drive({ ...board([card('dA0', 'A', 'deck'), card('dA1', 'A', 'deck')]), turn: { active: 'A', phase: 'エントリー', n: 2 } }, ctx).state)
+  e = passUntil(e, (s) => s.turn?.phase === 'メイン')
+  eq([topFrame(e.present)?.kind, topFrame(e.present)?.step], ['mainPhase', 1], '⑫ エントリーフェイズの後はメインフェイズ [1] から')
+}
+
+// ⑬ バトルの通し（20-4 oldrule.txt:1062-1127）: 挑む → [7] 参加 → [11] 参加 → [16] 種目 → [19]〜[22]（[21] で戻る）→ [23][24] 結果 → [26] ダウン → [29] → 終わり
+const st = (p: number) => ({ 力: p, 早: 0, 賢: 0, 根: 0, 感: 0 })
+const BINFOS: CardInfo[] = [
+  { ...info('BL', 'c', 4), stats: st(1) },
+  { ...info('BM', 'c', 4), stats: st(1) },
+  { ...info('BX', 'c', 3), stats: st(5) },
+  { ...info('BY', 'c', 2), stats: st(2) },
+  { ...info('Kumi', 'b', null), battleAtk: '力', battleDef: '力' },
+  { ...info('Odd', 'b', null), battleAtk: '？', battleDef: '？' },
+]
+const ctxB = { cards: Object.fromEntries(BINFOS.map((c) => [c.id, c])), defs: {} }
+function reqB(h: History, r: EngineReq, sender: Seat | null = null): History {
+  const x = applyEngineReq(h, ctxB, r, sender)
+  if (!x.ok) throw new Error(`要求が断られた: ${JSON.stringify(r)} → ${x.reason}`)
+  return x.history
+}
+/** 見送り続けて、条件を満たすか選択が出るまで */
+function passB(h: History, pred: (s: BoardState) => boolean, limit = 120): History {
+  for (let i = 0; i < limit && !pred(h.present); i++) {
+    const seat = awaitingSeat(h.present)
+    if (!seat || h.present.procMeta.choice) break
+    h = reqB(h, { kind: 'pass', by: seat })
+  }
+  return h
+}
+const choiceOf = (s: BoardState) => s.procMeta.choice
+const topOf = (s: BoardState) => s.proc[s.proc.length - 1]
+function battleStart(battleCard: string): History {
+  const cards = [
+    card('BL', 'A', 'leader', { kiryoku: 8, orientation: 'rested' }),
+    card('BX', 'A', 'char', { kiryoku: 3 }),
+    card('BM', 'B', 'leader', { kiryoku: 8, orientation: 'rested' }),
+    card('BY', 'B', 'char', { kiryoku: 2 }),
+    card(battleCard, 'A', 'battle', { used: false }),
+    card('dA0', 'A', 'deck'),
+    card('dA1', 'A', 'deck'),
+    card('dB0', 'B', 'deck'),
+  ]
+  return hist(drive({ ...board(cards), ...inMain(2) }, ctxB).state)
+}
+{
+  let h = battleStart('Kumi')
+  const decl = legalDeclarations(h.present, ctxB, 'A').filter((d) => d.req.battle)
+  eq(decl.map((d) => d.label), ['バトルを挑む'], '⑬ メインの窓で AP はバトルを挑める（20-2・20-3）。ボタンは1つ')
+  eq(applyEngineReq(h, ctxB, { kind: 'declare', req: { by: 'B', source: 'BY', battle: true } }).ok, false, '⑬ NAP はバトルを挑めない（20-2 自分のメインフェイズ）')
+  h = reqB(h, { kind: 'declare', req: decl[0]?.req ?? { by: 'A', source: 'BX', battle: true } })
+  eq(awaitingSeat(h.present), 'B', '⑬ [2] 相手プレイヤーの同時アクションの宣言の機会（20-4[2]）')
+  h = passB(h, (s) => !!choiceOf(s))
+  let ch = choiceOf(h.present)
+  eq([ch?.purpose, ch?.by, [...(ch?.options.map((o) => o.key) ?? [])].sort()], ['battleParticipant', 'A', ['BX']], '⑬ [7] 挑んだ側が待機状態のキャラから参加キャラを指定（20-7。消耗状態のリーダーは候補でない）')
+  h = reqB(h, { kind: 'choose', by: 'A', id: ch!.id, pick: ['BX'] })
+  eq(h.present.cards.BX.orientation, 'rested', '⑬ [7] 指定したらそのキャラを消耗させる（20-4[7]・FAQ:3465 指定した瞬間）')
+  h = passB(h, (s) => !!choiceOf(s))
+  ch = choiceOf(h.present)
+  eq([ch?.purpose, ch?.by, [...(ch?.options.map((o) => o.key) ?? [])].sort()], ['battleParticipant', 'B', ['BM', 'BY']], '⑬ [11] 挑まれた側は待機状態のキャラか、リーダー（消耗状態でもよい）から指定（20-8）')
+  h = reqB(h, { kind: 'choose', by: 'B', id: ch!.id, pick: ['BY'] }, 'B')
+  eq(h.present.cards.BY.orientation, 'rested', '⑬ [11] 指定したらそのキャラを消耗させる（20-4[11]）')
+  h = passB(h, (s) => !!choiceOf(s))
+  ch = choiceOf(h.present)
+  eq([ch?.purpose, ch?.by], ['battleCard', 'A'], '⑬ [16] バトル種目は挑んだ側が選ぶ（DESIGN §4.10 利用者の決定）')
+  eq(applyEngineReq(h, ctxB, { kind: 'choose', by: 'B', id: ch!.id, pick: ['Kumi'] }, 'B').ok, false, '⑬ [16] 挑まれた側の答えは捨てる（ホストが正）')
+  h = reqB(h, { kind: 'choose', by: 'A', id: ch!.id, pick: ['Kumi'] })
+  eq([topOf(h.present).step, h.present.cards.Kumi.used], [17, false], '⑬ [16] の後は [17]《バトルカードを選択したとき》の宣言の機会（まだ未使用）')
+  h = passB(h, (s) => topOf(s)?.step === 19)
+  eq(h.present.cards.Kumi.used, true, '⑬ [18] バトル種目のバトルカードを使用済み状態にする（20-4[18]1）')
+  eq([topOf(h.present).kind, topOf(h.present).step, awaitingSeat(h.present)], ['battle', 19, 'A'], '⑬ [19] 挑んだプレイヤー（AP）から宣言の機会（20-4[19]）')
+  h = passB(h, (s) => !!choiceOf(s))
+  ch = choiceOf(h.present)
+  eq([ch?.purpose, ch?.by], ['battleLoop', 'A'], '⑬ [21] 挑んだプレイヤーが [19] に戻るか進むかを選ぶ（20-4[21]）')
+  h = reqB(h, { kind: 'choose', by: 'A', id: ch!.id, pick: ['back'] })
+  eq(topOf(h.present).step, 19, '⑬ [21] で戻ると [19] の機会がもう一度ある')
+  h = passB(h, (s) => !!choiceOf(s))
+  ch = choiceOf(h.present)
+  h = reqB(h, { kind: 'choose', by: 'A', id: ch!.id, pick: ['next'] })
+  eq(topOf(h.present).step, 22, '⑬ [21] で進むと [22]（20-4[22]）')
+  const handA = Object.values(h.present.cards).filter((c) => c.owner === 'A' && c.zone === 'hand').length
+  const at22 = h.past.length
+  h = passB(h, (s) => s.proc.length === 0 && s.procMeta.base?.state === 'awaitActive')
+  // [23] 力/力 の種目: BX 攻5・防5／BY 攻2・防2（20-10）→ [24] A←2−5（0以下＝発生しない）・B←5−2=3
+  const bl = h.present.procMeta.battles
+  eq([bl.length, bl[0]?.aborted, bl[0]?.battleCard], [1, null, 'Kumi'], '⑬ バトルは中断せずに終わった（結果のダウンは 20-6 の中断に数えない）')
+  eq([h.present.cards.BY.zone, h.present.downs.B, h.present.cards.BX.kiryoku, h.present.cards.BX.zone], ['trash', 1, 3, 'char'], '⑬ 結果ダメージ B←3 で BY（気力2）がダウン→ゴミ箱・B のダウン数1。A←−3 は 0 以下で発生しない（20-10・15-5-1）')
+  eq(Object.values(h.present.cards).filter((c) => c.owner === 'A' && c.zone === 'hand').length, handA + 1, '⑬ 相手のキャラがダウンしたので A はボーナスドロー1枚（15-5-1[5]）')
+  const stepTexts = h.past.slice(at22).flatMap((p) => p.log.steps ?? []).map((x) => x.text)
+  eq([stepTexts.some((t) => t.startsWith('バトルの結果')), stepTexts.some((t) => t.startsWith('バトル終了'))], [true, true], '⑬ 結果とバトルの終わりが段としてログに出る（§2-4）')
+  eq([awaitingSeat(h.present), h.present.turn?.phase], ['A', 'メイン'], '⑬ バトルの後はメインの窓（AP から）')
+}
+
+// ⑭ [23] エンジンが攻防の値を出せない種目（攻・防が「？」）: 人が値を入れる（values 要求）。入れた値で結果を出す（20-10）
+{
+  let h = battleStart('Odd')
+  h = reqB(h, { kind: 'declare', req: { by: 'A', source: 'BX', battle: true } })
+  for (let i = 0; i < 12; i++) {
+    h = passB(h, (s) => !!choiceOf(s) || topOf(s)?.engineWhat === 'battleValues')
+    const ch = choiceOf(h.present)
+    if (!ch) break
+    const pick = ch.purpose === 'battleParticipant' ? [ch.by === 'A' ? 'BX' : 'BY'] : ch.purpose === 'battleCard' ? ['Odd'] : ['next']
+    h = reqB(h, { kind: 'choose', by: ch.by, id: ch.id, pick })
+  }
+  const top = topOf(h.present)
+  eq([top?.kind, top?.step, top?.status, top?.engineWhat], ['battle', 23, 'engine', 'battleValues'], '⑭ 攻防が能力値アイコン1つでない種目は [23] で止まり、人の入力を待つ')
+  eq(applyEngineReq(h, ctxB, { kind: 'values', by: 'B', values: { A: { atk: 1, def: 0 }, B: { atk: 1, def: 0 } } }, 'A').ok, false, '⑭ 他の席を名乗る値の入力は捨てる')
+  eq(applyEngineReq(h, ctxB, { kind: 'values', by: 'A', values: { A: { atk: 1.5, def: 0 }, B: { atk: 1, def: 0 } } }).ok, false, '⑭ 整数でない値は断る')
+  eq(applyEngineReq(battleStart('Odd'), ctxB, { kind: 'values', by: 'A', values: { A: { atk: 1, def: 0 }, B: { atk: 1, def: 0 } } }).ok, false, '⑭ [23] でないときの値の入力は断る')
+  // B（挑まれた側）が入れてもよい【決めたこと】。A 攻1・防0／B 攻3・防1 → A←3−0=3・B←1−1=0（発生しない）
+  h = reqB(h, { kind: 'values', by: 'B', values: { A: { atk: 1, def: 0 }, B: { atk: 3, def: 1 } } }, 'B')
+  h = passB(h, (s) => s.proc.length === 0 && s.procMeta.base?.state === 'awaitActive')
+  eq([h.present.cards.BX.zone, h.present.downs.A, h.present.cards.BY.kiryoku], ['trash', 1, 2], '⑭ 入れた値で結果ダメージ A←3（BX 気力3→0 でダウン）・B←0（発生しない）（20-10・15-5）')
+}
+
+// ⑮ 自動の見送りはログで1行に畳む（統括11 の検証の気づき3）。フェイズ終了の宣言・承認は畳まない
+{
+  let h = battleStart('Kumi')
+  h = reqB(h, { kind: 'declare', req: { by: 'A', source: 'BX', battle: true } })
+  const from = h.past.length
+  for (let i = 0; i < 4; i++) {
+    const seat = awaitingSeat(h.present)
+    if (!seat || choiceOf(h.present)) break
+    h = reqB(h, { kind: 'pass', by: seat, auto: true })
+  }
+  const logs = h.past.slice(from).map((p) => p.log)
+  const rows = foldLog(logs)
+  eq([logs.length > 1, logs.every((l) => l.auto), rows.length, rows[0]?.text.startsWith('自動で見送り ×')], [true, true, 1, true], '⑮ 続いた自動の見送りは「自動で見送り ×N」の1行になる（Undo は1要求ずつのまま）')
+  const pe = applyEngineReq(hist(s0), ctx, { kind: 'pass', by: 'A', auto: true })
+  eq(pe.ok && pe.history.past[0].log.auto, undefined, '⑮ 自動でもフェイズ終了の宣言（10-2-2）はログで畳まない')
 }
 
 if (failures) {

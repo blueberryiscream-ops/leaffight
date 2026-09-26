@@ -24,6 +24,7 @@ const KIND_LABEL: Record<string, string> = {
   battleCard: 'バトルカード配置（19-2）',
   battle: 'バトル（20-4）',
   entry: 'エントリーフェイズ（10-4）',
+  mainPhase: 'メインフェイズ（10-5）',
   endPhase: '終了フェイズ（10-6）',
   handAdjust: '手札調整フェイズ（10-7）',
   turnEnd: 'ターン終了（10-8）',

@@ -1,7 +1,7 @@
 // ホスト権威プロトコル本体（DESIGN.md §6 / PHASE2.md §3）。
 // Transport（生の管）の上に、seq/version/ackの形を乗せる。
 // UIを持ち込まない・core/ は使ってよい（net→core は正、core→net は禁止）。
-// P3の優先権システム(declare/respond/pass/resolve)はこの上に乗る想定（DESIGN.md §5.1）。
+// エンジンの要求（EngineReq）もこの上に乗る（R2u）。
 
 import { applyAction, type BoardAction } from '../core/actions'
 import type { BoardState } from '../core/board'
@@ -15,7 +15,8 @@ import type { DeclareReq } from '../engine/drive'
  */
 export type EngineReq =
   | { kind: 'declare'; req: DeclareReq }
-  | { kind: 'pass'; by: Seat }
+  /** auto: 鳴き無しボタンの自動見送り（ログで畳む。統括11 の検証の気づき3） */
+  | { kind: 'pass'; by: Seat; auto?: boolean }
   | { kind: 'choose'; by: Seat; id: string; pick: string[] }
   /**
    * フェイズの終了（10-2-2 oldrule.txt:367-369）: AP は answer 無しで「フェイズ終了を宣言」（フェイズの窓での見送りと同じ）。
@@ -24,8 +25,8 @@ export type EngineReq =
   | { kind: 'phase'; by: Seat; answer?: 'accept' | 'deny' }
   /** 手動からエンジンに戻す（mode を engine にして、今の proc から drive で続ける）。どちらの席も出せる */
   | { kind: 'engineOn'; by: Seat }
-  /** [23] の人の入力（R2u-2 で中身を作る） */
-  | { kind: 'values'; by: Seat; values: Record<string, number> }
+  /** 20-4[23] 攻撃能力値・防御能力値の人の入力（エンジンが出せないとき。drive の askValues で止まっている） */
+  | { kind: 'values'; by: Seat; values: Record<Seat, { atk: number; def: number }> }
   /** 開始準備の後にターンを置く（先攻の1ターン目・エントリー）。R2u-1 の暫定: 誰でも出せる */
   | { kind: 'start'; by: Seat; first: Seat }
   /** 手順を捨てる（詰まったとき用・確認つき §2-3）。どちらの席も出せる */

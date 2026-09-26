@@ -4,8 +4,6 @@
 // （P2でホストの操作をそのまま再生できるようにするため。PHASE1.md §6地雷）。
 
 import type { Attr } from './types'
-import type { Battle } from './battle'
-import type { Mode, Priority } from './priority'
 import type { CostToken, GameResult, Phase, ProcFrame, ProcMeta } from './proc'
 
 // 絶対座席（PHASE2.5.md §2.1）。'自分/相手' のような視点依存の語は core/ に一切持ち込まない。
@@ -15,6 +13,12 @@ export type Seat = 'A' | 'B'
 export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field' | 'pending'
 
 export type Orientation = 'ready' | 'rested'
+
+/**
+ * engine＝ルールエンジンが手順（proc）を進める／free＝手動（エンジンを動かさない・盤面を手で直す）。
+ * DESIGN §5.3 R2u の決定③。旧 'assist'（半自動）は R2u-2 で消した（git タグ assist-final に残る）。保存盤面の assist は free として読む
+ */
+export type Mode = 'engine' | 'free'
 
 export interface CardInstance {
   iid: string
@@ -70,20 +74,16 @@ export interface SetupState {
 export interface BoardState {
   cards: Record<string, CardInstance>
   modifiers: Record<string, Modifier>
-  /** 優先権の窓（アクティブ/非アクティブの2枠＋入れ子フレーム）。null＝窓が開いていない（自由操作中）。DESIGN.md §5.1 */
-  priority: Priority | null
-  /** free＝優先権オフ（このengineを使わない）。DESIGN.md §5.1 */
+  /** engine＝エンジンが進める／free＝手動（R2u §2-3）。共有・同期される */
   mode: Mode
-  /** 進行中のバトル。null＝バトル中でない。DESIGN.md §5.2 / PHASE3d-1.md */
-  battle: Battle | null
   /** 開始準備の状態（座席ごと）。PHASE5b.md §1-1 */
   setup: Record<Seat, SetupState | null>
-  // ── R2a（DESIGN §5.4 K1・PHASE-R2a §2）: 原典の処理手順。今の priority/battle とは独立（画面につなぐのは R2u）
+  // ── R2a（DESIGN §5.4 K1・PHASE-R2a §2）: 原典の処理手順（窓・バトルもここ。R2u-2 で旧 priority/battle を置き換えた）
   /** 手順のスタック（空＝何も処理していない）。末尾＝今の手順 */
   proc: ProcFrame[]
   /** 手順の付帯状態（メインフェイズの窓・選択・連番・使用回数など） */
   procMeta: ProcMeta
-  /** 手番（アクティブプレイヤー）とフェイズ。null＝未設定（今は priority.activePlayer で代用している） */
+  /** 手番（アクティブプレイヤー）とフェイズ。null＝未設定（AP は A として扱う） */
   /** n: ターンの番号（1＝先攻の1ターン目・10-2-4 の制限に使う。R2u）。無い盤面（R2a/R2b のテスト・旧データ）は制限なし */
   turn: { active: Seat; phase: Phase; n?: number } | null
   /** 確定したキャラのダウン数（9-2）。ダウン処理[3]で加えた分は[6]の後に確定する（H-12） */
@@ -112,9 +112,7 @@ export const EMPTY_PROC_META: ProcMeta = {
 export const EMPTY_BOARD: BoardState = {
   cards: {},
   modifiers: {},
-  priority: null,
-  mode: 'assist',
-  battle: null,
+  mode: 'free',
   setup: { A: null, B: null },
   proc: [],
   procMeta: EMPTY_PROC_META,
@@ -131,9 +129,12 @@ export const EMPTY_BOARD: BoardState = {
  */
 export function fillBoardDefaults(saved: Partial<BoardState>): BoardState {
   // R2a で足した手順の状態も、古い保存盤面では既定値で補う（procMeta は欄ごとに補う）
-  // R2u: 半自動（assist）の保存盤面はフリーとして読む（PHASE-R2u §1。assist は R2u-2 で消える）
-  const mode = (saved.mode as string | undefined) === 'assist' ? 'free' : saved.mode
-  return { ...EMPTY_BOARD, ...saved, ...(mode ? { mode } : {}), procMeta: { ...EMPTY_PROC_META, ...(saved.procMeta ?? {}) } }
+  // R2u: 半自動（assist）の保存盤面はフリーとして読む（PHASE-R2u §1）。R2u-2 で消した旧 priority・battle の欄は捨てる
+  const { priority: _p, battle: _b, ...rest } = saved as Partial<BoardState> & { priority?: unknown; battle?: unknown }
+  void _p
+  void _b
+  const mode: Mode | undefined = (rest.mode as string | undefined) === 'assist' ? 'free' : rest.mode
+  return { ...EMPTY_BOARD, ...rest, ...(mode ? { mode } : {}), procMeta: { ...EMPTY_PROC_META, ...(rest.procMeta ?? {}) } }
 }
 
 /**
@@ -389,8 +390,7 @@ export function setFaceUp(state: BoardState, args: { iid: string; faceUp: boolea
   return { state: next, log: `${subject} を ${args.faceUp ? '表' : '裏'} にした` }
 }
 
-/** バトルカードの未使用/使用済み（19-3）。PHASE3d-1.md §2。プレイヤーが直接叩く想定のsetterではなく、
- *  core/battle.ts の setBattleCard から呼ばれる（種目決定で used=true にする用途） */
+/** バトルカードの未使用/使用済み（19-3）。プレイヤーが直接叩く想定のsetterではない（ルールと効果でのみ変わる） */
 export function setUsed(state: BoardState, args: { iid: string; used: boolean; cardName: string }): Result {
   const card = state.cards[args.iid]
   if (!card) return { state, log: '' }
@@ -439,23 +439,6 @@ export function clearModifiers(state: BoardState, args: { iid: string; scope?: M
   const target = state.cards[args.iid]
   const subject = !target || isPublicCard(target) ? args.cardName : 'カード'
   return { state: next, log: `${subject} の修正を ${count} 件クリアした` }
-}
-
-/**
- * [28]で攻防修正を失わせる（原典20-4[28] oldrule.txt:1121-1122・FAQ oldfaq.txt:78。P3d-3 §3-2）。
- * kind==='攻防修正' かつ scope==='このバトル' の修正だけを消す。能力値修正・他scopeの攻防修正は残す
- * （人間が見て消す）。呼び出し側（actions.ts の advanceBattleStep）が at===28 を出るときだけ呼ぶ。
- */
-export function clearBattleModifiers(state: BoardState): { state: BoardState; count: number } {
-  const next = cloneBoard(state)
-  let count = 0
-  for (const [id, mod] of Object.entries(state.modifiers)) {
-    if (mod.kind === '攻防修正' && mod.scope === 'このバトル') {
-      delete next.modifiers[id]
-      count++
-    }
-  }
-  return { state: next, count }
 }
 
 export function attach(state: BoardState, args: { itemIid: string; targetIid: string; itemName: string; targetName: string }): Result {
@@ -520,7 +503,7 @@ export function clearBoard(): Result {
 
 /**
  * デッキで開始準備（10-1 [1]〜[4]）。owner の盤面を全部片付けてから、リーダー・デッキ・手札を置く。
- * battle・priority が動いている最中は差し替えない（参照が壊れるため）。
+ * 手順（proc）が動いている最中は差し替えない（参照が壊れるため）。
  */
 export function startWithDeck(
   state: BoardState,
@@ -532,7 +515,7 @@ export function startWithDeck(
     draw: number
   },
 ): Result {
-  if (state.battle !== null || state.priority !== null) return { state, log: '' }
+  if (state.proc.length > 0) return { state, log: '' }
   const { owner, deckName, leader, deck, draw } = args
 
   // 2. owner のカードを全ゾーンから消す（共有フィールドの owner 一致分も）。
@@ -601,9 +584,7 @@ export function startWithDeck(
     ...state,
     cards,
     modifiers,
-    priority: state.priority,
     mode: state.mode,
-    battle: state.battle,
     setup: { ...state.setup, [owner]: { deckName, mulliganUsed: false, leaderRevealed: false } },
   }
 

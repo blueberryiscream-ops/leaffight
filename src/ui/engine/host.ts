@@ -114,8 +114,17 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
       if (!phaseEndPending(state)) return { ok: false, reason: 'フェイズ終了の宣言が無い' }
       return { ok: true, actions: [req.answer === 'accept' ? { type: 'procPass', by: req.by } : { type: 'procPhaseDeny', by: req.by }], warnings: [] }
     }
-    case 'values':
-      return { ok: false, reason: '[23] の人の入力は R2u-2 で作る' }
+    case 'values': {
+      // [23] 攻防の値をエンジンが出せないとき、人が入れる（drive の askValues で止まっている）。どちらの席も入れられる【決めたこと】
+      const top = state.proc[state.proc.length - 1]
+      if (!top || top.kind !== 'battle' || top.status !== 'engine' || top.engineWhat !== 'battleValues') return { ok: false, reason: '今は攻防の値を入れる段（20-4[23]）でない' }
+      const ok = (['A', 'B'] as Seat[]).every((x) => {
+        const v = req.values[x]
+        return !!v && Number.isInteger(v.atk) && Number.isInteger(v.def)
+      })
+      if (!ok) return { ok: false, reason: '攻撃・防御の値を両方の席に整数で入れる' }
+      return { ok: true, actions: [{ type: 'procBattle', frameId: top.id, values: { A: req.values.A, B: req.values.B } }], warnings: [] }
+    }
     case 'start':
     case 'engineOn':
       return { ok: false, reason: `${req.kind} は applyEngineReq が扱う` }
@@ -133,6 +142,9 @@ function reqSeat(req: EngineReq): Seat {
 export function setupDone(state: BoardState): boolean {
   return (['A', 'B'] as Seat[]).every((s) => !state.setup[s] || state.setup[s]!.leaderRevealed)
 }
+
+/** 画面の drive: [23] の攻防の値をエンジンが出せなければ人の入力を待つ（R2u-2） */
+const DRIVE_OPTS = { askValues: true } as const
 
 function entry(history: History, id: string, text: string, trace: ProcTrace[], state: BoardState): LogEntry {
   const steps = toPublicSteps(trace, state)
@@ -161,7 +173,7 @@ export function applyEngineReq(history: History, ctx: EngineCtx, req: EngineReq,
       placed = { ...before, mode: 'engine' }
       text = 'エンジンに切り替えた'
     }
-    const d = drive(placed, ctx)
+    const d = drive(placed, ctx, DRIVE_OPTS)
     return {
       ok: true,
       history: { present: d.state, past: [...history.past, { state: before, log: entry(history, req.kind, text, d.trace, d.state) }], future: [] },
@@ -176,16 +188,21 @@ export function applyEngineReq(history: History, ctx: EngineCtx, req: EngineReq,
   const logs: string[] = []
   for (const a of plan.actions) {
     const r = applyAction(state, a)
-    if (!r.log) return { ok: false, reason: `適用できなかった: ${a.type}` }
+    // 受け付けられなかった＝状態もログも変わらない（procBattle の値の入力のようにログの無い操作もある）
+    if (!r.log && r.state === state) return { ok: false, reason: `適用できなかった: ${a.type}` }
     state = r.state
-    logs.push(r.log)
+    if (r.log) logs.push(r.log)
     if (r.trace) trace.push(...r.trace)
   }
-  const d = drive(state, ctx)
+  const d = drive(state, ctx, DRIVE_OPTS)
   state = d.state
   trace.push(...d.trace)
   let text = logs[0] ?? req.kind
   const log = entry(history, req.kind, text, trace, state)
+  // 自動の見送り（鳴き無しボタン §2-2）はログで畳む（統括11 の検証の気づき3）。LogPanel が続いた印をまとめて1行にする
+  // フェイズ終了の宣言・承認（10-2-2）はターンの進みなので畳まない
+  if (req.kind === 'pass' && req.auto && /が通した$/.test(text)) log.auto = true
+  if (req.kind === 'values') log.text = `${req.by} が攻防の値を入れた（A 攻${req.values.A.atk}・防${req.values.A.def}／B 攻${req.values.B.atk}・防${req.values.B.def}）`
   if (req.kind === 'choose') {
     // 選んだカードは iid のままログの文に入れない（画面が公開かどうかを見て名前か「＊」にする）。カードでない選択肢は文に書く
     const cardsPicked = req.pick.filter((k) => k in state.cards)
@@ -247,7 +264,8 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat)
     }
     if ((c.zone === 'char' || c.zone === 'leader') && c.owner === seat && c.attachedTo === null) {
       tryReq({ by: seat, source: c.iid, costGen: true }, `${info.name}（コスト）`)
-      tryReq({ by: seat, source: c.iid, battle: true }, `${info.name}でバトルを挑む`)
+      // バトルを挑む（20-2）は1つだけ出す（参加キャラは [7] で選ぶ。宣言の source はどのキャラでも同じ）
+      if (!out.some((d) => d.req.battle)) tryReq({ by: seat, source: c.iid, battle: true }, 'バトルを挑む')
       for (const ab of ctx.defs[c.cardId]?.abilities ?? []) {
         if (ab.kind === 'activated' && ab.name) tryReq({ by: seat, source: c.iid, ability: ab.name }, `${info.name}《${ab.name}》`)
       }
@@ -340,3 +358,35 @@ export function targetsNeeded(state: BoardState, ctx: EngineCtx, req: DeclareReq
 }
 
 export type { TargetSpec }
+
+// ───────────────────────────────────────────────────────────────
+// ログの畳み（R2u-2・統括11 の検証の気づき3）
+// ───────────────────────────────────────────────────────────────
+
+export type LogRow = { key: string; text: string; steps: { text: string; iids: string[] }[] }
+
+/** 続いた自動の見送り（LogEntry.auto）を「自動で見送り ×N（席）」の1行にまとめる（古い順のまま。段はその下にまとめる） */
+export function foldLog(log: LogEntry[]): LogRow[] {
+  const rows: LogRow[] = []
+  let run: { first: LogEntry; n: number; seats: Set<string>; steps: LogRow['steps'] } | null = null
+  const flush = () => {
+    if (!run) return
+    const seats = [...run.seats].sort().join('・')
+    rows.push({ key: run.first.id, text: run.n === 1 ? run.first.text : `自動で見送り ×${run.n}（${seats}）`, steps: run.steps })
+    run = null
+  }
+  for (const e of log) {
+    if (e.auto) {
+      if (!run) run = { first: e, n: 0, seats: new Set(), steps: [] }
+      run.n++
+      const seat = /^([AB]) /.exec(e.text)?.[1]
+      if (seat) run.seats.add(seat)
+      run.steps.push(...(e.steps ?? []))
+      continue
+    }
+    flush()
+    rows.push({ key: e.id, text: e.text, steps: e.steps ?? [] })
+  }
+  flush()
+  return rows
+}

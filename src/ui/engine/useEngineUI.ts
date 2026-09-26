@@ -158,7 +158,9 @@ export function useEngineUI({
     }
     if (ch && ch.by === actor && ch.options.some((o) => o.key === iid)) {
       const n = pick.filter((k) => k === iid).length
-      return n ? { battleRing: 'selected', battleRingLabel: n > 1 ? `×${n}` : '選択' } : { battleRing: 'candidate' }
+      // バトルの選択は何を選んでいるかを札に出す（[7][11] 参加・[16] 種目）
+      const label = ch.purpose === 'battleParticipant' ? '参加' : ch.purpose === 'battleCard' ? '種目' : '選択'
+      return n ? { battleRing: 'selected', battleRingLabel: n > 1 ? `×${n}` : label } : { battleRing: 'candidate' }
     }
     return {}
   }

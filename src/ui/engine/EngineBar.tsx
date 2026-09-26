@@ -98,7 +98,7 @@ export function EngineBar({
     const n = steps.n
     const t = window.setTimeout(() => {
       autoDoneN.current = n
-      engineRequest({ kind: 'pass', by: waiting })
+      engineRequest({ kind: 'pass', by: waiting, auto: true })
     }, autoPass === 'now' ? 0 : WAIT_MS)
     return () => window.clearTimeout(t)
   }, [engineOn, ctx, board, localSeat, solo, waiting, autoPass, engineRequest, steps.n])
@@ -286,6 +286,11 @@ export function EngineBar({
             <span className="text-ink-muted">{pePending ? 'フェイズ終了の答えを待っています' : '相手の宣言の機会'}</span>
           )}
         </div>
+      )}
+
+      {/* 20-4[23]: エンジンが攻防の値を出せないとき（特殊な攻防・複数参加）は人が入れる（右のバトル欄。EngineReq.values） */}
+      {engineOn && top?.kind === 'battle' && top.status === 'engine' && top.engineWhat === 'battleValues' && (
+        <div className="font-bold text-warn">バトル [23]: 攻撃能力値・防御能力値を右のバトル欄で入れてください（どちらのプレイヤーが入れてもよい）</div>
       )}
 
       {/* 対象の指定（宣言[3]）: 盤面のカードをクリック */}

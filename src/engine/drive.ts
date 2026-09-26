@@ -12,6 +12,7 @@
 import { applyAction, type BoardAction } from '../core/actions'
 import type { BoardState, Seat } from '../core/board'
 import {
+  MAIN_ACTIONS,
   PHASE_ACTIONS,
   STEP_TIMINGS,
   activeSeat,
@@ -291,7 +292,11 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
 // 駆動
 // ───────────────────────────────────────────────────────────────
 
-export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: boolean } = {}): DriveResult {
+/**
+ * opts.askValues: [23] の攻防の値をエンジンが出せない（特殊な攻防・複数参加）とき、人の入力を待って止まる（画面の層。R2u-2）。
+ * 無いとき（FAQ テスト）は今までどおり manual の警告を出して値なしで進める
+ */
+export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: boolean; askValues?: boolean } = {}): DriveResult {
   const out: DriveResult = { state, actions: [], warnings: [], trace: [] }
   const apply = (a: BoardAction) => {
     const r = applyAction(out.state, a)
@@ -310,15 +315,17 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
     }
     const top = topFrame(s)
     if (!top) {
-      // フェイズの窓: メインフェイズ（10-5-1）・終了フェイズの [2]（10-6-1）
-      const actionPhase = s.turn?.phase === 'メイン' || (s.turn?.phase === '終了' && s.procMeta.phaseRun === PHASE_ACTIONS)
+      // フェイズの窓: メインフェイズの [2]（10-5-1）・終了フェイズの [2]（10-6-1）。ターンの番号が無い盤面（FAQ テスト）はメインの窓から
+      const numbered = s.turn?.n !== undefined
+      const actionPhase =
+        (s.turn?.phase === 'メイン' && (numbered ? s.procMeta.phaseRun === MAIN_ACTIONS : true)) || (s.turn?.phase === '終了' && s.procMeta.phaseRun === PHASE_ACTIONS)
       if (opts.openMain !== false && !s.procMeta.base && !s.procMeta.mainClosed && actionPhase) {
         apply({ type: 'procOpenMain' })
         continue
       }
-      // エントリーフェイズ（10-4）・終了フェイズ（10-6）・手札調整フェイズ（10-7）の段を始める
+      // エントリーフェイズ（10-4）・メインフェイズ（10-5。ターンの番号がある盤面だけ）・終了フェイズ（10-6）・手札調整フェイズ（10-7）の段を始める
       const ph = s.turn?.phase
-      if ((ph === 'エントリー' || ph === '終了' || ph === '手札調整') && s.procMeta.phaseRun === null) {
+      if ((ph === 'エントリー' || (ph === 'メイン' && numbered) || ph === '終了' || ph === '手札調整') && s.procMeta.phaseRun === null) {
         apply({ type: 'procPhaseStart' })
         continue
       }
@@ -332,6 +339,15 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
       continue
     }
     if (top.status !== 'engine') break
+    // [23] 攻防の値をエンジンが出せなければ人の入力（EngineReq.values）を待つ
+    if (opts.askValues && top.engineWhat === 'battleValues') {
+      const w: string[] = []
+      const v = battleValues(ctx, s, top, w)
+      if (!v.A || !v.B) {
+        out.warnings.push(...w, '[23] 攻防の値を入れてください（バトル欄）')
+        break
+      }
+    }
     const acts = engineStep(ctx, s, top, out.warnings)
     if (acts.length === 0) {
       out.warnings.push(`エンジンが進められない: ${top.kind}[${top.step}] ${top.engineWhat}`)
@@ -416,7 +432,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
  * 20-4[18] 2.3.・[23]: 攻撃能力値・防御能力値。バトルカードの攻撃属性・防御属性（[16] で決まる。場を離れても有効 20-9）の
  * 今の能力値＋攻防修正。属性が能力値アイコン1つでない（特殊な攻防）・複数参加は人が入れる（K13・K9 は R4）
  */
-function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, { atk: number; def: number } | null> {
+export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, { atk: number; def: number } | null> {
   const b = frame.battle!
   const out: Record<Seat, { atk: number; def: number } | null> = { A: null, B: null }
   const info = b.battleCard ? ctx.cards[state.cards[b.battleCard]?.cardId ?? ''] : undefined

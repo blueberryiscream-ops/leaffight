@@ -34,14 +34,14 @@ import type { CostKind } from './types'
 /** カードを使う手順（宣言は ability・event と同じ [1]〜[5]、処理は [6] から） */
 export type CardUseKind = 'call' | 'tag' | 'equip' | 'field' | 'battleCard'
 /** ターンの進行の段（10-4・10-6・10-7・10-8） */
-export type PhaseKind = 'entry' | 'endPhase' | 'handAdjust' | 'turnEnd'
+export type PhaseKind = 'entry' | 'mainPhase' | 'endPhase' | 'handAdjust' | 'turnEnd'
 
 export type ProcKind = 'costGen' | 'ability' | 'event' | 'damage' | 'down' | 'simul' | CardUseKind | 'battle' | PhaseKind
 
 /**
- * 窓（11-2 の2枠）。今の priority.ts の ActionWindow と同じ2枠だが、[3] 同時アクションの AP の機会
+ * 窓（11-2 の2枠: AP・NAP）。[3] 同時アクションの AP の機会
  * （NAP が [2] で宣言し AP が [1] で宣言していなかったとき）を 'awaitActiveSimul' として持つ
- * （priority.ts にはこの段が無い＝R2u で直す食い違い。HANDOFF-R2a §7-8）。
+ * （旧 priority.ts にはこの段が無かった。R2u-2 で旧 priority.ts を消した）。
  */
 export type WindowState = 'awaitActive' | 'awaitNonActive' | 'awaitActiveSimul' | 'closed'
 
@@ -404,6 +404,11 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
     1: { names: ['エントリー開始時'], window: true },
     5: { names: ['エントリー終了時'], window: true },
   },
+  // 10-5（oldrule.txt:391-394）。[2] はフレームを降ろしてフェイズの窓（procMeta.base・10-5-1）を開く（10-6 と同じ形。R2u-2）
+  mainPhase: {
+    1: { names: ['メインフェイズ開始時'], window: true },
+    3: { names: ['メインフェイズ終了時'], window: true },
+  },
   // 10-6（oldrule.txt:417-421）。[2] はフレームを降ろしてフェイズの窓（procMeta.base・メインと同じ手順の外の窓 10-6-1）を開く
   endPhase: {
     1: { names: ['終了フェイズ開始時'], window: true },
@@ -435,6 +440,7 @@ const LAST_STEP: Record<ProcKind, number> = {
   battleCard: 12,
   battle: 29,
   entry: 5,
+  mainPhase: 3,
   endPhase: 3,
   handAdjust: 4,
   turnEnd: 2,
@@ -445,6 +451,11 @@ const HAND_LIMIT = 7
 
 /** procMeta.phaseRun: 終了フェイズの [2]（アクションを行う段・10-6-1）に入った。drive がフェイズの窓を開く */
 export const PHASE_ACTIONS = '終了[2]'
+/**
+ * procMeta.phaseRun: メインフェイズの [2]（アクションを行う段・10-5-1）に入った。drive がフェイズの窓を開く（R2u-2）。
+ * ターンの番号（turn.n）が無い盤面（FAQ テスト・R2a/R2b の盤面）は [1][3] を行わず、今までどおりメインの窓から
+ */
+export const MAIN_ACTIONS = 'メイン[2]'
 
 const CARD_USE: ProcKind[] = ['call', 'tag', 'equip', 'field', 'battleCard']
 export function isCardUse(kind: ProcKind): kind is CardUseKind {
@@ -464,7 +475,7 @@ export function otherSeat(seat: Seat): Seat {
 }
 
 export function activeSeat(state: BoardState): Seat {
-  return state.turn?.active ?? state.priority?.activePlayer ?? 'A'
+  return state.turn?.active ?? 'A'
 }
 
 export function topFrame(state: BoardState): ProcFrame | undefined {
@@ -847,6 +858,7 @@ function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
     case 'battle':
       return enterBattle(state, frame, trace)
     case 'entry':
+    case 'mainPhase':
     case 'endPhase':
     case 'handAdjust':
     case 'turnEnd':
@@ -1115,7 +1127,7 @@ function battleDamageStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[
   const claims = [...new Set(b.firstStrike.map((x) => x.seat))]
   if (b.dmgPhase === 0 && claims.length === 2 && b.firstChosen === null) {
     // 両者の《先手必勝》: AP がどちらの効果を優先するか選ぶ（FAQ:1450）
-    return coreChoice(state, frame, { by: activeSeat(state), kind: 'order', purpose: 'firstStrike', prompt: 'どちらの「先にダメージを与える」効果を優先するか（FAQ:1450）', options: b.firstStrike.map((x) => ({ key: x.key, label: x.key })), min: 0, max: b.firstStrike.length })
+    return coreChoice(state, frame, { by: activeSeat(state), kind: 'order', purpose: 'firstStrike', prompt: 'どちらの「先にダメージを与える」効果を優先するか（FAQ:1450）', options: b.firstStrike.map((x) => ({ key: x.key, label: `${x.seat} の「先にダメージを与える」効果` })), min: 0, max: b.firstStrike.length })
   }
   const first = b.firstChosen ?? (claims.length === 1 ? claims[0] : null)
   const resume = (s: BoardState, phase: number) => setFrame(s, { ...findFrame(s, frame.id)!, status: 'resume', resume: 'reenter', battle: { ...findFrame(s, frame.id)!.battle!, dmgPhase: phase } })
@@ -1152,8 +1164,8 @@ function battleEndCleanup(state: BoardState, frame: ProcFrame, trace: ProcTrace[
 // ── ターンの進行（10-4 エントリー・10-6 終了フェイズ・10-7 手札調整・10-8 ターン終了）
 function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
   const ap = activeSeat(state)
-  // 10-6[2]: お互いのプレイヤーは終了フェイズで可能なアクションを行う（10-6-1）＝フレームを降ろし、popFrame がフェイズの窓を開く用意をする
-  if (frame.kind === 'endPhase') return setFrame(state, { ...frame, status: 'done' })
+  // 10-5[2]・10-6[2]: お互いのプレイヤーはそのフェイズで可能なアクションを行う（10-5-1・10-6-1）＝フレームを降ろし、popFrame がフェイズの窓を開く用意をする
+  if (frame.kind === 'endPhase' || frame.kind === 'mainPhase') return setFrame(state, { ...frame, status: 'done' })
   if (frame.kind === 'entry') {
     switch (frame.step) {
       case 2: {
@@ -1438,6 +1450,10 @@ function popFrame(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boar
   }
   // ターンの進行: エントリーが終わったらメインフェイズ（13-3-1 の窓を開き直す）。手札調整が終わったらターン終了（10-8）
   if (frame.kind === 'entry' && s.turn) s = setMeta({ ...s, turn: { ...s.turn, phase: 'メイン' } }, { base: null, mainClosed: false, phaseRun: null })
+  // 10-5: [2] で降りたらメインフェイズの窓（drive が procOpenMain で開く）。[3] が終わったら終了フェイズ（10-2-3）
+  if (frame.kind === 'mainPhase' && s.turn) {
+    s = frame.step === 2 ? setMeta(s, { base: null, mainClosed: false, phaseRun: MAIN_ACTIONS }) : setMeta({ ...s, turn: { ...s.turn, phase: '終了' } }, { base: null, mainClosed: false, phaseRun: null })
+  }
   // 10-6: [2] で降りたらフェイズの窓（drive が procOpenMain で開く）。[3] が終わったら手札調整フェイズ（10-2-3）
   if (frame.kind === 'endPhase' && s.turn) {
     s = frame.step === 2 ? setMeta(s, { base: null, mainClosed: false, phaseRun: PHASE_ACTIONS }) : setMeta({ ...s, turn: { ...s.turn, phase: '手札調整' } }, { base: null, mainClosed: false, phaseRun: null })
@@ -1599,6 +1615,11 @@ function phaseEndAgreed(state: BoardState): BoardState {
   if (turn.phase === '終了') {
     const s = setMeta(state, { base: null, mainClosed: false, phaseRun: '終了[3]' })
     return pushFrame(s, { kind: 'endPhase', step: 3, status: 'enter', window: null, by: activeSeat(s), label: '終了フェイズ', eng: {} }, 'phase')[0]
+  }
+  // 10-5[3]《メインフェイズ終了時》（[1] から始めたメインフェイズだけ。turn.n の無い盤面は今までどおり終了フェイズへ）
+  if (turn.phase === 'メイン' && state.procMeta.phaseRun === MAIN_ACTIONS) {
+    const s = setMeta(state, { base: null, mainClosed: false, phaseRun: 'メイン[3]' })
+    return pushFrame(s, { kind: 'mainPhase', step: 3, status: 'enter', window: null, by: activeSeat(s), label: 'メインフェイズ', eng: {} }, 'phase')[0]
   }
   const next: Phase = turn.phase === 'メイン' ? '終了' : turn.phase
   return setMeta({ ...state, turn: { ...turn, phase: next } }, { base: null, mainClosed: false, phaseRun: null })
@@ -2003,11 +2024,12 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       return state.proc.length ? { state, log: '' } : null
     case 'procAbandon':
       // 【決めたこと】どのフェイズで捨ててもそのターンのメインの窓から（PHASE-R2u §2-3 の文のまま。エントリーをやり直すとドローが重なるため）
-      return { state: setMeta({ ...state, proc: [], turn: state.turn ? { ...state.turn, phase: 'メイン' } : null }, { choice: null, base: null, mainClosed: false, phaseRun: null }), log: '手順を捨てた' }
+      // メインの窓（[2]）から: ターンの番号がある盤面は [1] をやり直さない（R2u-2）
+      return { state: setMeta({ ...state, proc: [], turn: state.turn ? { ...state.turn, phase: 'メイン' } : null }, { choice: null, base: null, mainClosed: false, phaseRun: state.turn?.n !== undefined ? MAIN_ACTIONS : null }), log: '手順を捨てた' }
     case 'procPhaseStart': {
       const ph = state.turn?.phase
       if (state.proc.length || !ph || state.procMeta.phaseRun !== null) return null
-      const kind: ProcKind | null = ph === 'エントリー' ? 'entry' : ph === '終了' ? 'endPhase' : ph === '手札調整' ? 'handAdjust' : null
+      const kind: ProcKind | null = ph === 'エントリー' ? 'entry' : ph === 'メイン' ? 'mainPhase' : ph === '終了' ? 'endPhase' : ph === '手札調整' ? 'handAdjust' : null
       if (!kind) return null
       const s = setMeta(state, { phaseRun: ph, base: null })
       return { state: pushFrame(s, { kind, step: 1, status: 'enter', window: null, by: activeSeat(s), label: `${ph}フェイズ`, eng: {} }, 'phase')[0], log: `${ph}フェイズ` }

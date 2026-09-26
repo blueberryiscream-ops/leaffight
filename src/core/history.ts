@@ -10,6 +10,8 @@ export interface LogEntry {
   text: string
   /** エンジンが進めた段（R2u §2-4「ログに1行ずつ」）。カード名は入れず iid だけ（画面が公開かどうかを見て名前にする） */
   steps?: { text: string; iids: string[] }[]
+  /** 自動の見送り（鳴き無しボタン）。画面のログで続いたものを1行に畳む（R2u-2） */
+  auto?: boolean
 }
 
 interface Snapshot {

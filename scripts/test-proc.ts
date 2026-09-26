@@ -464,9 +464,8 @@ function decl(id: string, by: Seat, kind: ProcDecl['kind'], sourceIid: string, e
   eq([f.proc, f.turn, f.downs, f.costs, f.result, f.procMeta.seq, f.procMeta.base], [[], null, { A: 0, B: 0 }, { A: [], B: [] }, null, 0, null], '10a: proc・turn・downs・costs・result・procMeta を既定値で補う')
   const partial = fillBoardDefaults({ procMeta: { seq: 3 } } as unknown as Partial<BoardState>)
   eq([partial.procMeta.seq, partial.procMeta.answers, partial.procMeta.aborted], [3, {}, []], '10b: procMeta の欄が欠けていても欄ごとに補う')
-  // 既存の優先権の窓は proc と独立に今までどおり動く
-  const r = applyAction(EMPTY_BOARD, { type: 'declareAction', action: { by: 'A', sourceIid: null, kind: 'その他', actionType: '通常型', label: 'x' } })
-  eq([r.state.priority?.frames.length, r.state.proc.length], [1, 0], '10c: 既存の declareAction は priority の窓を開き、proc には触れない')
+  // R2u-2: 旧 priority・battle の欄は読み込みで捨てる。assist は free として読む
+  eq(['priority' in f, 'battle' in f, f.mode], [false, false, 'free'], '10c: 旧 priority・battle の欄を捨て、assist は free として読む')
 }
 
 // =============================================================================
@@ -757,9 +756,6 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
 {
   const f = fillBoardDefaults({ procMeta: { seq: 1, base: null, mainClosed: false, choice: null, answers: {}, used: {}, leaderLost: [], aborted: [] } } as unknown as Partial<BoardState>)
   eq([f.procMeta.mods, f.procMeta.battles, f.procMeta.phaseRun], [[], [], null], '19a: procMeta.mods・battles・phaseRun を既定値で補う')
-  // 既存の画面のバトル（battle.ts・battleFlow.ts）は proc と独立に今までどおり動く
-  const r = applyAction(board([card('a1', 'A', 'char'), card('bx', 'A', 'battle', { used: false })]), { type: 'declareBattle', challenger: 'A' })
-  eq([r.state.battle !== null, r.state.proc.length], [true, 0], '19b: 既存の declareBattle は battle を開き、proc には触れない')
 }
 
 console.log(failures === 0 ? '\n✅ 全成功' : `\n❌ ${failures} 件失敗`)

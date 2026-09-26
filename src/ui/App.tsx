@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadLibrary } from '../data/bundle'
 import { clearBundle, readBundleMeta } from '../data/db'
-import type { AnnotationsMap, BundleMeta, InterruptsMap, PoolCard } from '../data/types'
+import type { AnnotationsMap, BundleMeta, PoolCard } from '../data/types'
 import { Board } from './board/Board'
 import { CardList } from './CardList'
 import { DataGate } from './DataGate'
@@ -15,7 +15,6 @@ export function App() {
   const [cards, setCards] = useState<PoolCard[]>([])
   const [imageUrls, setImageUrls] = useState<Map<string, string>>(new Map())
   const [annotations, setAnnotations] = useState<AnnotationsMap>({})
-  const [interrupts, setInterrupts] = useState<InterruptsMap>({})
   const [cardDefs, setCardDefs] = useState<Record<string, unknown>>({})
   const [meta, setMeta] = useState<BundleMeta | null>(null)
   const [view, setView] = useState<View>('board')
@@ -48,7 +47,6 @@ export function App() {
     setImageUrls(lib.imageUrls)
     setCards(lib.cards)
     setAnnotations(lib.annotations)
-    setInterrupts(lib.interrupts)
     setCardDefs(lib.cardDefs)
     setMeta(saved)
     setPhase('ready')
@@ -72,7 +70,6 @@ export function App() {
     setImageUrls(new Map())
     setCards([])
     setAnnotations({})
-    setInterrupts({})
     setMeta(null)
     setPhase('empty')
   }, [])
@@ -109,7 +106,7 @@ export function App() {
           className={`absolute inset-0 ${view === 'board' ? '' : 'pointer-events-none invisible'}`}
           aria-hidden={view !== 'board'}
         >
-          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} interrupts={interrupts} cardDefs={cardDefs} />
+          <Board cards={cards} imageUrls={imageUrls} annotations={annotations} cardDefs={cardDefs} />
         </div>
         {view === 'deck' && (
           <div className="absolute inset-0">

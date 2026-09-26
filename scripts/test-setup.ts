@@ -123,10 +123,10 @@ function mkDeck(n: number, prefix = 'd'): { iid: string; cardId: string }[] {
   assertEqual(s.cards['b_item']?.attachedTo, null, '2f: 相手のアイテムの attachedTo が消したカードを指していたら null')
 }
 
-// battle / priority が動いている最中は何もしない
+// 手順（proc）が動いている最中は何もしない（R2u-2: 旧 battle / priority の条件を proc に置き換えた）
 {
-  const withBattle: BoardState = { ...boardWith([]), battle: { at: 1 } as never }
-  const r1 = applyAction(withBattle, {
+  const withProc: BoardState = { ...boardWith([]), proc: [{ id: 'f1' } as never] }
+  const r1 = applyAction(withProc, {
     type: 'startWithDeck',
     owner: 'A',
     deckName: 'd',
@@ -134,18 +134,7 @@ function mkDeck(n: number, prefix = 'd'): { iid: string; cardId: string }[] {
     deck: mkDeck(1),
     draw: 1,
   })
-  assertEqual(r1.state, withBattle, '3a: battle が non-null なら状態が変わらない')
-
-  const withPriority: BoardState = { ...boardWith([]), priority: {} as never }
-  const r2 = applyAction(withPriority, {
-    type: 'startWithDeck',
-    owner: 'A',
-    deckName: 'd',
-    leader: { iid: 'l', cardId: 'c', kiryoku: 1 },
-    deck: mkDeck(1),
-    draw: 1,
-  })
-  assertEqual(r2.state, withPriority, '3b: priority が non-null なら状態が変わらない')
+  assertEqual(r1.state, withProc, '3a: proc が空でなければ状態が変わらない')
 }
 
 // =============================================================================

@@ -9,22 +9,20 @@ import {
   type CollisionDetection,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { other } from '../../core/battle'
-import type { BoardState, Seat, ZoneId } from '../../core/board'
+import type { Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
-import { canDeclare, type ActionTiming } from '../../core/priority'
-import type { AnnotationsMap, InterruptsMap, PoolCard } from '../../data/types'
-import { BattlePanel, canAct } from './BattlePanel'
+import { nearestBattle } from '../../core/proc'
+import type { AnnotationsMap, PoolCard } from '../../data/types'
+import { BattlePanel } from './BattlePanel'
 import { CardContextMenu } from './CardContextMenu'
 import { CardPicker } from './CardPicker'
 import { ConnectionPanel } from './ConnectionPanel'
 import { DetailPanel } from './DetailPanel'
 import { DroppableSlot } from './DroppableSlot'
 import { LogPanel } from './LogPanel'
+import { SetupBand } from './SetupBand'
 import { StackedCardSlot } from './StackedCardSlot'
 import { StartWithDeckDialog } from './StartWithDeckDialog'
-import { StackPanel } from './StackPanel'
-import { SetupBand, TodoBand } from './TodoBand'
 import { cellSizeForB, portraitCell, squareCell, useMeasuredHeight, useMeasuredWidth } from './useMeasuredHeight'
 import { ZoneBundle } from './ZoneBundle'
 import { newIid, otherSeat, useBoard } from './useBoard'
@@ -33,31 +31,6 @@ import { buildEngineCtx } from '../engine/host'
 import { ProcPanel } from '../engine/ProcPanel'
 import { useEngineUI } from '../engine/useEngineUI'
 import type { CardDef } from '../../engine/dsl'
-
-/**
- * 盤面クリックでの参加キャラ・種目選択（PHASE3d-3.md §1）。候補の集合は既存の
- * ParticipantChecklist/BattleCardChecklist の candidates と同じ（合法性は判定しない）。
- * 🚨 candidatesにはBattlePanel.tsxのcanActを使う（二重に書かない）。
- */
-function battleCandidateKind(board: BoardState, iid: string, localSeat: Seat): 'participant' | 'battleCard' | null {
-  const battle = board.battle
-  if (!battle) return null
-  const inst = board.cards[iid]
-  if (!inst) return null
-  if (battle.at === 7 && canAct(board, localSeat, battle.challenger)) {
-    if (inst.owner === battle.challenger && (inst.zone === 'char' || inst.zone === 'leader')) return 'participant'
-  }
-  if (battle.at === 11) {
-    const receiver = other(battle.challenger)
-    if (canAct(board, localSeat, receiver) && inst.owner === receiver && (inst.zone === 'char' || inst.zone === 'leader')) {
-      return 'participant'
-    }
-  }
-  if (battle.at === 16 && canAct(board, localSeat, battle.challenger)) {
-    if (inst.zone === 'battle' && inst.used !== true) return 'battleCard'
-  }
-  return null
-}
 
 // 盤面レイアウト（PHASE2.7.md。原本図 _local/reference/layout_sketch.png.png が正）。
 // 🚨 マスをflex-1で引き伸ばさない（PHASE2.6の元凶）。マスの大きさはrowHeightから計算した
@@ -120,13 +93,11 @@ export function Board({
   cards,
   imageUrls,
   annotations,
-  interrupts,
   cardDefs = {},
 }: {
   cards: PoolCard[]
   imageUrls: Map<string, string>
   annotations: AnnotationsMap
-  interrupts: InterruptsMap
   /** カードの記述（carddefs.json）。R2u のエンジンの材料 */
   cardDefs?: Record<string, unknown>
 }) {
@@ -176,15 +147,6 @@ export function Board({
   const [menuTarget, setMenuTarget] = useState<{ iid: string; x: number; y: number } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [startWithDeckOpen, setStartWithDeckOpen] = useState(false)
-  // ドラッグ拒否の一言（PHASE3a-3.md §3-1「黙って何も起きないのは不可」）。共有ログではなく
-  // このクライアントだけのローカルな失敗通知（「何も起きなかった」試みを両者のログに残す
-  // 必要は無い）。数秒で自動的に消す。
-  const [dragNotice, setDragNotice] = useState<string | null>(null)
-  const notifyDragRejected = (text: string) => {
-    setDragNotice(text)
-    window.setTimeout(() => setDragNotice((cur) => (cur === text ? null : cur)), 2500)
-  }
-
   // レイアウトA(現行・6行)/B(段数削減・4行)の実行時切替（PHASE2.10.md）。localStorageで保持、既定はA。
   const [layout, setLayout] = useState<'A' | 'B'>(
     () => (localStorage.getItem('lf.layout') as 'A' | 'B' | null) ?? 'A',
@@ -205,51 +167,14 @@ export function Board({
 
   const openMenu = (iid: string, x: number, y: number) => setMenuTarget({ iid, x, y })
 
-  // 盤面クリックでの参加キャラ・種目選択（PHASE3d-3.md §1）。「未決定の選択（iidの配列）」だけを
-  // ローカルstateに持つ（localSeatと同じくBoardStateには入れない）。battle.atが変わったらリセットする
-  // （旧 ParticipantChecklist の `key={battle.at}` と同じ効果）。BattlePanelのチェックリストと共有する。
-  const [battleSelected, setBattleSelected] = useState<string[]>([])
-  useEffect(() => {
-    setBattleSelected([])
-  }, [board.battle?.at])
-  const toggleBattleSelected = (iid: string) =>
-    setBattleSelected((cur) => (cur.includes(iid) ? cur.filter((i) => i !== iid) : [...cur, iid]))
-
   function handleCardClick(iid: string) {
-    // エンジンモード: 対象・支払い・選択肢の候補なら、そのクリックはエンジンの入力（R2u §2-1・§3-3）
-    if (ui.click(iid)) {
-      setSelectedIid(iid)
-      return
-    }
-    const kind = battleCandidateKind(board, iid, localSeat)
-    if (kind === 'participant') {
-      toggleBattleSelected(iid)
-      setSelectedIid(iid)
-      return
-    }
-    if (kind === 'battleCard') {
-      const inst = board.cards[iid]
-      if (inst) dispatch({ type: 'setBattleCard', iid, cardName: cardOf(inst.cardId)?.name ?? inst.cardId })
-      return
-    }
+    // エンジンモード: 対象・支払い・選択肢（バトルの参加キャラ・種目を含む procMeta.choice）の候補なら、そのクリックはエンジンの入力（R2u §2-1・§3-3）
+    ui.click(iid)
     setSelectedIid(iid)
   }
 
-  /** リング表示（§1）。候補でなければ何も返さない（対象カードの見た目は変えない） */
-  function battleRingProps(iid: string): { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string } {
-    const e = ui.ring(iid)
-    if (e.battleRing) return e
-    const kind = battleCandidateKind(board, iid, localSeat)
-    if (kind === 'participant') {
-      return battleSelected.includes(iid) ? { battleRing: 'selected', battleRingLabel: '参加' } : { battleRing: 'candidate' }
-    }
-    if (kind === 'battleCard') {
-      return board.battle?.battleCardIid === iid
-        ? { battleRing: 'selected', battleRingLabel: '種目' }
-        : { battleRing: 'candidate' }
-    }
-    return {}
-  }
+  /** リング表示（対象・支払い・選択の候補）。候補でなければ何も返さない（対象カードの見た目は変えない） */
+  const ringProps = (iid: string) => ui.ring(iid)
 
   // rows1-5は等高（1fr）なので1つ測れば足りる。row6(手札)だけ別に測る
   const [rowRef, rowH] = useMeasuredHeight<HTMLDivElement>()
@@ -263,10 +188,9 @@ export function Board({
   // PC専用。少し動いたらドラッグ開始（クリックとの競合を避ける。tcg-companion の知見＝distance:6）
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }))
 
-  // 手札→場/ゴミ箱のドラッグは「プレイ宣言」に変える（PHASE3a-3.md §3-1）。
+  // エンジンモード: 手札→場/ゴミ箱のドラッグは「そのカードを使う宣言」に変える（PHASE3a-3.md §3-1・R2u §3-3）。
   // 'deck'は含めない（手札をデッキに戻すのは雑務）。'trash'は含める（イベント使用に一致する動き）。
-  // 🚨 PHASE3a-4: ここは「宣言のきっかけになるか」を決めるだけで、着地先には一切影響しない。
-  // プレイしたカードの行き先はカードの種別とルールが一意に決める（解決時にStackPanelが決める）。
+  // 🚨 ここは「宣言のきっかけになるか」を決めるだけで、着地先には一切影響しない（行き先は手順が決める）。
   const PLAY_DECLARE_TARGET_ZONES = new Set<ZoneId>(['char', 'leader', 'battle', 'field', 'trash'])
 
   function handleDragEnd(e: DragEndEvent) {
@@ -289,29 +213,6 @@ export function Board({
     // エンジンモード: 手札から盤面へのドラッグ＝そのカードを使う宣言（R2u §3-3）。カードは動かさない（行き先は手順が決める）
     if (board.mode === 'engine' && instance.zone === 'hand' && PLAY_DECLARE_TARGET_ZONES.has(target.toZone)) {
       ui.startFor(iid)
-      return
-    }
-
-    const isPlayDeclare =
-      board.mode === 'assist' && instance.zone === 'hand' && PLAY_DECLARE_TARGET_ZONES.has(target.toZone)
-
-    if (isPlayDeclare) {
-      if (!canDeclare(board.priority, localSeat)) {
-        // engineが受理しない状況（相手の応答待ち中等）。カードは動かさず、黙って終わらせない
-        // （PHASE3a-3.md §3-1「黙って何も起きないのは不可」）。
-        notifyDragRejected(`今は「${cardName}」を宣言できません（相手の応答待ち）`)
-        return
-      }
-      const current = board.priority?.frames[board.priority.frames.length - 1]
-      const actionType: ActionTiming =
-        current && (current.step === 'processActive' || current.step === 'processNonActive') ? '割込型' : '通常型'
-      // 🚨 どのマスに落としたかは記録しない（PHASE3a-4.md §1-1）。ドラッグの意味は
-      // 「このカードをプレイすると宣言する」だけ。detailに「〜へ」と書くと着地先があるかの
-      // ような誤解を生むので書かない。
-      dispatch({
-        type: 'declareAction',
-        action: { by: localSeat, sourceIid: iid, kind: 'プレイ', actionType, label: cardName },
-      })
       return
     }
 
@@ -341,14 +242,9 @@ export function Board({
     dispatch({ type: 'spawnCard', iid: newIid(), cardId: card.id, cardName: card.name, owner, zone })
   }
 
-  // 「デッキで始める」ボタンの押せる/押せない（PHASE5b.md §2-1）。バトル中・宣言中は
+  // 「デッキで始める」ボタンの押せる/押せない（PHASE5b.md §2-1）。手順（proc）の処理中は
   // 盤面を差し替えると参照が壊れるため押せない（core側の startWithDeck も同じ条件で弾く）
-  const startWithDeckBlocked =
-    board.battle !== null
-      ? 'バトル中は使えません'
-      : board.priority !== null
-        ? '宣言の処理中は使えません'
-        : null
+  const startWithDeckBlocked = board.proc.length > 0 ? '手順の処理中は使えません' : null
   const hasOwnCards = Object.values(board.cards).some((c) => c.owner === mySeat)
 
   function handleClearBoard() {
@@ -365,12 +261,10 @@ export function Board({
       .sort((a, b) => a.index - b.index)
 
   // 参加キャラ／バトル種目カードに⚔バッジを出す（PHASE3d-2b §1）。付随アイテムには出さない
-  // （StackedCardSlotのtargetにだけ渡す）。バトルが無ければ常にfalse。
-  const isBattleMarked = (iid: string) => {
-    const b = board.battle
-    if (!b) return false
-    return b.participants.A.includes(iid) || b.participants.B.includes(iid) || b.battleCardIid === iid
-  }
+  // （StackedCardSlotのtargetにだけ渡す）。バトル（proc の battle フレーム）が無ければ常にfalse。
+  const battleNow = nearestBattle(board)?.battle
+  const isBattleMarked = (iid: string) =>
+    !!battleNow && (battleNow.participants.A.includes(iid) || battleNow.participants.B.includes(iid) || battleNow.battleCard === iid)
 
   const charCell = (owner: Seat, index: number) => {
     const inst = cardsInZone(board, owner, 'char').find((c) => c.index === index)
@@ -390,7 +284,7 @@ export function Board({
             size={cellPortrait}
             flipped={owner !== mySeat}
             battleBadge={isBattleMarked(inst.iid)}
-            {...battleRingProps(inst.iid)}
+            {...ringProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -415,7 +309,7 @@ export function Board({
             size={cellPortrait}
             flipped={owner !== mySeat}
             battleBadge={isBattleMarked(inst.iid)}
-            {...battleRingProps(inst.iid)}
+            {...ringProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -442,7 +336,7 @@ export function Board({
                 size={cellPortrait}
                 flipped={owner !== mySeat}
                 battleBadge={isBattleMarked(inst.iid)}
-                {...battleRingProps(inst.iid)}
+                {...ringProps(inst.iid)}
               />
             )}
           </DroppableSlot>
@@ -468,7 +362,7 @@ export function Board({
             selectedIid={selectedIid}
             size={cellPortrait}
             flipped={inst.owner !== mySeat}
-            {...battleRingProps(inst.iid)}
+            {...ringProps(inst.iid)}
           />
         )}
       </DroppableSlot>
@@ -694,14 +588,6 @@ export function Board({
           >
             レイアウト: {layout} ⇄
           </button>
-          <button
-            type="button"
-            onClick={() => dispatch({ type: 'setMode', mode: board.mode === 'assist' ? 'free' : 'assist' })}
-            title="アシスト=優先権/スタックが働く。フリー=優先権オフで自由操作（DESIGN.md §5.1・共有・同期される）"
-            className="rounded border border-line-strong px-2 py-1 text-xs text-ink-muted hover:border-accent hover:text-accent"
-          >
-            モード: {board.mode === 'assist' ? 'アシスト' : 'フリー'} ⇄
-          </button>
           {mode !== 'guest' && (
             <>
               <button type="button" onClick={undo} disabled={!canUndo} className="rounded border border-line-strong px-2 py-1 text-xs disabled:opacity-30">
@@ -742,7 +628,7 @@ export function Board({
         </div>
 
         {/* 大きな「今やること」帯（PHASE3d-3.md §5）。チロムの直下・盤面の上に全幅で置く。高さ固定（shrink-0） */}
-        {/* R2u: エンジン⇄手動・鳴き無し・宣言の番・選択・段の表示（PHASE-R2u §3-3）。エンジンの間は旧 TodoBand を出さない */}
+        {/* R2u: エンジン⇄手動・鳴き無し・宣言の番・選択・段の表示（PHASE-R2u §3-3） */}
         <EngineBar
           board={board}
           localSeat={localSeat}
@@ -756,19 +642,11 @@ export function Board({
           notice={engineNotice}
           clearNotice={clearEngineNotice}
         />
-        {board.mode !== 'engine' && (
-          <TodoBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} battleSelection={battleSelected} />
-        )}
-        {/* エンジンの間も開始準備（P5b: マリガン・リーダーを表にする）の帯は出す。済んだら EngineBar の「先攻 A/B で始める」 */}
-        {board.mode === 'engine' && board.setup[localSeat] && !board.setup[localSeat]!.leaderRevealed && (
+        {/* 開始準備（P5b: マリガン・リーダーを表にする）の帯。済んだら EngineBar の「先攻 A/B で始める」 */}
+        {board.setup[localSeat] && !board.setup[localSeat]!.leaderRevealed && (
           <SetupBand board={board} localSeat={localSeat} dispatch={dispatch} cardOf={cardOf} />
         )}
 
-        {dragNotice && (
-          <div className="shrink-0 border-b border-warn bg-warn/20 px-3 py-1 text-center text-xs text-warn">
-            {dragNotice}
-          </div>
-        )}
 
         {/* 本体: 左(システム+ログ) / 中央(盤面) / [Bのみ]スタック置き場 / 右(詳細+割り込み枠)。スクロールなし */}
         <div
@@ -789,32 +667,20 @@ export function Board({
           {/* 中央: 盤面。マスの大きさは計測したrowHeightから固定pxで決める（DESIGN.md §4.18.1） */}
           {layout === 'A' ? renderLayoutA() : renderLayoutB()}
 
-          {/* Bのみ: スタック処理中置き場（PHASE2.10.md §1の予約枠。P3a-2aで実装） */}
-          {layout === 'B' && board.mode === 'engine' && <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />}
-          {layout === 'B' && board.mode !== 'engine' && (
-            <StackPanel
-              board={board}
-              localSeat={localSeat}
-              dispatch={dispatch}
-              cardOf={cardOf}
-              interrupts={interrupts}
-              onSelectCard={setSelectedIid}
-              imageUrlOf={imageUrlOf}
-              onCardContextMenu={openMenu}
-              selectedIid={selectedIid}
-            />
-          )}
+          {/* Bのみ: 手順（proc）の置き場（PHASE2.10.md §1の予約枠）。手動の間も今の手順を出す */}
+          {layout === 'B' && <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />}
 
           {/* 右列: バトルパネル＋詳細＋能力トリガー、下部に割り込み関係/システムボタンの枠（P3で実装） */}
           <div className="flex min-h-0 flex-col gap-1.5">
             <BattlePanel
               board={board}
               localSeat={localSeat}
-              dispatch={dispatch}
-              cardOf={cardOf}
+              solo={mode === 'solo'}
+              ctx={engineCtx}
+              ui={ui}
+              nameOf={nameOfId}
+              engineRequest={engineRequest}
               onSelectCard={setSelectedIid}
-              battleSelection={battleSelected}
-              onToggleBattleSelection={toggleBattleSelected}
             />
             <div className="lf-panel min-h-0 flex-1">
               <DetailPanel
@@ -824,45 +690,16 @@ export function Board({
                 cardOf={cardOf}
                 imageUrlOf={imageUrlOf}
                 annotationsOf={annotationsOf}
-                dispatch={dispatch}
                 engineActions={engineActionsFor(selectedIid)}
               />
             </div>
-            {/* h-56: 提示エリア（PHASE3a-4.md §1-4）のカード1枚分＋ラベルを足したぶん高くした。
+            {/* レイアウトAのみ: 右カラム下に手順（proc）の置き場（Bは専用枠がある。PHASE3a-2a.md §2-1）。
                 上のDetailPanel（flex-1・内部でoverflow-y-auto）が縮むだけでページのスクロールは増えない */}
-            <div className="flex h-56 shrink-0 gap-1.5">
-              {/* レイアウトAのみ: 右カラム下の「割り込み関係」枠にスタック置き場を出す（Bは専用枠がある。PHASE3a-2a.md §2-1） */}
-              {layout === 'A' && board.mode === 'engine' && (
-                <div className="flex-1 min-h-0">
-                  <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />
-                </div>
-              )}
-              {layout === 'A' && board.mode !== 'engine' && (
-                <div className="flex-1 min-h-0">
-                  <StackPanel
-                    board={board}
-                    localSeat={localSeat}
-                    dispatch={dispatch}
-                    cardOf={cardOf}
-                    interrupts={interrupts}
-                    onSelectCard={setSelectedIid}
-                    imageUrlOf={imageUrlOf}
-                    onCardContextMenu={openMenu}
-                    selectedIid={selectedIid}
-                  />
-                </div>
-              )}
-              <button
-                type="button"
-                disabled
-                title="P4で実装予定（ターン進行）"
-                className="flex-1 rounded border border-line-strong bg-surface-1/40 p-2 text-[10px] text-ink-muted"
-              >
-                ターンエンド /<br />次フェイズへ
-                <br />
-                (P4で実装)
-              </button>
-            </div>
+            {layout === 'A' && (
+              <div className="h-56 shrink-0">
+                <ProcPanel board={board} localSeat={localSeat} nameOf={nameOfId} />
+              </div>
+            )}
           </div>
         </div>
       </div>

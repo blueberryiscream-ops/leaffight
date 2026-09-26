@@ -1,22 +1,13 @@
-import type { BoardAction } from '../../core/actions'
 import type { BoardState, Seat } from '../../core/board'
 import { effectiveStat, modifiersFor } from '../../core/board'
-import type { ActionTiming } from '../../core/priority'
 import { ATTRS, CARD_KIND_LABEL } from '../../core/types'
 import type { AbilityAnnotation, PoolCard } from '../../data/types'
 import { modifierLabel } from './modifierLabel'
 import { hiddenFromViewer } from './visibility'
 
-// 起動型能力の注釈type → 優先権エンジンのactionType。複合型（通常起動+割込起動）は
-// より許容的な「割込型」に寄せる（coreはactionTypeの中身で分岐しないので表示・記録用の割り切り）。
-function toActionTiming(annotationType: AbilityAnnotation['type']): ActionTiming {
-  return annotationType === '通常起動' ? '通常型' : '割込型'
-}
-
 // 右パネル＝詳細＋能力/カードのアクショントリガー（DESIGN.md §4.18・4.17）。
 // 左クリックで選ぶ。読み取り専用（気力・修正等の状態変化は右クリックメニューの役目）。
-// 「起動」ボタンはユーザー校正済みの注釈（起動型/常時＋コスト）を見せているだけで、
-// 効果の解決・合法性は判定しない（DESIGN.md §5.1「あえて作らない」）。
+// 宣言はエンジンの「宣言（エンジン）」ボタンだけ（R2u-2 で旧アシストの「起動」ボタンを消した）。
 
 export function DetailPanel({
   iid,
@@ -25,7 +16,6 @@ export function DetailPanel({
   cardOf,
   imageUrlOf,
   annotationsOf,
-  dispatch,
   engineActions = [],
 }: {
   iid: string | null
@@ -34,7 +24,6 @@ export function DetailPanel({
   cardOf: (cardId: string) => PoolCard | undefined
   imageUrlOf: (cardId: string) => string | undefined
   annotationsOf: (cardId: string) => AbilityAnnotation[] | undefined
-  dispatch: (action: BoardAction) => void
   /** エンジンモード（R2u §3-3）: このカードで今宣言できるもの（declare の答え）。押すと宣言を組み立て始める */
   engineActions?: { label: string; onClick: () => void }[]
 }) {
@@ -63,9 +52,6 @@ export function DetailPanel({
 
   const annotations = annotationsOf(instance.cardId) ?? []
   const annotationByName = new Map(annotations.map((a) => [a.name, a]))
-  // 「自分のターン」で出し分けない（原典§11-2/§4.15。PHASE3a-2b.md §1）。
-  // 自分の所有カードなら常に押せる。合法性・タイミングの判定は人間がやる
-  const triggerable = instance.owner === mySeat && board.mode === 'assist' ? annotations.filter((a) => a.type !== '常時') : []
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-3 text-xs">
@@ -150,36 +136,6 @@ export function DetailPanel({
                 {engineActions.map((a, i) => (
                   <button key={i} type="button" onClick={a.onClick} className="rounded border border-accent px-2 py-1 text-accent hover:bg-accent/15">
                     {a.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {triggerable.length > 0 && (
-            <div className="mb-2">
-              <div className="mb-1 font-semibold text-ink-muted">起動</div>
-              <div className="flex flex-wrap gap-1.5">
-                {triggerable.map((a) => (
-                  <button
-                    key={a.name}
-                    type="button"
-                    onClick={() =>
-                      dispatch({
-                        type: 'declareAction',
-                        action: {
-                          by: mySeat,
-                          kind: '能力',
-                          actionType: toActionTiming(a.type),
-                          sourceIid: instance.iid,
-                          label: a.name,
-                          detail: a.cost,
-                        },
-                      })
-                    }
-                    className="rounded border border-accent px-2 py-1 text-accent hover:bg-accent/15"
-                  >
-                    {a.name}（{a.cost}）
                   </button>
                 ))}
               </div>

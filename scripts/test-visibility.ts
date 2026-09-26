@@ -130,5 +130,16 @@ function boardWith(cards: CardInstance[]): BoardState {
   assertTrue(!r3.log.includes('手札の中身'), '3c: 手札内のflipは（前後とも非公開なので）名前なし')
 }
 
+// --- 手でドラッグしてフィールドを入れ替えた場合も、旧カードはゴミ箱へ（oldrule.txt:935 / 18-2[11]）---
+// （R2u-2 で旧 test-play-declare.ts（優先権の窓のテスト）を消したときに、盤面の操作のこのケースだけ移した）
+{
+  let state = applyAction(EMPTY_BOARD, { type: 'spawnCard', iid: 'old', cardId: 'f1', cardName: '旧', owner: 'A', zone: 'field' }).state
+  state = applyAction(state, { type: 'spawnCard', iid: 'new', cardId: 'f2', cardName: '新', owner: 'B', zone: 'hand' }).state
+  state = applyAction(state, { type: 'moveCard', iid: 'new', toOwner: 'B', toZone: 'field', cardName: '新' }).state
+  assertEqual(state.cards['new'].zone, 'field', '4a: 新しいフィールドカードが場に出る')
+  assertEqual(state.cards['old'].zone, 'trash', '4b: 旧フィールドカードはゴミ箱（手札へ入れ替わらない）')
+  assertEqual(state.cards['old'].owner, 'A', '4c: 持ち主は変わらない')
+}
+
 console.log(failures === 0 ? `\n✅ 全成功` : `\n❌ ${failures} 件失敗`)
 process.exit(failures === 0 ? 0 : 1)
