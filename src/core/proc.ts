@@ -241,6 +241,12 @@ export interface ProcFrame {
     costOf: string | null
     /** バトルの結果ダメージでのダウン（《どろぼう》FAQ:129） */
     byBattle?: string | null
+    /**
+     * 気力が1以上から0以下になった（15-5）のを起こしにしたダウンか（既定 true）。使用代償としてのダウン
+     * （costOf）や効果で明示的にダウンさせる（《サクリファイス》）は false。D14（R4a-2）: byLowKiryoku の
+     * ダウンだけ、[2] の窓が閉じた後に気力が回復していれば起きない（K10 と同じ考え方。原典に書いていない細部）
+     */
+    byLowKiryoku?: boolean
   }
   simul?: {
     items: SimulItem[]
@@ -586,7 +592,7 @@ function changeKiryoku(state: BoardState, iid: string, next: number, costOf: str
   return s
 }
 
-function pushDown(state: BoardState, iid: string, costOf: string | null, byBattle: string | null = null): BoardState {
+function pushDown(state: BoardState, iid: string, costOf: string | null, byBattle: string | null = null, byLowKiryoku = true): BoardState {
   const card = state.cards[iid]
   if (!card) return state
   const [s, id] = nextId(state, 'down')
@@ -598,7 +604,7 @@ function pushDown(state: BoardState, iid: string, costOf: string | null, byBattl
     window: null,
     by: card.owner,
     label: `ダウン:${card.cardId}`,
-    down: { iid, seat: card.owner, added: false, canceled: false, wasLeader: card.zone === 'leader', costOf, byBattle },
+    down: { iid, seat: card.owner, added: false, canceled: false, wasLeader: card.zone === 'leader', costOf, byBattle, byLowKiryoku },
     eng: {},
   }
   return { ...s, proc: [...s.proc, frame] }
@@ -791,7 +797,12 @@ function abortBattle(state: BoardState, frame: ProcFrame, reason: string, trace:
 function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
   const ap = activeSeat(state)
   if (frame.aborted) return setFrame(state, { ...frame, status: 'done' })
-  if (frame.kind === 'down' && frame.down?.canceled) return setFrame(state, { ...frame, status: 'done' })
+  // D14（R4a-2）: 明示の cancelDown だけでなく、《ダウンするとき》[2] の窓が閉じた後に気力が回復していれば
+  // （関西魂・幸せ泥棒 FAQ:2836 のように、ダウンではなく「気力を回復させる効果」を乗っ取って回復させた場合）
+  // ダウンは起きない（K10 と同じ考え方：条件を保っているかを処理の入り口で確かめ直す）
+  if (frame.kind === 'down' && (frame.down?.canceled || (frame.down?.byLowKiryoku && frame.step > 2 && (state.cards[frame.down!.iid]?.kiryoku ?? 0) > 0))) {
+    return setFrame(state, { ...frame, status: 'done' })
+  }
   if (frame.kind === 'battle') {
     const b = frame.battle!
     if (b.aborted && frame.step < 28) return setFrame(state, { ...frame, step: 28 })
@@ -1274,6 +1285,11 @@ function enterAction(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
           s = moveTo(s, src.iid, 'trash')
           represented = true
         }
+      } else if (decl.eng.synthetic) {
+        // NH-17（D15・R4a-2）: 処理条件がある常時効果を decl 化した合成の宣言（宣言[1]〜[5]を経ていない）は
+        // 「再提示」の対象ではない（15-13-1[6] はカードを宣言のために提示エリアへ出す手順の続き）。発生源は
+        // フィールドのキャラとは限らない（アイテム等）ので、engine が eng.synthetic で「確かめない」と伝える
+        represented = true
       } else represented = onField(src)
       return setFrame(s, { ...advance(frame), represented })
     }
@@ -1784,6 +1800,12 @@ export type ProcAction =
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
   | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[] }
   | { type: 'procCancelDown'; frameId: string }
+  /**
+   * 効果の乗っ取り（hijack・D11）が「適切な対象が無い」等で失敗したとき、乗っ取りの効果自身（いただきます等）を
+   * 立ち消えにする（procMeta.aborted に記録＝FAQ の fizzled 期待が拾える）。対象のフレームは今の段（enter/window/
+   * engine/resume のどれでも）にかかわらず終える。abortFrame と同じ扱い（宣言 id は procMeta.aborted に残る）
+   */
+  | { type: 'procAbortEffect'; frameId: string; reason: string }
   | {
       type: 'procDamageEdit'
       frameId: string
@@ -1982,7 +2004,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const g = findFrame(s0, f.id)!
       // 20-4[19][20][22]: 宣言があったら同じ段の機会をもう一度開く
       const battle = g.kind === 'battle' && [19, 20, 22].includes(g.step) ? { ...g.battle!, reopen: decls.length > 0 } : g.battle
-      const items: SimulItem[] = [...decls.map(declItem), ...action.items.map((it) => ({ ...it, type: 'effect' as const, status: 'pending' as const }))]
+      // NH-17（D15・R4a-2）: engine が「合成の宣言」（decl 付き）として渡した項目は type:'action'（14段の処理を
+      // 通す＝アクション宣言の窓を持たせる）。それ以外はこれまでどおり type:'effect'
+      const items: SimulItem[] = [...decls.map(declItem), ...action.items.map((it) => ({ ...it, type: (it.decl ? 'action' : 'effect') as SimulItem['type'], status: 'pending' as const }))]
       if (items.length === 0) return { state: setFrame(s0, { ...advance({ ...g, battle }), window: null }), log: '' }
       const s1 = setFrame(s0, { ...g, battle, status: 'resume', resume: 'afterTiming' })
       const label = `《${STEP_TIMINGS[f.kind][f.step]?.names.join('》《')}》の処理`
@@ -2000,7 +2024,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
         const c = s.cards[k.iid]
         if (c && c.kiryoku !== null) s = changeKiryoku(s, k.iid, c.kiryoku + k.delta)
       }
-      for (const iid of action.down) if (onField(s.cards[iid])) s = pushDown(s, iid, f.id)
+      for (const iid of action.down) if (onField(s.cards[iid])) s = pushDown(s, iid, f.id, null, false)
       trace.push({ kind: 'name', text: `支払い:${f.label}` })
       return { state: s, log: `${f.label}: 使用代償を支払った` }
     }
@@ -2102,7 +2126,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     }
     case 'procDown': {
       if (!onField(state.cards[action.iid])) return { state, log: '' }
-      return { state: pushDown(state, action.iid, null), log: 'ダウンさせた' }
+      return { state: pushDown(state, action.iid, null, null, false), log: 'ダウンさせた' }
     }
     case 'procRun':
       return state.proc.length ? { state, log: '' } : null
@@ -2210,6 +2234,11 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!f || f.kind !== 'down') return null
       trace.push({ kind: 'name', text: `ダウンしない:${f.down!.iid}` })
       return { state: setFrame(state, { ...f, down: { ...f.down!, canceled: true } }), log: 'ダウンしない' }
+    }
+    case 'procAbortEffect': {
+      const f = findFrame(state, action.frameId)
+      if (!f) return null
+      return { state: abortFrame(state, f, action.reason, trace), log: `${f.label}: ${action.reason}` }
     }
     case 'procDamageEdit': {
       const f = findFrame(state, action.frameId)

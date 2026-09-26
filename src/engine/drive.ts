@@ -31,11 +31,11 @@ import {
   type ProcTrace,
   type SimulItem,
 } from '../core/proc'
-import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Play } from './abilities'
+import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
-import type { Choice, Op } from './dsl'
+import type { Ability, CardRef, Choice, Op } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
 import { clearableMods, continuousSeed, damagePrevented, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, violations, type Violation } from './layers'
@@ -488,11 +488,13 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
     case 'effect': {
       const d = top.decl!
       if (top.countered) return [{ type: 'procEffect', frameId: top.id, items: [] }]
-      const found = findAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null, d.kind === 'event' ? optionOf(ctx, d) : undefined)
-      const ab = found?.ab as Activated | Play | undefined
-      if (!ab) return [{ type: 'procEffect', frameId: top.id, items: [] }]
+      const found = abilityOf(ctx, d)
+      const ab = found?.ab as Activated | Play | Conditional | undefined
+      // NH-17（D15・R4a-2）: 処理条件がある常時効果（回復を含むもの）を decl 化した合成の宣言（timingItems 参照）は
+      // ab.kind==='conditional'。choices を持たない（対象は元から取らない・宣言時の選択も無い）
+      if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play' && ab.kind !== 'conditional')) return [{ type: 'procEffect', frameId: top.id, items: [] }]
       const env: Env = { self: d.sourceIid, you: d.by, slots: (d.eng.slots as Record<string, string[]>) ?? {}, trigger: d.trigger, declId: d.id, declared: (d.eng.declared as Env['declared']) ?? {} }
-      const resolveChoices: Task[] = ab.choices.filter((c) => c.when !== 'declare').map((choice) => ({ op: { op: 'choose', choice } as Op }))
+      const resolveChoices: Task[] = ab.kind === 'conditional' ? [] : ab.choices.filter((c) => c.when !== 'declare').map((choice) => ({ op: { op: 'choose', choice } as Op }))
       const eng: ItemEng = { tasks: [...resolveChoices, ...ab.effect.map((op) => ({ op }))], env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
       return [{ type: 'procEffect', frameId: top.id, items: [{ key: d.id, label: d.label, by: d.by, sourceIid: d.sourceIid, eng: eng as unknown as Record<string, unknown> }] }]
     }
@@ -655,13 +657,28 @@ function optionOf(ctx: EngineCtx, d: ProcDecl): string | undefined {
   return ab && ab.kind === 'play' ? ab.name : undefined
 }
 
+/**
+ * NH-17（D15・R4a-2）: 処理条件がある常時効果（12-2-1）を decl 化した合成の宣言（timingItems 参照）は、
+ * 元の能力に name が無いことが多い（選択肢の無い Auto は名前を持たない）ので、findAbility の名前一致では
+ * 再び見つけられないことがある。d.eng.index（decl 化したときに控えた元の能力の番号）が指す先が conditional
+ * ならそれを直接使う（1枚のカードで conditional は複数あり得るので index を優先する）
+ */
+function abilityOf(ctx: EngineCtx, d: ProcDecl): { ab: Ability; index: number } | null {
+  const idx = d.eng.index as number | undefined
+  if (idx !== undefined) {
+    const ab = ctx.defs[d.eng.cardId as string]?.abilities[idx]
+    if (ab && ab.kind === 'conditional') return { ab, index: idx }
+  }
+  return findAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null, d.kind === 'event' ? optionOf(ctx, d) : undefined)
+}
+
 /** [10][12] 構成要素: 対象が失われていないか（11-4 立ち消え） */
 function checkTargets(ctx: EngineCtx, state: BoardState, frame: ProcFrame): string | null {
   const d = frame.decl!
   if (d.kind === 'costGen') return null
-  const found = findAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null, d.kind === 'event' ? optionOf(ctx, d) : undefined)
-  const ab = found?.ab as Activated | Play | undefined
-  if (!ab) return null
+  const found = abilityOf(ctx, d)
+  const ab = found?.ab as Activated | Play | Conditional | undefined
+  if (!ab || ab.kind === 'conditional') return null // NH-17: 合成の宣言は対象を declare 時にとらない（choices が無い）
   const slots = (d.eng.slots as Record<string, string[]>) ?? {}
   const env: Env = { self: d.sourceIid, you: d.by, slots, trigger: d.trigger, declId: d.id, declared: {} }
   for (const ch of ab.choices) {
@@ -691,6 +708,28 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
     // H-2: 処理条件がある常時効果による受け渡しは、ダメージ1件につき1回
     .filter((h) => !(condRedirected && h.ab.effect.some((op) => op.op === 'redirectDamage')))
     .map((h) => {
+      // NH-17（D15・R4a-2）: 気力を回復させる操作（kiryoku recover:true）を含む処理条件がある常時効果は、
+      // 回復を適用する前に《効果が発生したとき》のアクション宣言の機会を持つ（幸せ泥棒を使える FAQ:2836）。
+      // 合成の「宣言」（kind:'ability'。宣言[1]〜[5]は無い＝ [6] から。cardId・index は元のキャラの由来のまま）を
+      // decl 化して 15-13-1 相当の 8/11/13 の窓（STEP_TIMINGS.ability）を持たせる（type:'action' の同時処理項目）
+      const hasRecover = h.ab.effect.some((op) => op.op === 'kiryoku' && op.recover)
+      if (hasRecover) {
+        const decl: ProcDecl = {
+          id: `${frame.id}:${h.key}`,
+          by: h.env.you,
+          kind: 'ability',
+          actionType: '通常型',
+          label: h.ab.name ?? nameOf(ctx, state, h.iid),
+          sourceIid: h.iid,
+          targets: [],
+          costGens: [],
+          sources: [],
+          trigger: frame.id,
+          usageKey: null,
+          eng: { cardId: state.cards[h.iid]?.cardId, index: h.index, slots: {}, usePool: true, poolIds: [], declared: {}, later: [], synthetic: true },
+        }
+        return { key: h.key, label: decl.label, by: h.env.you, sourceIid: h.iid, decl, eng: {} as Record<string, unknown> }
+      }
       const eng: ItemEng = {
         tasks: h.ab.effect.map((op) => ({ op })),
         env: h.env,
@@ -869,6 +908,77 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       }
       if (!targetId) return manual('打ち消す宣言が見つからない')
       return { tasks: rest, actions: [{ type: 'procCounter', frameId: targetId }] }
+    }
+    case 'hijack': {
+      // D11〜D15: 効果の乗っ取り。対象の宣言を探すのは 'counter' と同じ（op.what.declared）
+      const r = op.what.declared
+      let targetId: string | null = null
+      if (r.ref === 'event' && r.role === 'declaredAction') targetId = trigger && (trigger.kind === 'ability' || trigger.kind === 'event') ? trigger.id : null
+      else {
+        const iid = refs(r)[0]
+        targetId = iid ? findActionOf(state, iid) : null
+      }
+      const targetFrame = targetId ? findFrame(state, targetId) : undefined
+      const originalDecl = targetFrame?.decl
+      const hijacker = env.you
+      // 失敗（乗っ取る宣言・能力が見つからない／使用タイミング・使用条件を今（乗っ取った側 you）で満たさない）:
+      // 元の宣言は必ず打ち消し扱い（D11「元の使用者はその効果を使えない」）。乗っ取り自身（この効果）は立ち消え
+      const fizzle = (why: string): OpResult => {
+        const acts: BoardAction[] = []
+        if (targetId) acts.push({ type: 'procCounter', frameId: targetId })
+        if (env.declId) acts.push({ type: 'procAbortEffect', frameId: env.declId, reason: `適切な対象が無い（立ち消え・D11）: ${why}` })
+        return { tasks: [], actions: acts }
+      }
+      if (!targetFrame || (targetFrame.kind !== 'ability' && targetFrame.kind !== 'event') || !originalDecl) return fizzle('乗っ取る宣言が見つからない')
+      const found = abilityOf(ctx, originalDecl)
+      const origAb = found?.ab
+      // NH-17: 幸せ泥棒（part:'recover'）は処理条件がある常時効果（conditional。関西魂など）も対象にできる
+      if (!origAb || (origAb.kind !== 'activated' && origAb.kind !== 'play' && origAb.kind !== 'conditional')) return fizzle('乗っ取る能力が無い')
+      // D11: 使用タイミング・使用条件は、乗っ取った側を you として、元の宣言が反応した窓（originalDecl.trigger）の状況で確かめ直す
+      const origEnv: Env = { self: originalDecl.sourceIid, you: hijacker, slots: {}, trigger: originalDecl.trigger, declId: originalDecl.id, declared: (originalDecl.eng.declared as Env['declared']) ?? {} }
+      if (origAb.trigger) {
+        const trigFrame = originalDecl.trigger ? findFrame(state, originalDecl.trigger) : undefined
+        if (!trigFrame || !triggerMatches(ctx, state, origEnv, origAb.trigger, trigFrame)) return fizzle('使用タイミングを満たさない')
+      }
+      if (origAb.kind !== 'conditional' && origAb.usableIf && !evalCond(ctx, state, origEnv, origAb.usableIf)) return fizzle('使用条件を満たさない')
+      // 成功: 元の宣言はここで必ず打ち消す（乗っ取りが後で失われても元の使用者は使えない・D11）
+      const counterAction: BoardAction = { type: 'procCounter', frameId: targetId! }
+      let built: Task[]
+      if (op.part === 'recover') {
+        // D13: 「気力を回復させる効果」の部分だけを乗っ取る。受け手は乗っ取った側がその場で選ぶ
+        // （候補＝元の受け手の条件を満たすもの＝元の who を今の状況で解決したもの。選ばないこともできる）
+        built = []
+        origAb.effect
+          .filter((o): o is Extract<Op, { op: 'kiryoku' }> => o.op === 'kiryoku' && !!o.recover)
+          .forEach((o, i) => {
+            const cands = resolveRef(state, origEnv, o.who)
+            if (cands.length === 0) return
+            const srcSlot = `hjsrc${i}`
+            const pickSlot = `hjpick${i}`
+            const pickChoice: Choice = {
+              slot: pickSlot,
+              chooser: 'you',
+              pick: { cards: { zone: 'field', side: 'both', where: { same: [{ ref: 'it' }, { ref: 'slot', slot: srcSlot } as CardRef] } } },
+              count: [0, 1],
+              mode: 'target',
+              when: 'resolve',
+            }
+            built.push({ op: { op: 'choose', choice: pickChoice }, bind: { [srcSlot]: cands } })
+            built.push({ op: { op: 'kiryoku', who: { ref: 'slot', slot: pickSlot }, delta: o.delta, recover: true } })
+          })
+      } else if (origAb.kind === 'conditional') {
+        return fizzle('乗っ取る能力の形が合わない（conditional は part:recover だけ）')
+      } else {
+        // D11: そのイベントの効果（選んだ選択肢のまま）を自分が使う。対象はこのときに乗っ取った側が選ぶ
+        // （宣言時の対象の選択も解決時にやり直す＝ choices を全部いま選び直す）
+        built = [...origAb.choices.map((c) => ({ op: { op: 'choose', choice: c } as Op })), ...origAb.effect.map((o) => ({ op: o }))]
+      }
+      // D12: 乗っ取った効果の中の self/grantor/equipped は元のカードのまま。you/opponent は乗っ取った側から読み替え（env.you は既にそう）
+      return {
+        tasks: [...built, ...rest],
+        actions: [counterAction],
+        patch: { env: { ...eng.env, self: originalDecl.sourceIid, trigger: originalDecl.trigger, declId: originalDecl.id, declared: (originalDecl.eng.declared as Env['declared']) ?? {}, slots: {} } },
+      }
     }
     case 'choose': {
       const ch = op.choice

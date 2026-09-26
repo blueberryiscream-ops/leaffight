@@ -407,6 +407,8 @@ function battleStart(battleCard: string): History {
     st('NoEv', 'f', null, null),
     st('NoEvT', 'f', null, null),
     st('Hit', 'e', null, null),
+    st('Heal', 'e', null, null),
+    st('Snatch', 'e', null, null),
     { ...st('Robo', 'c', S(1, 1, 1, 1, 1)), charTypes: ['ロボ'] },
     { ...st('GC', 'c', S(1, 1, 1, 1, 1)), cost: 'WW' },
   ]
@@ -421,6 +423,10 @@ function battleStart(battleCard: string): History {
     NoEvT: { id: 'NoEvT', name: 'NoEvT', kind: 'f', status: 'tested', abilities: [{ kind: 'static', effects: [{ ce: 'prohibit', action: { kinds: ['イベント'], by: 'any' } }] }] },
     P: { id: 'P', name: 'P', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Zap', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [{ slot: 't', chooser: 'you', pick: { cards: { zone: 'field', side: 'opponent', class: 'キャラ', excludeLeader: true } }, count: [1, 1], mode: 'target', when: 'declare' }], effect: [{ op: 'damage', to: { ref: 'slot', slot: 't' }, amount: 1 }] }] },
     Hit: DEFS.Hit,
+    // D11・R4a-2 単体テスト用: Heal（通常型・宣言時に対象。気力+3回復）と Snatch（割込型「イベントカードを
+    // 使用したとき」・hijack）。対象の選び直し（宣言時と違う候補を選べる）と、元の使用者は使えないことを確かめる
+    Heal: { id: 'Heal', name: 'Heal', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '通常型', choices: [{ slot: 't', chooser: 'you', pick: { cards: { zone: 'field', side: 'both', class: 'キャラ', excludeLeader: true } }, count: [1, 1], mode: 'target', when: 'declare' }], effect: [{ op: 'kiryoku', who: { ref: 'slot', slot: 't' }, delta: 3, recover: true }] }] },
+    Snatch: { id: 'Snatch', name: 'Snatch', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '割込型', trigger: { timing: 'イベントカードを使用したとき', actor: 'opponent' }, choices: [], effect: [{ op: 'hijack', what: { declared: { ref: 'event', role: 'declaredAction' } } }] }] },
     GC: {
       id: 'GC',
       name: 'GC',
@@ -504,6 +510,39 @@ function battleStart(battleCard: string): History {
     eq(g.costs.A.every((t) => t.frameId === null), true, '㉒a′ 発生したコストは frameId 無し（宣言の途中に縛られない・すぐ使える）')
     g = useAbility(g, 'Gen2')
     eq(g.costs.A.map((t) => t.icon), ['W', 'W', 'W', 'W', 'W'], '㉒b D21 generateCost（callCostOf・D22 サクリファイスと同じ形）: GC の印刷コスト[WW]＋extra[W]＝[WWW] が追加で発生する')
+  }
+
+  // D11・R4a-2 単体テスト: 効果の乗っ取り（hijack）。対象の選び直し（宣言時と違う候補を選べる）・元の使用者は使えない
+  {
+    // どちらの席も、頼まれた窓（pred が true を返す）に来るまで見送り続ける（それ以外の窓では反応しない）
+    const passUntil = (s: BoardState, pred: (s: BoardState) => boolean): BoardState => {
+      let cur = s
+      for (let i = 0; i < 100 && !pred(cur); i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+      }
+      return cur
+    }
+    let m = drive(base3([card('Q', 'A', 'char', { kiryoku: 1 }), card('Y', 'A', 'char', { kiryoku: 1 }), card('Heal', 'A', 'hand'), card('Snatch', 'B', 'hand')]), ctx3).state
+    const d1 = declare(m, ctx3, { by: 'A', source: 'Heal', targets: ['Q'] })
+    if (!d1.ok) throw new Error(`Heal declare failed: ${d1.reason}`)
+    d1.actions.forEach((a) => (m = act3(m, a)))
+    m = drive(m, ctx3).state
+    // メインの窓（B も見送るまで閉じない・11-2）→ Heal 本体の処理（[6]〜）→ [8]（使用するとき）を経て
+    // [11]《イベントカードを使用したとき》の窓で Snatch を宣言する
+    m = passUntil(m, (s) => currentWindow(s)?.frame?.kind === 'event' && currentWindow(s)?.frame?.step === 11 && awaitingSeat(s) === 'B')
+    const d2 = declare(m, ctx3, { by: 'B', source: 'Snatch' })
+    if (!d2.ok) throw new Error(`Snatch declare failed: ${d2.reason}`)
+    d2.actions.forEach((a) => (m = act3(m, a)))
+    m = drive(m, ctx3).state
+    // Heal の窓の残り・Snatch 自身の宣言〜効果（[6]〜[14]）を見送りきると、hijack が choose 't' を再び宣言する
+    m = passUntil(m, (s) => !!s.procMeta.choice)
+    let ch = m.procMeta.choice
+    // 宣言時は Q を選んでいたが、乗っ取った側（B）はここで改めて選ぶ（Q・Y どちらも候補）
+    eq([ch?.by, ch?.options.map((o) => o.key).sort()], ['B', ['Q', 'Y']], '対象の選び直し: 乗っ取った側（B）が改めて対象を選ぶ（Q・Y どちらも候補）')
+    m = drive(act3(m, { type: 'procChoose', id: ch!.id, pick: ['Y'] }), ctx3).state
+    eq([m.cards.Y.kiryoku, m.cards.Q.kiryoku], [4, 1], '対象の選び直し: 選び直した Y が回復・宣言時に指定した Q は元の使用者が使えず変わらない')
   }
 
   // D2（12-2 但し書き oldrule.txt:509-510）: バトルカードは、バトルが行われている限りカードの有無は問われず、バトルが行われている間有効

@@ -205,6 +205,16 @@ export type Op =
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
   | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous' }
   | { op: 'counter'; what: 'thisEffect' | { declared: CardRef } } // 打ち消し（原典に定義が無い ❓）
+  /**
+   * 効果の乗っ取り（D11〜D15・R4a-2）。what.declared が指す宣言（いただきます＝相手のイベント／幸せ泥棒＝
+   * 処理条件がある常時効果の《効果が発生したとき》の機会 NH-17）の効果を、乗っ取った側（you）が使う。
+   * 使用タイミング・使用条件は、乗っ取った側を you として、元の宣言が反応した窓の状況で確かめ直す（D11）。
+   * 満たさない・適切な対象が無ければ効果は失われる（この効果自身の宣言も立ち消えにする）。
+   * 元の宣言はこの Op が実行された時点で必ず打ち消し扱いになる（元の使用者は使えない。乗っ取りが失われても＝D11）。
+   * part: 'recover'（D13・幸せ泥棒）＝元の効果のうち「気力を回復させる」操作（kiryoku recover:true）だけを乗っ取る。
+   * 受け手は乗っ取った側がその場で選ぶ（元の受け手の条件を満たすものが候補・選ばないこともできる）
+   */
+  | { op: 'hijack'; what: { declared: CardRef }; part?: 'recover' }
   // 効果でコストを発生させる（D21・R4a-2）。得たコストは「その他の代償」（7-3）としてすぐ使える（frameId 無し）。
   // icons が配列＝固定の並び（臨時収入の[WWW]等）／{ callCostOf }＝そのカードの印刷された呼び出しコスト＋extra（サクリファイス）
   | { op: 'generateCost'; who?: PlayerRef; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] } }
