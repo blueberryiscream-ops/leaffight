@@ -399,7 +399,11 @@ function equipProblem(ctx: EngineCtx, state: BoardState, item: CardInstance | un
 // 層の足し外し（常時効果・期限）: drive が状態の変わるたびに呼ぶ
 // ───────────────────────────────────────────────────────────────
 
-/** 常時効果の発生源がフィールドにあるか（12-2）: キャラ・付いているアイテム（キャラ・バトルカードに）・フィールドカード・バトルカード */
+/**
+ * 常時効果の発生源がフィールドにあるか（12-2）: キャラ・付いているアイテム（キャラ・バトルカードに）・フィールドカード・バトルカード。
+ * D2（12-2 但し書き oldrule.txt:509-510）: バトルカードだけは例外——そのバトルカードで種目を選んだバトルが進行中の間は、
+ * 場（zone==='battle'）に無くても（使用済みでゴミ箱へ送られていても）有効
+ */
 export function staticSourceActive(state: BoardState, iid: string): boolean {
   const c = state.cards[iid]
   if (!c) return false
@@ -408,7 +412,13 @@ export function staticSourceActive(state: BoardState, iid: string): boolean {
     const h = state.cards[c.attachedTo]
     return h?.zone === 'battle' || isCharOnField(h)
   }
-  return isCharOnField(c)
+  if (isCharOnField(c)) return true
+  return battleCardInUse(state, iid)
+}
+
+/** D2: そのバトルカードで種目を選んだバトルが今進行中か（state.proc に kind:'battle' で battle.battleCard===iid の未完了フレームがあるか） */
+function battleCardInUse(state: BoardState, iid: string): boolean {
+  return state.proc.some((f) => f.kind === 'battle' && f.status !== 'done' && f.battle?.battleCard === iid)
 }
 
 function onFieldAny(c: CardInstance | undefined): boolean {

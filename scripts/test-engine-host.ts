@@ -9,10 +9,11 @@
 
 import { EMPTY_BOARD, EMPTY_PROC_META, fillBoardDefaults, type BoardState, type CardInstance, type Seat } from '../src/core/board'
 import { emptyHistory, undo, type History } from '../src/core/history'
-import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, topFrame } from '../src/core/proc'
+import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, startBattleAt, topFrame } from '../src/core/proc'
 import type { CardInfo } from '../src/engine/ctx'
 import { applyAction } from '../src/core/actions'
 import { currentStat, declare, drive } from '../src/engine/drive'
+import { staticSourceActive } from '../src/engine/layers'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 
@@ -447,6 +448,14 @@ function battleStart(battleCard: string): History {
     eq([ch?.by, ch?.kind, ch?.options.length], ['A', 'select', 4], '⑯e 並びがあると drive が止まって装備させたプレイヤー（A）に問う（力/早 × 根/感 の4通り）')
     t = drive(act3(t, { type: 'procChoose', id: ch!.id, pick: ['早:根'] }), ctx3).state
     eq([currentStat(ctx3, t, 'Tie', '早'), currentStat(ctx3, t, 'Tie', '根'), currentStat(ctx3, t, 'Tie', '力'), currentStat(ctx3, t, 'Tie', '感')], [1, 5, 5, 1], '⑯e 選んだ組（早・根）だけが入れ替わり、他（力・感）は印刷値のまま')
+  }
+
+  // D2（12-2 但し書き oldrule.txt:509-510）: バトルカードは、バトルが行われている限りカードの有無は問われず、バトルが行われている間有効
+  {
+    let d = base3([card('BCX', 'A', 'trash')])
+    eq(staticSourceActive(d, 'BCX'), false, 'D2a: バトルが無ければ trash のバトルカードの常時効果は無効（通常の12-2どおり）')
+    d = startBattleAt(d, { challenger: 'A', at: 19, battleCard: 'BCX' })
+    eq(staticSourceActive(d, 'BCX'), true, 'D2b: そのバトルカードで種目を選んだバトルが進行中なら trash（使用済み）でも有効（12-2 但し書き）')
   }
 
   // ⑰ K4: 対象にならない（空打ち）・禁止は警告だけ（止めない）。自動見送りは違反のある宣言を数えない
