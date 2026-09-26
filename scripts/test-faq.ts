@@ -269,5 +269,12 @@ if (Object.keys(cardInfos).length) {
     console.log(`実行（R4a の対象 ${scopeD.size}件・診断のみ）: ✅ ${sD.ok}／保留 ${sD.hold}／❌ ${sD.ng}${missingD.length ? `／見つからない ${missingD.length}` : ''}`)
     for (const r of rD.filter((r) => r.verdict !== '✅')) console.log(`  ${r.verdict} ${r.id}: ${[...r.reasons, ...r.failures].join(' / ')}`)
   }
+  // tested の数（D25(c)・_local/rules/tools/tested.ts の判定を読む。_r*-result.json を書いた後に呼ぶ）
+  const testedToolPath = join(root, '_local', 'rules', 'tools', 'tested.ts')
+  if (existsSync(testedToolPath)) {
+    const { computeTested } = (await import(pathToFileURL(testedToolPath).href)) as { computeTested: (root: string) => Promise<{ counts: { tested: number; draft: number; manual: number }; missingReviewCount: number }> }
+    const { counts, missingReviewCount } = await computeTested(root)
+    console.log(`tested の数: tested ${counts.tested}／draft ${counts.draft}／manual ${counts.manual}（faqReview が足りなくて tested になれなかった枚数: ${missingReviewCount}）`)
+  }
   if (ng || defProblems.length) process.exit(1)
 } else console.log('実行: pool.json が無いのでスキップ')

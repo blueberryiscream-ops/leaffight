@@ -392,4 +392,11 @@ export interface CardDef {
     icons: { atk: Attr[]; def: Attr[] }
   }
   abilities: Ability[]
+  /**
+   * このカードが登場する FAQ（`_local/rules/faq/_index.json` の cards にこのカードの id があるもの）の読み合わせ結果。
+   * キーは `_index.json` の id（'faq-995' の形）。D25(b)・R4a-2。
+   * 'case'＝T ケースがある／'ok'＝記述どおりになることを読み合わせで確かめた（why に1行の理由）／
+   * 'manual'＝記述で扱っていない（記述に manual がある）／'na'＝そのカードの効果に関係しない・プール外の版の話
+   */
+  faqReview?: Record<string, { v: 'case' | 'ok' | 'manual' | 'na'; why?: string }>
 }
