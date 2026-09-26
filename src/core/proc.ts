@@ -1281,7 +1281,9 @@ function enterAction(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       // [7] [4]で宣言したコストを発生させるアクションの処理
       const i = frame.cgIndex ?? 0
       if (i < decl.costGens.length) {
-        const cg: ProcDecl = { ...decl, id: `${decl.id}.cg${i}`, kind: 'costGen', label: 'コスト発生', sources: decl.costGens[i], costGens: [], eng: {} }
+        // D21（R4a-2 続き）: cgSubs（7-2[3] の窓で宣言したイベント等）を costGen の処理に渡す（enterCardUse と同じ。
+        // ここが抜けていたため、payWith にイベントの iid を指定しても [3] の窓で宣言したイベントが処理されなかった）
+        const cg: ProcDecl = { ...decl, id: `${decl.id}.cg${i}`, kind: 'costGen', label: 'コスト発生', sources: decl.costGens[i], subDecls: decl.cgSubs?.[i] ?? [], costGens: [], eng: {} }
         const s1 = setFrame(state, { ...frame, cgIndex: i + 1, status: 'resume', resume: 'reenter' })
         return pushDeclFrame(s1, cg, { step: 4, bindTo: frame.id })
       }

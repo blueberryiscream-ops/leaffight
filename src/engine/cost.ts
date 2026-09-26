@@ -152,6 +152,15 @@ export function effectiveCost(ctx: EngineCtx, state: BoardState, actionKind: Pro
 }
 
 /**
+ * D21（R4a-2）: このカードに「コストを発生するとき（7-2[3]）に割込型として使える」play 能力があるか。
+ * あれば、payWith にこの iid を指定したとき、CostSource にはせず [3] の窓でこのイベント自体を宣言させる（generateCost 参照）
+ */
+function isCostGenEvent(ctx: EngineCtx, cardId: string): boolean {
+  const def = ctx.defs[cardId]
+  return !!def?.abilities.some((a) => a.kind === 'play' && a.speed === '割込型' && a.trigger?.timing === 'コストを発生するとき')
+}
+
+/**
  * 15-13-1[4]・16-1[4] 支払い方法の宣言。
  * - payWith（発生源の iid）か payPool（使う発生済みのコストの id）があれば、**指定されたものだけ**で払う
  *   （payWith でコストを発生させ、payPool の発生済みのコストと合わせる。指定していない発生済みのコストは使わない FAQ:2959
@@ -179,10 +188,23 @@ export function planPayment(
     return { iid, from: 'field', icon, attrs: attrsOf(info) }
   }
   if (payWith?.length || payPool?.length) {
-    const srcs = (payWith ?? []).map(toSource).filter((x): x is CostSource => x !== null)
+    // D21: payWith にイベント（コストを発生するときに割込型として使える）の iid があれば、それは CostSource にしない
+    // （発生源はその他の payWith だけ・無ければ0個）。そのイベント自身は [4] で開く [3] の窓で宣言する（enterCostGen の subDecls）
+    let hasEventPay = false
+    const srcs: CostSource[] = []
+    for (const iid of payWith ?? []) {
+      const c = state.cards[iid]
+      const info = c ? ctx.cards[c.cardId] : undefined
+      if (c && c.zone === 'hand' && info && isCostGenEvent(ctx, info.id)) {
+        hasEventPay = true
+        continue
+      }
+      const s = toSource(iid)
+      if (s) srcs.push(s)
+    }
     const have = new Set(state.costs[by].map((t) => t.id))
     const poolIds = (payPool ?? []).filter((id) => have.has(id))
-    return { ok: true, costGens: srcs.length ? [srcs] : [], usePool: false, poolIds, warn }
+    return { ok: true, costGens: srcs.length || hasEventPay ? [srcs] : [], usePool: false, poolIds, warn }
   }
   if (cost.icons.length === 0) return { ok: true, costGens: [], usePool: true, poolIds: [], warn }
   const pool = state.costs[by].map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })) // 他のアクションで発生したコストはその他のコスト（7-3）
