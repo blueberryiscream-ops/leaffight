@@ -33,6 +33,7 @@ export interface PoolCardLike {
   battleAtk?: string
   battleDef?: string
   cells?: string[]
+  charTypes?: string[]
 }
 
 export function cardInfoFromPool(p: PoolCardLike): CardInfo {
@@ -45,6 +46,7 @@ export function cardInfoFromPool(p: PoolCardLike): CardInfo {
     cost: p.cost,
     attr: p.attr,
     abilities: (p.abilities ?? []).map((a) => ({ header: a.header, cost: a.cost })),
+    charTypes: p.charTypes ?? [],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),
   }
 }

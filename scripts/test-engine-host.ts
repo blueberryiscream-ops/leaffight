@@ -14,6 +14,7 @@ import type { CardInfo } from '../src/engine/ctx'
 import { applyAction } from '../src/core/actions'
 import { currentStat, declare, drive } from '../src/engine/drive'
 import { staticSourceActive } from '../src/engine/layers'
+import { select } from '../src/engine/eval'
 import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
@@ -406,6 +407,7 @@ function battleStart(battleCard: string): History {
     st('NoEv', 'f', null, null),
     st('NoEvT', 'f', null, null),
     st('Hit', 'e', null, null),
+    { ...st('Robo', 'c', S(1, 1, 1, 1, 1)), charTypes: ['ロボ'] },
   ]
   const self = { ref: 'self' as const }
   const equipped = { ref: 'equipped' as const }
@@ -451,6 +453,17 @@ function battleStart(battleCard: string): History {
     eq([ch?.by, ch?.kind, ch?.options.length], ['A', 'select', 4], '⑯e 並びがあると drive が止まって装備させたプレイヤー（A）に問う（力/早 × 根/感 の4通り）')
     t = drive(act3(t, { type: 'procChoose', id: ch!.id, pick: ['早:根'] }), ctx3).state
     eq([currentStat(ctx3, t, 'Tie', '早'), currentStat(ctx3, t, 'Tie', '根'), currentStat(ctx3, t, 'Tie', '力'), currentStat(ctx3, t, 'Tie', '感')], [1, 5, 5, 1], '⑯e 選んだ組（早・根）だけが入れ替わり、他（力・感）は印刷値のまま')
+  }
+
+  // D24（吸血・カード本文「このキャラと「ロボ」は指定できない」）: charType 除外の選択（chara 相当の Selector）はロボを候補から外す
+  {
+    const robo = drive(base3([card('Q', 'A', 'char'), card('Robo2', 'A', 'char', { cardId: 'Robo' })]), ctx3).state
+    const sel = { zone: 'field' as const, side: 'you' as const, class: 'キャラ' as const, where: { not: { charType: [{ ref: 'it' as const }, 'ロボ'] } } }
+    eq(
+      select(ctx3, robo, { self: null, you: 'A', slots: {}, trigger: null, declId: null, declared: {} }, sel).sort(),
+      ['LA', 'Q'].sort(),
+      '㉑ D24: charType 除外の Selector はキャラタイプ「ロボ」を持つカード（Robo2）を候補から外す（他の味方キャラは候補のまま）',
+    )
   }
 
   // D2（12-2 但し書き oldrule.txt:509-510）: バトルカードは、バトルが行われている限りカードの有無は問われず、バトルが行われている間有効

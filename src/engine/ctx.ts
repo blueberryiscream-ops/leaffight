@@ -21,6 +21,8 @@ export interface CardInfo {
   attr: string
   /** 能力の使用代償の元表記（E0 で分けたもの。'R＋気力－１' など） */
   abilities: { header: string; cost: string }[]
+  /** キャラタイプ（[ロボ][魔族] 等・カード単位。無ければ空。D24・R4a-2 で足した） */
+  charTypes?: string[]
   /** バトルカードの攻撃属性・防御属性（印刷。'力' など）と分類（'屋内'・'屋外'）。R2b */
   battleAtk?: string
   battleDef?: string

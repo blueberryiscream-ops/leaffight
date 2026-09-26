@@ -251,6 +251,10 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.hasAttr[0])
     return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.attr ?? '').includes(c.hasAttr[1]))
   }
+  if ('charType' in c) {
+    const xs = resolveRef(state, env, c.charType[0])
+    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.charTypes ?? []).includes(c.charType[1]))
+  }
   // pureAttrs は R4 以降
   return false
 }

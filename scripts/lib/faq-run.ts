@@ -635,6 +635,7 @@ export function cardInfoOf(p: {
   battleAtk?: string
   battleDef?: string
   cells?: string[]
+  charTypes?: string[]
 }): CardInfo {
   return {
     id: p.id,
@@ -645,6 +646,7 @@ export function cardInfoOf(p: {
     cost: p.cost,
     attr: p.attr,
     abilities: p.abilities.map((a) => ({ header: a.header, cost: a.cost })),
+    charTypes: p.charTypes ?? [],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),
   }
 }
