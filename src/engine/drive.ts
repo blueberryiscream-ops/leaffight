@@ -313,6 +313,13 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     return iids.map((iid) => ({ key: iid, label: nameOf(ctx, state, iid) }))
   }
   if ('option' in p) return p.option.map((o) => ({ key: o, label: o }))
+  // 数を選ぶ（D16・世話焼き）。上限は無いが候補は実装で有限に区切る（今のプールの気力の実務上の範囲を広めに超える20まで）
+  if ('number' in p) {
+    const NUMBER_PICK_CAP = 20
+    const out: { key: string; label: string }[] = []
+    for (let n = p.number.min; n <= NUMBER_PICK_CAP; n++) out.push({ key: String(n), label: String(n) })
+    return out
+  }
   // 能力値を1つ選ぶ（「このキャラの能力値１つを＋２」）。rule any だけ（maxBase・minBase は R4）
   if ('stat' in p && p.rule === 'any') return ['力', '早', '賢', '根', '感'].map((a) => ({ key: a, label: a }))
   return [] // 能力を選ぶ（模写など）は R4

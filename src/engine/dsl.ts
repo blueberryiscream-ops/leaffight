@@ -101,6 +101,7 @@ export type Expr =
   | { eventAmount: 'damage' }    // 進行中のダメージの値
   | { callCost: CardRef }        // 呼び出しコスト（印刷されたコストアイコンの数。R2a で足した・《恐怖の抱擁》）
   | { battleDamage: CardRef }    // そのキャラが受けるバトルの結果ダメージ（20-4[24] の計算。無ければ 0。R2b）
+  | { chosen: string }           // 宣言時に選んだ数（Pick { number } の答え・D16「回復数Xは宣言時に選ぶ」。R4a-2）
   | { add: Expr[] }
   | { sub: [Expr, Expr] }
 
@@ -129,6 +130,7 @@ export type Cond =
   // ── R3 で足した
   | { hasAttr: [CardRef, Attr] }               // キャラの属性にその属性が含まれる（「[力]属性のキャラ」。複数の属性なら含めば当たる FAQ:1709）
   | { charType: [CardRef, string] }            // キャラタイプを持つか（「[ロボ]の」等。D24・R4a-2）
+  | { downed: CardRef }                        // そのカードが今ゴミ箱にある＝ダウン処理が打ち消されずに終わった近似（D22・D16・R4a-2）
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -143,6 +145,7 @@ export type Pick =
   | { ability: Selector; excludeNames?: string[] }    // キャラの特殊能力を1つ選ぶ（模写）
   | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase' }
   | { option: string[] }
+  | { number: { min: number } }  // 数を選ぶ（可変の使用代償・D16「世話焼き」。答えは数の文字列。1以上・上限は無いが候補は実装で有限に区切る）
 
 export interface Choice {
   slot: string
@@ -163,7 +166,7 @@ export interface Choice {
 // ───────────────────────────────────────────────────────────────
 
 export type OtherCost =
-  | { kiryoku: number; of?: CardRef }   // 「気力－N」。既定は能力を持つキャラ自身（8-3）
+  | { kiryoku: number | Expr; of?: CardRef }   // 「気力－N」。既定は能力を持つキャラ自身（8-3）。Expr は可変の使用代償（D16。宣言時に選んだ数 { chosen }）
   | { kiryokuAny: true }                // 気力－任意
   | { trash: CardRef }                  // 「このキャラ／このアイテムをゴミ箱送りにする」
   | { down: CardRef }                   // 「このキャラをダウンさせる」（《マルチ》受け渡し）。取り消されたら支払っていない（FAQ:2040）。R2a で足した

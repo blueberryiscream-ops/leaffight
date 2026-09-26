@@ -12,7 +12,7 @@ import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
 import { ACTION_KIND, applyCostMod, costModOf } from './layers'
-import { resolveRef } from './eval'
+import { evalExpr, resolveRef } from './eval'
 
 const ICONS = 'WRGLT'
 const ATTRS = '力早賢根感'
@@ -44,6 +44,12 @@ export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
     const m = /^気力[－\-−ー]([0-9０-９]+)$/.exec(part)
     if (m) {
       other.push({ kiryoku: toNum(m[1]) })
+      return
+    }
+    // 可変の使用代償「気力－回復数」（D16・世話焼き。宣言時に選んだ数がそのまま代償の量にも効果の回復量にもなる。
+    // slot 'x' の約束。原文の表記ゆれ「回復数」「回複数」（データの誤字）両方を読む）
+    if (/^気力[－\-−ー](回復数|回複数)$/.test(part)) {
+      other.push({ kiryoku: { chosen: 'x' } })
       return
     }
     if (part === 'このキャラをゴミ箱送りにする' || part === 'このアイテムをゴミ箱送りにする') {
@@ -306,10 +312,13 @@ export function payNow(
       // 8-3-1: 気力を減らすキャラは1以上の気力でなければならない。0未満になってもよい（FAQ:3263）。
       // of（「味方キャラ１体の気力－１」等）＝宣言[3]で選んだ対象（decl.eng.slots。既定は能力を持つキャラ自身 8-3）
       const slots = (decl.eng.slots as Record<string, string[]> | undefined) ?? {}
-      const targetIid = o.of ? resolveRef(state, { self, you: by, slots, trigger: null, declId: null, declared: {} }, o.of)[0] : self
+      const env = { self, you: by, slots, trigger: null, declId: null, declared: {} }
+      const targetIid = o.of ? resolveRef(state, env, o.of)[0] : self
       const c = targetIid ? state.cards[targetIid] : undefined
       if (!c || !isCharOnField(c) || (c.kiryoku ?? 0) < 1) return fail('気力が1以上でない（8-3-1）')
-      kiryoku.push({ iid: c.iid, delta: -o.kiryoku })
+      // D16: 可変の使用代償（宣言時に選んだ数。OtherCost.kiryoku が Expr）
+      const amount = typeof o.kiryoku === 'number' ? o.kiryoku : evalExpr(ctx, state, env, o.kiryoku)
+      kiryoku.push({ iid: c.iid, delta: -amount })
     } else if ('trash' in o) {
       if (!self || !isCharOnField(state.cards[self])) return fail('ゴミ箱送りにするキャラがいない')
       trash.push(self)

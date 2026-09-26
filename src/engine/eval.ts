@@ -256,6 +256,11 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.charType[0])
     return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.charTypes ?? []).includes(c.charType[1]))
   }
+  if ('downed' in c) {
+    // ダウン処理が（cancelDown で）打ち消されずに終わったかの近似＝今ゴミ箱にあるか（D22 の読み合わせと同じ理由）
+    const xs = resolveRef(state, env, c.downed)
+    return xs.length > 0 && xs.every((x) => state.cards[x]?.zone === 'trash')
+  }
   // pureAttrs は R4 以降
   return false
 }
@@ -270,6 +275,7 @@ export function evalExpr(ctx: EngineCtx, state: BoardState, env: Env, e: Expr): 
   }
   if ('add' in e) return e.add.reduce((s: number, x) => s + evalExpr(ctx, state, env, x), 0)
   if ('sub' in e) return evalExpr(ctx, state, env, e.sub[0]) - evalExpr(ctx, state, env, e.sub[1])
+  if ('chosen' in e) return Number(env.slots[e.chosen]?.[0] ?? '0')
   if ('callCost' in e) {
     const c = state.cards[resolveRef(state, env, e.callCost)[0] ?? '']
     return c ? [...(ctx.cards[c.cardId]?.cost ?? '')].filter((ch) => 'WRGLT'.includes(ch)).length : 0

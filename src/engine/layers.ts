@@ -392,7 +392,8 @@ export function applyCostMod(cost: Cost, mod: { icons: Partial<Record<CostIcon, 
   for (const [icon, delta] of Object.entries(mod.icons)) counts[icon as CostIcon] = (counts[icon as CostIcon] ?? 0) + (delta ?? 0)
   const icons: CostIcon[] = []
   for (const [icon, n] of Object.entries(counts)) for (let i = 0; i < Math.max(0, n ?? 0); i++) icons.push(icon as CostIcon)
-  const other = mod.kiryoku === 0 ? cost.other : cost.other?.map((o) => ('kiryoku' in o ? { ...o, kiryoku: Math.max(0, o.kiryoku + mod.kiryoku) } : o))
+  // D16: 可変の使用代償（kiryoku が Expr＝宣言時に選んだ数）は costMod の対象外（今のプールに両方が絡む例が無い。決めていない組み合わせ）
+  const other = mod.kiryoku === 0 ? cost.other : cost.other?.map((o) => ('kiryoku' in o && typeof o.kiryoku === 'number' ? { ...o, kiryoku: Math.max(0, o.kiryoku + mod.kiryoku) } : o))
   return { ...cost, icons, other }
 }
 
