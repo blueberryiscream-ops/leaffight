@@ -379,7 +379,7 @@ function battleStart(battleCard: string): History {
 // R3: 継続効果の層（K3）・人の手直しの層・合法性の警告（K4）・場の制限の是正（K12）— PHASE-R3 §3-7
 //   12-1（oldrule.txt:493-500）「これらの効果によって得られた能力値修正はターン終了時に失われます」「対象が失われた場合…失われます」
 //   12-2（501-515）「新たにこれらの効果が発揮した場合は、既に発揮した全ての効果の後に発揮したとみなされ」「発生元がフィールドから失われた場合、その効果も失われます」
-//   H-6（DESIGN §5.3・利用者 2026-09-25）「今の値を入れ替える（例 元 力5・感1＋力+2 → 力1・感7）」
+//   H-6（DESIGN §5.3・統括12 2026-09-26 D1）「印刷値（元の能力値・常に同じ）で入れ替えて上書き（例 元 力5・感1＋力+2 → 力1・感5）」・並びは装備するたびに装備させたプレイヤーが選ぶ（FAQ:443）
 //   DESIGN §5.4「人の手直しの層」: 人が盤面を直した修正は導出の最後に重ねる・消すのも人
 //   11-3（485-486）「プレイヤーは空打ちのアクションの宣言をすることができません」・【～の対象にならない】（1178-1179）・DESIGN §5.4「段階」（R3 は警告だけ）
 //   15-2（590-605）「該当プレイヤーは即座に…１体づつ選択してゴミ箱送り」・17-1（846-853）・FAQ:3329（キャラ数制限を受けないキャラ）
@@ -391,6 +391,7 @@ function battleStart(battleCard: string): History {
     st('LA', 'c', S(1, 1, 1, 1, 1)),
     st('LB', 'c', S(1, 1, 1, 1, 1)),
     st('Q', 'c', S(5, 3, 3, 3, 1)),
+    st('Tie', 'c', S(5, 5, 3, 1, 1)),
     st('P', 'c', S(3, 1, 2, 2, 2), 5, [{ header: 'Zap', cost: '' }]),
     st('Y', 'c', S(1, 1, 1, 1, 1)),
     st('Same1', 'c', S(1, 1, 1, 1, 1)),
@@ -425,16 +426,28 @@ function battleStart(battleCard: string): History {
   s = act3(s, { type: 'attach', itemIid: 'Kinoko', targetIid: 'Q', itemName: 'Kinoko', targetName: 'Q' })
   s = act3(s, { type: 'moveCard', iid: 'Kinoko', toZone: 'char', toIndex: 100, cardName: 'Kinoko' })
   s = drive(s, ctx3).state // 常時効果の層（Kinoko の入れ替え）が足される＝力+2 の後
-  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [1, 7], '⑯a H-6: 今の値を入れ替える（元 力5・感1＋力+2 → 力1・感7）')
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [1, 5], '⑯a H-6（D1）: 印刷値（元 力5・感1）で入れ替えて上書き・先に掛かった力+2は消える')
   s = act3(s, { type: 'procLayers', add: [modSeed('Q', '力', 1)] })
   s = act3(s, { type: 'addModifier', modifier: { id: 'hand1', targetIid: 'Q', sourceLabel: '手', stat: '感', delta: 1, kind: '能力値修正', scope: 'その他' }, cardName: 'Q' })
   s = drive(s, ctx3).state
-  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [2, 8], '⑯b 後から来た修正は入れ替わらない・右クリックの修正（手直しの層）は導出の最後に重なる')
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [2, 6], '⑯b 入れ替えより後から来た修正は上に乗る（力+1）・右クリックの修正（手直しの層）は導出の最後に重なる')
   s = act3(s, { type: 'procPhase', to: 'ターン終了' })
   s = drive(s, ctx3).state
-  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感'), Object.keys(s.modifiers), s.layers.list.length], [1, 6, ['hand1'], 1], '⑯c 10-8 で効果の修正（ターン終了時まで）は外れ、常時効果（入れ替え）と手直しの層は残る（元 力5・感1 → 力1・感5 に手直し 感+1…の入れ替えは今の値）')
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感'), Object.keys(s.modifiers), s.layers.list.length], [1, 6, ['hand1'], 1], '⑯c 10-8 で効果の修正（ターン終了時まで）は外れ、常時効果（入れ替え）と手直しの層は残る（元 力5・感1 の入れ替え=力1・感5 に手直し 感+1）')
   s = act3(s, { type: 'removeModifier', modId: 'hand1', cardName: 'Q' })
   eq(currentStat(ctx3, s, 'Q', '感'), 5, '⑯d 手直しを消すのは人（消したら導出だけの値）')
+
+  // ⑯e H-6 の並び（FAQ:443）: 印刷値の最高（力・早＝5）・最低（根・感＝1）が複数あるとき、装備させたプレイヤーに選ばせる（swapChoiceFix）
+  {
+    let t = base3([card('Tie', 'A', 'char'), card('Kinoko2', 'A', 'hand', { cardId: 'Kinoko' })])
+    t = act3(t, { type: 'attach', itemIid: 'Kinoko2', targetIid: 'Tie', itemName: 'Kinoko2', targetName: 'Tie' })
+    t = act3(t, { type: 'moveCard', iid: 'Kinoko2', toZone: 'char', toIndex: 100, cardName: 'Kinoko2' })
+    t = drive(t, ctx3).state
+    const ch = t.procMeta.choice
+    eq([ch?.by, ch?.kind, ch?.options.length], ['A', 'select', 4], '⑯e 並びがあると drive が止まって装備させたプレイヤー（A）に問う（力/早 × 根/感 の4通り）')
+    t = drive(act3(t, { type: 'procChoose', id: ch!.id, pick: ['早:根'] }), ctx3).state
+    eq([currentStat(ctx3, t, 'Tie', '早'), currentStat(ctx3, t, 'Tie', '根'), currentStat(ctx3, t, 'Tie', '力'), currentStat(ctx3, t, 'Tie', '感')], [1, 5, 5, 1], '⑯e 選んだ組（早・根）だけが入れ替わり、他（力・感）は印刷値のまま')
+  }
 
   // ⑰ K4: 対象にならない（空打ち）・禁止は警告だけ（止めない）。自動見送りは違反のある宣言を数えない
   let k = drive(base3([card('P', 'A', 'char'), card('Y', 'B', 'char'), card('Circ', 'B', 'char', { attachedTo: 'Y', kiryoku: null, index: 100 })]), ctx3).state

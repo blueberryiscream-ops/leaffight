@@ -23,6 +23,8 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
       case 'challenger':
       case 'battleUser': // H-9c 仮の既定＝挑んだ側
         return nearestBattle(state)?.battle?.challenger ?? env.you
+      case 'equipper': // 性格反転キノコの静的効果は you＝発生源（アイテム）の使用権者＝装備させたプレイヤー（layers.ts layerEnv）
+        return env.you
       case 'challenged': {
         const b = nearestBattle(state)?.battle
         return b ? other(b.challenger) : other(env.you)

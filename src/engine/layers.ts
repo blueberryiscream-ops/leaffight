@@ -155,7 +155,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
       items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
     } else if (f.ce === 'statSwap') {
-      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && swapMaxMin(v) })
+      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v) })
     }
   }
   items.sort((a, b) => a.seq - b.seq).forEach((x) => x.run())
@@ -164,16 +164,78 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   return v
 }
 
-/** H-6（利用者 2026-09-25）: 最高値と最低値を今の値で入れ替える。並びが同じなら原典の能力値の順（力早賢根感）で先のもの【決めたこと】 */
-function swapMaxMin(v: Record<string, number>): boolean {
-  let hi = ATTRS[0]
-  let lo = ATTRS[0]
+/** 印刷値の最高・最低の能力値（複数あれば全部）。全属性が同じ値なら hi===lo===全部 */
+function tiedHiLo(printed: Record<string, number>): { hi: Attr[]; lo: Attr[] } {
+  let maxV = -Infinity
+  let minV = Infinity
   for (const a of ATTRS) {
-    if (v[a] > v[hi]) hi = a
-    if (v[a] < v[lo]) lo = a
+    if (printed[a] > maxV) maxV = printed[a]
+    if (printed[a] < minV) minV = printed[a]
   }
-  if (hi !== lo) [v[hi], v[lo]] = [v[lo], v[hi]]
+  return { hi: ATTRS.filter((a) => printed[a] === maxV), lo: ATTRS.filter((a) => printed[a] === minV) }
+}
+
+/**
+ * H-6（統括12 2026-09-26・D1）: 最も高い元の能力値と最も低い元の能力値（**印刷値・常に同じ**）を入れ替えて上書きする。
+ * その2つの能力値にこの層より前で掛かっていた修正は消え（v の値を印刷値の入れ替えで上書きするため）、
+ * 後から来た修正（この層より後の seq）は通常どおり v に足される。
+ * 並びが複数あるときは装備させたプレイヤーが装備するたびに選ぶ（FAQ:443）。答えは procMeta.answers['swap:<アイテムiid>']（`swapChoiceFix` が問う）。
+ * 未回答の間は原典の能力値の順（力早賢根感）で先のものを仮に使う（`swapChoiceFix` が別途止めて問う）
+ */
+function swapStats(ctx: EngineCtx, state: BoardState, e: Eff, iid: string, v: Record<string, number>): boolean {
+  const c = state.cards[iid]
+  const printed = c ? ctx.cards[c.cardId]?.stats : null
+  if (!printed) return false
+  const { hi, lo } = tiedHiLo(printed)
+  let hiAttr = hi[0]
+  let loAttr = lo[0]
+  if (hiAttr === loAttr) return true // 全属性が同じ値: 入れ替えても変化なし
+  if (hi.length > 1 || lo.length > 1) {
+    const itemIid = e.layer.source
+    const answer = itemIid ? state.procMeta.answers[`swap:${itemIid}`] : undefined
+    const [pickHi, pickLo] = (answer?.[0]?.split(':') ?? []) as [Attr, Attr]
+    if (pickHi && pickLo && hi.includes(pickHi) && lo.includes(pickLo)) {
+      hiAttr = pickHi
+      loAttr = pickLo
+    }
+  }
+  const hiPrinted = printed[hiAttr] ?? 0
+  const loPrinted = printed[loAttr] ?? 0
+  v[hiAttr] = loPrinted
+  v[loAttr] = hiPrinted
   return true
+}
+
+/**
+ * H-6 の並び（tieBreak）: 印刷値の最高・最低が複数あるとき、装備させたプレイヤーに入れ替える組を1回選ばせる（FAQ:443・装備するたびに）。
+ * 選んだ答えは procMeta.answers['swap:<アイテムiid>'] に残る（そのアイテムが場にある限り・再装備は新しい iid なので改めて問う）
+ */
+export function swapChoiceFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  if (state.result || state.procMeta.choice) return null
+  for (const e of derived(ctx, state).effs) {
+    if (e.effect.ce !== 'statSwap') continue
+    const itemIid = e.layer.source
+    if (!itemIid) continue
+    const key = `swap:${itemIid}`
+    if (state.procMeta.answers[key]) continue
+    for (const iid of targetsOf(ctx, state, e)) {
+      if (!effectOn(ctx, state, e, iid)) continue
+      const c = state.cards[iid]
+      const printed = c ? ctx.cards[c.cardId]?.stats : null
+      if (!printed) continue
+      const { hi, lo } = tiedHiLo(printed)
+      if (hi.length <= 1 && lo.length <= 1) continue
+      if (hi[0] === lo[0]) continue
+      const opts: { key: string; label: string }[] = []
+      for (const a of hi) for (const b of lo) if (a !== b) opts.push({ key: `${a}:${b}`, label: `${a}と${b}を入れ替える` })
+      const chooser = resolvePlayer(state, layerEnv(state, e.layer), e.effect.tieBreak.chooser)
+      return {
+        type: 'procChoice',
+        choice: { id: key, by: chooser, kind: 'select', prompt: `「${e.layer.label}」: 入れ替える能力値を選ぶ（元の能力値が並んでいる。FAQ:443）`, options: opts, min: 1, max: 1, frameId: null },
+      }
+    }
+  }
+  return null
 }
 
 function manualMods(state: BoardState, iid: string) {

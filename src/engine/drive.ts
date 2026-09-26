@@ -36,7 +36,7 @@ import { attrsOf, costOfAbility, parseCostText, payNow, planPayment } from './co
 import type { Choice, Op } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { clearableMods, continuousSeed, damagePrevented, limitFix, maxKiryokuOf, modSeed, syncActions, violations, type Violation } from './layers'
+import { clearableMods, continuousSeed, damagePrevented, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -341,6 +341,17 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
       apply(fix)
       if (out.state === before) {
         out.warnings.push('場の制限の是正が受け付けられない')
+        break
+      }
+      continue
+    }
+    // H-6（D1）: 性格反転キノコの類で入れ替える能力値が並んだら、装備させたプレイヤーに装備するたびに1回選ばせる（FAQ:443）
+    const swapChoice = swapChoiceFix(ctx, s)
+    if (swapChoice) {
+      const before = out.state
+      apply(swapChoice)
+      if (out.state === before) {
+        out.warnings.push('H-6 の入れ替えの選択が受け付けられない')
         break
       }
       continue

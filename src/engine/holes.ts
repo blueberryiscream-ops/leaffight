@@ -25,7 +25,7 @@ export const HOLES = {
   'H-3': { options: ['activatedOnly'], value: 'activatedOnly', status: 'decided', note: '「使う」は起動する特殊能力（コスト発生を含む）。処理条件がある常時効果は入らない（FAQ:1058・2765・3324）' },
   'H-4': { options: ['target', 'select'], value: 'target', status: 'decided', note: '模写は対象にとる' },
   'H-5': { options: ['noEffect'], value: 'noEffect', status: 'provisional', note: 'コピーした能力の「このアイテム」は無し＝効果なし。範囲内で該当0枚' },
-  'H-6': { options: ['swapCurrent', 'swapBase'], value: 'swapCurrent', status: 'decided', note: '性格反転キノコは今の値を入れ替える' },
+  'H-6': { options: ['swapCurrent', 'swapBase'], value: 'swapBase', status: 'decided', note: '性格反転キノコは元の値（印刷値）で入れ替えて上書き。先に掛かった修正は消え、後から来た修正は上に乗る（統括12 2026-09-26・FAQ:443・1666・2973。R4a で swapCurrent から決め直し）' },
   'H-7a': { options: ['target', 'select'], value: 'target', status: 'decided', note: '決闘の指名は対象にとる' },
   'H-7b': { options: ['likeAllocation', 'likeCost'], value: 'likeCost', status: 'decided', note: '決闘の気力−2 は使用代償型: 気力1以上なら払え、0未満ならただちにダウン（利用者 2026-09-25・FAQ:3263）' },
   'H-7c': { options: ['notAction', 'action'], value: 'notAction', status: 'provisional', note: '決闘の気力−2 の支払いはアクションでない' },

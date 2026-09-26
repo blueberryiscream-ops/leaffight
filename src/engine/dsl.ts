@@ -265,8 +265,8 @@ export interface ActionPattern {
 export type Continuous =
   /** when: この条件を満たしている間だけ（《柏木千鶴》恐怖「このキャラが挑んだバトルに参加している間」。R3） */
   | { ce: 'statMod'; who: CardRef | Selector; stat: Attr; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
-  /** 最高値と最低値を入れ替える。入れ替えるのは**今の値**（H-6: 元 力5・感1＋力+2 → 力1・感7）。
-   *  層の順で、これより前に掛かった修正ごと入れ替わり、後から来た修正は入れ替わらない */
+  /** 最高値と最低値を入れ替える。入れ替えるのは**印刷値（元の能力値）**で常に同じ（H-6・統括12 2026-09-26 D1: 元 力5・感1＋力+2 → 力1・感5）。
+   *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }
   | { ce: 'battleAttrSwap'; battleCard: CardRef; requires: 'pureAttrs' }                 // [攻]と[防]の入れ替え
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }
