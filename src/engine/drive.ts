@@ -443,6 +443,12 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
     warnings.push(`manual: バトルの攻防の値（${info?.name ?? 'バトル種目なし'}: 攻 ${info?.battleAtk ?? '?'}・防 ${info?.battleDef ?? '?'}）を人が入れる`)
     return out
   }
+  // 基本バトルカード＝能力値アイコン1つずつで特殊なテキストを持たない（oldrule.txt:1042-1046・DESIGN §5.2）。
+  // テキストのあるバトルカードは、カードの記述（defs）が無ければ効果が値に効きうるので人が入れる（統括11）
+  if (info && info.abilities.length > 0 && !ctx.defs[info.id]) {
+    warnings.push(`manual: バトルの攻防の値（${info.name} はテキストのあるバトルカードで記述が無い）を人が入れる`)
+    return out
+  }
   for (const seat of ['A', 'B'] as Seat[]) {
     const ps = b.participants[seat]
     if (ps.length !== 1) {
