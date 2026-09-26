@@ -81,6 +81,9 @@ export function useEngineUI({
   // 盤面が変わったら組み立て中の宣言は捨てる（古い盤面の前提で送らない）
   useEffect(() => setDraft(null), [board])
   useEffect(() => setPick([]), [ch?.id])
+  // §3-3: 窓・番・盤面が進んだら前の断り文（例「そのプレイヤーの番でない（11-2）」）を残さない。
+  // notice は declare() の答え（盤面を変えないその場の判定）を出すだけなので、盤面が進んでも自動では消えなかった
+  useEffect(() => setNotice(null), [board])
 
   /** 送る前に K4 の違反を確かめる（あれば確認の帯へ） */
   const send = useCallback(
