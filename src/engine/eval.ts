@@ -151,6 +151,7 @@ export function select(ctx: EngineCtx, state: BoardState, env: Env, sel: Selecto
       if (sel.kind && !sel.kind.includes(info.kind)) return false
       if (sel.excludeLeader && c.zone === 'leader') return false
       if (excl.has(c.iid)) return false
+      if (sel.fromSlot && !(env.slots[sel.fromSlot] ?? []).includes(c.iid)) return false
       if (sel.where && !evalCond(ctx, state, { ...env, it: c.iid }, sel.where)) return false
       return true
     })

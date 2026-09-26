@@ -13,6 +13,7 @@
 
 import { applyAction, type BoardAction } from '../core/actions'
 import type { BoardState, Seat } from '../core/board'
+import { parseCost } from '../core/types'
 import {
   MAIN_ACTIONS,
   PHASE_ACTIONS,
@@ -31,7 +32,7 @@ import {
   type SimulItem,
 } from '../core/proc'
 import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Play } from './abilities'
-import { controllerOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
+import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
 import type { Choice, Op } from './dsl'
@@ -840,6 +841,15 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'adjustDamage':
       if (!trigger?.damage) return manual('増減するダメージが無い')
       return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: op.delta, all: op.scope === 'allSimultaneous' }] }
+    case 'generateCost': {
+      // D21: 効果でコストを発生させる。icons が配列なら固定の並び、{ callCostOf } ならそのカードの印刷された呼び出しコスト＋extra
+      const seat = op.who ? resolvePlayer(state, env, op.who) : env.you
+      const icons = Array.isArray(op.icons)
+        ? op.icons
+        : [...parseCost(refs(op.icons.callCostOf).map((iid) => infoOf(ctx, state, iid)?.cost ?? '').join('')), ...(op.icons.extra ?? [])]
+      if (icons.length === 0) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: icons.map((icon) => ({ icon, attrs: [] })) }] }
+    }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない
       if (op.what === 'thisEffect') return manual('「この効果」の打ち消し')

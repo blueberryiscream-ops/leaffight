@@ -168,7 +168,9 @@ function autoStep(run: Run): boolean {
     if (want && ch.options.some((o) => o.key === (run.refs[want] ?? want))) pick = [run.refs[want] ?? want]
     else if (ch.repeat) pick = defaultRepeat(ch)
     else if (ch.kind === 'use') pick = ch.options.slice(0, 1).map((o) => o.key)
-    else if (ch.kind === 'select') pick = ch.options.slice(0, Math.min(ch.max, Math.max(ch.min, 1))).map((o) => o.key)
+    // R4a-2（faq-4099 で発覚）: min===0（optionalFirst＝そもそも使うかどうかを聞く最初の選択）は既定で見送る（選ばない＝使わない）。
+    // 明示の steps が無いプレイヤー（例: eachPlayer の相手側）は、意図が無ければ何もしないのが安全な既定（D8 の「一人のときは払わない」と同じ考え方）
+    else if (ch.kind === 'select') pick = ch.min === 0 ? [] : ch.options.slice(0, Math.min(ch.max, ch.min)).map((o) => o.key)
     if (!want) run.warnings.push(`選択を既定で答えた: ${ch.prompt} → ${pick.join('・') || '（なし）'}`)
     if (!apply(run, { type: 'procChoose', id: ch.id, pick })) return false
     driveRun(run)

@@ -1779,6 +1779,8 @@ export type ProcAction =
   | { type: 'procSwapZones'; seat: Seat; order: string[] }
   | { type: 'procDraw'; seat: Seat; n: number }
   | { type: 'procAddDowns'; seat: Seat; n: number }
+  /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
+  | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[] }
   | { type: 'procCancelDown'; frameId: string }
   | {
       type: 'procDamageEdit'
@@ -2187,6 +2189,19 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const s: BoardState = { ...state, downs: { ...state.downs, [action.seat]: state.downs[action.seat] + action.n } }
       trace.push({ kind: 'name', text: `勝利条件+${action.n}:${action.seat}` })
       return { state: checkEnd(s, '勝利条件（9-2）'), log: `${action.seat} のダウン数 +${action.n}` }
+    }
+    case 'procGenCost': {
+      // D21: 効果でコストを発生させる。得たコストは frameId 無し＝すぐ「その他の代償」として使える（7-3）
+      let s = state
+      const tokens = [...s.costs[action.seat]]
+      for (const t of action.tokens) {
+        const [s2, id] = nextId(s, 'cost')
+        s = s2
+        tokens.push({ id, icon: t.icon, attrs: t.attrs, frameId: null })
+      }
+      s = { ...s, costs: { ...s.costs, [action.seat]: tokens } }
+      trace.push({ kind: 'name', text: `コスト発生（効果）:${action.tokens.map((x) => x.icon + x.attrs.join('')).join('')}` })
+      return { state: s, log: `${action.seat} に発生したコスト +${action.tokens.map((x) => x.icon).join('')}` }
     }
     case 'procCancelDown': {
       const f = findFrame(state, action.frameId)

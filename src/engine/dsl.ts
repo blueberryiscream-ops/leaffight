@@ -85,6 +85,8 @@ export interface Selector {
   where?: Cond
   excludeLeader?: boolean
   exclude?: CardRef[]
+  /** 候補をその slot で選ばれた ids に絞る（forEach で「宣言時に選んだ複数のうち、いま zone にあるもの」を拾う。D22・R4a-2） */
+  fromSlot?: string
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -200,6 +202,9 @@ export type Op =
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
   | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous' }
   | { op: 'counter'; what: 'thisEffect' | { declared: CardRef } } // 打ち消し（原典に定義が無い ❓）
+  // 効果でコストを発生させる（D21・R4a-2）。得たコストは「その他の代償」（7-3）としてすぐ使える（frameId 無し）。
+  // icons が配列＝固定の並び（臨時収入の[WWW]等）／{ callCostOf }＝そのカードの印刷された呼び出しコスト＋extra（サクリファイス）
+  | { op: 'generateCost'; who?: PlayerRef; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] } }
   // ── バトル
   | { op: 'setParticipants'; side: 'challenger' | 'challenged'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }

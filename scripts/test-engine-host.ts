@@ -408,6 +408,7 @@ function battleStart(battleCard: string): History {
     st('NoEvT', 'f', null, null),
     st('Hit', 'e', null, null),
     { ...st('Robo', 'c', S(1, 1, 1, 1, 1)), charTypes: ['ロボ'] },
+    { ...st('GC', 'c', S(1, 1, 1, 1, 1)), cost: 'WW' },
   ]
   const self = { ref: 'self' as const }
   const equipped = { ref: 'equipped' as const }
@@ -420,6 +421,16 @@ function battleStart(battleCard: string): History {
     NoEvT: { id: 'NoEvT', name: 'NoEvT', kind: 'f', status: 'tested', abilities: [{ kind: 'static', effects: [{ ce: 'prohibit', action: { kinds: ['イベント'], by: 'any' } }] }] },
     P: { id: 'P', name: 'P', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Zap', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [{ slot: 't', chooser: 'you', pick: { cards: { zone: 'field', side: 'opponent', class: 'キャラ', excludeLeader: true } }, count: [1, 1], mode: 'target', when: 'declare' }], effect: [{ op: 'damage', to: { ref: 'slot', slot: 't' }, amount: 1 }] }] },
     Hit: DEFS.Hit,
+    GC: {
+      id: 'GC',
+      name: 'GC',
+      kind: 'c',
+      status: 'draft',
+      abilities: [
+        { kind: 'activated', name: 'Gen1', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'generateCost', icons: ['W', 'W'] }] },
+        { kind: 'activated', name: 'Gen2', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'generateCost', icons: { callCostOf: self, extra: ['W'] } }] },
+      ],
+    },
   }
   const ctx3 = { cards: Object.fromEntries(R3I.map((c) => [c.id, c])), defs: R3D }
   const base3 = (cs: CardInstance[]) => ({ ...board([card('LA', 'A', 'leader', { kiryoku: 10 }), card('LB', 'B', 'leader', { kiryoku: 10 }), card('dA', 'A', 'deck'), card('dB', 'B', 'deck'), ...cs]), mode: 'engine' as const })
@@ -464,6 +475,35 @@ function battleStart(battleCard: string): History {
       ['LA', 'Q'].sort(),
       '㉑ D24: charType 除外の Selector はキャラタイプ「ロボ」を持つカード（Robo2）を候補から外す（他の味方キャラは候補のまま）',
     )
+  }
+
+  // D21 generateCost（効果でコストを発生させる。得たコストは frameId 無し＝すぐ「その他の代償」として使える 7-3）
+  {
+    let g = drive(base3([card('GC', 'A', 'char')]), ctx3).state
+    // 実戦では自動見送り（shouldAutoPass）を満たす窓だけクライアントが procPass を自動で送る（自分のメインフェイズは
+    // 送らない＝R3⑤・DESIGN §5.3）。ここではそれを模して、宣言した能力の処理が終わって自分のメインフェイズに
+    // 戻る（＝もう自動見送りの対象でない）ところまでだけ見送りきる
+    const settle = (s: BoardState): BoardState => {
+      let cur = s
+      for (let i = 0; i < 50; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat || !shouldAutoPass(cur, ctx3, seat)) break
+        const e = applyEngineReq(hist(cur), ctx3, { kind: 'pass', by: seat, auto: true })
+        if (!e.ok) break
+        cur = e.history.present
+      }
+      return cur
+    }
+    const useAbility = (s: BoardState, ability: string): BoardState => {
+      const ea = applyEngineReq(hist(s), ctx3, { kind: 'declare', req: { by: 'A', source: 'GC', ability } })
+      if (!ea.ok) throw new Error(`${ability} declare failed: ${ea.reason}`)
+      return settle(ea.history.present)
+    }
+    g = useAbility(g, 'Gen1')
+    eq(g.costs.A.map((t) => t.icon), ['W', 'W'], '㉒a D21 generateCost（固定の並び）: [WW] が「その他の代償」として発生する（frameId 無し）')
+    eq(g.costs.A.every((t) => t.frameId === null), true, '㉒a′ 発生したコストは frameId 無し（宣言の途中に縛られない・すぐ使える）')
+    g = useAbility(g, 'Gen2')
+    eq(g.costs.A.map((t) => t.icon), ['W', 'W', 'W', 'W', 'W'], '㉒b D21 generateCost（callCostOf・D22 サクリファイスと同じ形）: GC の印刷コスト[WW]＋extra[W]＝[WWW] が追加で発生する')
   }
 
   // D2（12-2 但し書き oldrule.txt:509-510）: バトルカードは、バトルが行われている限りカードの有無は問われず、バトルが行われている間有効
