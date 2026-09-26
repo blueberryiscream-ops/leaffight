@@ -24,7 +24,7 @@
 //   10-4 エントリーフェイズ [1]〜[5]（384-389）／10-7 手札調整フェイズ [1]〜[4]（430-435）／10-8 ターン終了（436-441）
 //   7-2[3]《コストを発生するとき》の窓は宣言の段で開く（244-250・統括11 の検証 C19）
 
-import { cardsInZone, moveCard, type BoardState, type CardInstance, type Seat, type ZoneId } from './board'
+import { cardsInZone, moveCard, type BoardState, type CardInstance, type Layer, type Seat, type ZoneId } from './board'
 import type { CostKind } from './types'
 
 // ───────────────────────────────────────────────────────────────
@@ -158,17 +158,8 @@ export interface BattleState {
   endTrash: string[]
 }
 
-/** 修正の記録（R2b。層 K3 は R3）。[28] は攻防修正と「バトル終了時まで」を失わせる。10-8 は能力値修正を失わせる */
-export interface ProcMod {
-  id: string
-  iid: string
-  /** 能力値（力早賢根感）か、攻防（atk・def） */
-  stat: string
-  delta: number
-  kind: '能力値修正' | '攻防修正'
-  until: 'turn' | 'battle'
-  battleId: string | null
-}
+/** 層を足すときの形（id・seq・battleId は core が決める。battleId は until battle か攻防修正のとき最も近いバトル）。R3 で R2b の ProcMod を置き換えた */
+export type LayerSeed = Omit<Layer, 'id' | 'seq' | 'battleId'>
 
 /** 終わったバトルの記録（FAQ テストの battleCard・battleAborted と画面のログ用） */
 export interface BattleLog {
@@ -306,8 +297,6 @@ export interface ProcMeta {
   leaderLost: Seat[]
   /** 立ち消え・中断した宣言の id と理由 */
   aborted: { declId: string; reason: string }[]
-  /** 修正の記録（R2b。層は R3） */
-  mods: ProcMod[]
   /** 終わったバトル */
   battles: BattleLog[]
   /** このフェイズの段（エントリー・手札調整・ターン終了）を始めたか。null＝まだ */
@@ -1020,7 +1009,8 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       return setFrame(state, advance(frame))
     case 5: {
       // [5] バトルを行うための条件（20-3）: 選択可能なバトルカードが1枚以上・自分のフィールドに待機状態のキャラが1体以上
-      const card = Object.values(state.cards).some((x) => x.zone === 'battle' && !x.used)
+      // 使用できないバトルカード（効果による・R3）は「選択可能な」に入れない
+      const card = Object.values(state.cards).some((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid))
       const ready = fieldChars(state, c).some((x) => x.orientation === 'ready')
       if (!card) return abortBattle(state, frame, '選択可能なバトルカードが無い（20-3・20-4[5]）', trace)
       if (!ready) return abortBattle(state, frame, '待機状態のキャラがいない（20-3・20-4[5]）', trace)
@@ -1059,7 +1049,7 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 16: {
       // 【利用者の決定】バトル種目は挑んだ側が選ぶ（DESIGN §4.10）。カードの効果で先に決まっていたら選ばない（21）
       if (b.cardDecided) return setFrame(state, advance(frame))
-      const opts = Object.values(state.cards).filter((x) => x.zone === 'battle' && !x.used)
+      const opts = Object.values(state.cards).filter((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid))
       if (opts.length === 0) return abortBattle(state, frame, 'バトルカードが選択できない（20-4[16]）', trace)
       return coreChoice(state, frame, { by: c, kind: 'select', purpose: 'battleCard', prompt: 'バトル種目（20-4[16]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
@@ -1150,13 +1140,16 @@ function battleDamageStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[
   return pushDamages(resume(state, 2), [sd])
 }
 
-/** [28] バトル中断・終了時の処理: 攻防修正を失わせる・「バトル終了時まで」の効果を失わせる（《バトル終了時》の効果はエンジンのタイミングの処理） */
+/**
+ * [28] バトル中断・終了時の処理: 攻防修正を失わせる・「バトル終了時まで」の効果を失わせる（《バトル終了時》の効果はエンジンのタイミングの処理）。
+ * 継続効果の層（R3）: 常時効果（whileSource）の攻防修正は発生源がある限り続く（12-2）ので、ここでは外さない（エンジンが発生源を見て外す）
+ */
 function battleEndCleanup(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
   const b = frame.battle!
-  const before = state.procMeta.mods.length
-  const mods = state.procMeta.mods.filter((m) => !(m.kind === '攻防修正' || (m.until === 'battle' && (m.battleId === frame.id || m.battleId === null))))
-  let s = setMeta(state, { mods })
-  if (before !== mods.length) trace.push({ kind: 'name', text: `攻防修正・バトル終了時までの効果を失わせた:${before - mods.length}` })
+  const list = state.layers.list
+  const keep = list.filter((m) => !((m.kind === '攻防修正' && m.until !== 'whileSource') || (m.until === 'battle' && (m.battleId === frame.id || m.battleId === null))))
+  let s: BoardState = keep.length === list.length ? state : { ...state, layers: { ...state.layers, list: keep } }
+  if (keep.length !== list.length) trace.push({ kind: 'name', text: `攻防修正・バトル終了時までの効果を失わせた:${list.length - keep.length}` })
   for (const iid of b.endTrash) if (s.cards[iid]?.zone === 'battle') s = moveTo(s, iid, 'trash')
   return s
 }
@@ -1199,17 +1192,20 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
     }
     return setFrame(state, advance(frame))
   }
-  // turnEnd [2]: コストの破棄・能力値修正を失わせる（10-8）。【１ターンにｎ回まで】の数え直し
+  // turnEnd [2]: コストの破棄・能力値修正を失わせる処理・《ターン終了時》に失われる効果の処理（10-8）。【１ターンにｎ回まで】の数え直し
+  // 継続効果の層（R3）: 常時効果（whileSource）の能力値修正は発生源がある限り続く（12-2）ので外さない
   if (frame.step === 2) {
-    const mods = state.procMeta.mods.filter((m) => m.kind !== '能力値修正' && m.until !== 'turn')
+    const list = state.layers.list.filter((m) => m.until !== 'turn' && !(m.kind === '能力値修正' && m.until !== 'whileSource'))
     trace.push({ kind: 'name', text: 'ターン終了の処理（10-8）' })
-    return setFrame(setMeta({ ...state, costs: { A: [], B: [] } }, { mods, used: {} }), advance(frame))
+    return setFrame(setMeta({ ...state, costs: { A: [], B: [] }, layers: { ...state.layers, list } }, { used: {} }), advance(frame))
   }
   return setFrame(state, advance(frame))
 }
 
 /** core の選択の答えを当てる */
 function applyCoreChoice(state: BoardState, ch: ProcChoice, pick: string[], trace: ProcTrace[]): BoardState {
+  // 場の制限の是正（15-2・17-1・17-2・19-1。K12・R3）: 選んだカードをゴミ箱送り（手順のフレームに属さない）
+  if (ch.purpose === 'limitTrash') return limitTrash(state, pick, trace)
   const frame = ch.frameId ? findFrame(state, ch.frameId) : undefined
   if (!frame) return state
   const b = frame.battle
@@ -1251,6 +1247,18 @@ function applyCoreChoice(state: BoardState, ch: ProcChoice, pick: string[], trac
     default:
       return state
   }
+}
+
+/** 場の制限を満たすためのゴミ箱送り（ダウンではない）。リーダーはゴミ箱送りにしない */
+function limitTrash(state: BoardState, iids: string[], trace: ProcTrace[]): BoardState {
+  let s = state
+  for (const iid of iids) {
+    const c = s.cards[iid]
+    if (!c || c.zone === 'leader' || (c.zone !== 'char' && c.zone !== 'battle')) continue
+    trace.push({ kind: 'name', text: `場の制限:${iid}`, id: `limit:${iid}` })
+    s = moveTo(s, iid, 'trash')
+  }
+  return s
 }
 
 function enterAction(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
@@ -1772,7 +1780,15 @@ export type ProcAction =
   | { type: 'procDraw'; seat: Seat; n: number }
   | { type: 'procAddDowns'; seat: Seat; n: number }
   | { type: 'procCancelDown'; frameId: string }
-  | { type: 'procDamageEdit'; frameId: string; recipient?: string; delta?: number; all?: boolean }
+  | {
+      type: 'procDamageEdit'
+      frameId: string
+      recipient?: string
+      delta?: number
+      all?: boolean
+      /** 受け手がこのダメージを受けない（継続効果「ダメージを受けない」。15-4-2[5] の前＝身代わりの後 FAQ:1706）。値は理由 */
+      prevent?: string
+    }
   | { type: 'procCounter'; frameId: string }
   | { type: 'procTrace'; entry: ProcTrace }
   /** 状況を作る（FAQ テストの force・画面の手動）: 同時処理の効果を1つ積む */
@@ -1796,8 +1812,25 @@ export type ProcAction =
   | { type: 'procStartBattle'; by: Seat; id: string }
   /** 効果でアイテムを移し替える（「アイテムの装備と同じ扱い」FAQ:804・2874）。17-3[11] から */
   | { type: 'procTransfer'; by: Seat; item: string; to: string; id: string }
-  /** 修正の記録（能力値修正・攻防修正。層は R3） */
-  | { type: 'procMod'; iid: string; stat: string; delta: number; kind: ProcMod['kind']; until: ProcMod['until'] }
+  /**
+   * 継続効果の層（K3・R3）: 層を足す・外す・中身を書き換える。エンジンの控え（bound・unusable）を置く。
+   * clamp＝気力を上限まで下げる（15-4「気力は気力上限以上の値はとりません」。ダメージでも気力の減少でもない FAQ:249・4203）。
+   * orient＝効果で状態を戻す（「常に消耗状態」FAQ:2476・3184）
+   */
+  | {
+      type: 'procLayers'
+      add?: LayerSeed[]
+      remove?: string[]
+      update?: { id: string; body: Record<string, unknown> }[]
+      bound?: Record<string, string | null>
+      unusable?: string[]
+      clamp?: { iid: string; value: number }[]
+      orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
+    }
+  /** 場の制限の是正（K12）: 選ぶ余地が無いときのゴミ箱送り（選ぶときは procChoice の purpose limitTrash） */
+  | { type: 'procLimitTrash'; iids: string[]; reason: string }
+  /** アイテムを付け替える（《替え玉》の交換。同時に行う）。装備の手順ではない */
+  | { type: 'procAttach'; moves: { item: string; to: string }[] }
   /** 効果でキャラをダウンさせる（15-5 のダウン処理を起こす。《サクリファイス》） */
   | { type: 'procDown'; iid: string }
   /** そのフェイズの段を始める（エントリー 10-4・手札調整 10-7）。エンジンの drive が出す */
@@ -1825,6 +1858,45 @@ export function validChoicePick(ch: ProcChoice, pick: string[]): boolean {
     if (ch.caps && count[k] > (ch.caps[k] ?? 0)) return false
   }
   return pick.length >= ch.min && pick.length <= ch.max
+}
+
+/** 継続効果の層の出し入れ（K3・R3）。中身は読まない */
+function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLayers' }>, trace: ProcTrace[]): { state: BoardState; log: string } {
+  let s = state
+  let list = s.layers.list
+  if (a.remove?.length) list = list.filter((l) => !a.remove!.includes(l.id))
+  for (const u of a.update ?? []) list = list.map((l) => (l.id === u.id ? { ...l, body: u.body } : l))
+  for (const seed of a.add ?? []) {
+    const [s2, id] = nextId(s, 'L')
+    s = s2
+    const battleId = seed.until === 'battle' || seed.kind === '攻防修正' ? nearestBattle(s)?.id ?? null : null
+    list = [...list, { ...seed, id, seq: s.procMeta.seq, battleId }]
+    if (seed.kind && seed.ability === null) trace.push({ kind: 'name', text: `修正:${seed.targets.join(',')}:${seed.label}` })
+  }
+  let bound = s.layers.bound
+  if (a.bound) {
+    bound = { ...bound }
+    for (const [k, v] of Object.entries(a.bound)) {
+      if (v === null) delete bound[k]
+      else bound[k] = v
+    }
+  }
+  const unusable = a.unusable ?? s.layers.unusable
+  s = { ...s, layers: { list, bound, unusable } }
+  if (a.clamp?.length || a.orient?.length) {
+    const cards = { ...s.cards }
+    for (const c of a.clamp ?? []) {
+      const k = cards[c.iid]?.kiryoku
+      if (k !== null && k !== undefined && k > c.value) cards[c.iid] = { ...cards[c.iid], kiryoku: c.value }
+    }
+    for (const o of a.orient ?? []) {
+      if (!cards[o.iid] || cards[o.iid].orientation === o.to) continue
+      cards[o.iid] = { ...cards[o.iid], orientation: o.to }
+      trace.push({ kind: 'name', text: `${o.to === 'rested' ? '消耗' : '待機'}（${o.why}）:${o.iid}` })
+    }
+    s = { ...s, cards }
+  }
+  return { state: s, log: '' }
 }
 
 export function applyProc(state: BoardState, action: ProcAction): ProcResult {
@@ -2009,12 +2081,20 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const decl: ProcDecl = { id: action.id, by: action.by, kind: 'equip', actionType: '割込型', label: `移し替え:${item.cardId}`, sourceIid: item.iid, targets: [action.to], costGens: [], sources: [], trigger: null, usageKey: null, eng: { cardId: item.cardId }, equipTo: action.to }
       return { state: pushDeclFrame(state, decl, { step: 11, transfer: true }), log: `${item.cardId} を移し替える` }
     }
-    case 'procMod': {
-      const [s, id] = nextId(state, 'mod')
-      const battleId = action.until === 'battle' || action.kind === '攻防修正' ? nearestBattle(s)?.id ?? null : null
-      const mod: ProcMod = { id, iid: action.iid, stat: action.stat, delta: action.delta, kind: action.kind, until: action.until, battleId }
-      trace.push({ kind: 'name', text: `修正:${action.iid}:${action.stat}${action.delta >= 0 ? '+' : ''}${action.delta}` })
-      return { state: setMeta(s, { mods: [...s.procMeta.mods, mod] }), log: `${action.kind} ${action.stat}${action.delta >= 0 ? '+' : ''}${action.delta}` }
+    case 'procLayers':
+      return applyLayers(state, action, trace)
+    case 'procLimitTrash':
+      return { state: limitTrash(state, action.iids, trace), log: `場の制限を満たすためにゴミ箱送り（${action.reason}）` }
+    case 'procAttach': {
+      // 同時に付け替える。付け替えたアイテムは装備の順の一番最後（FAQ:1484）
+      for (const m of action.moves) if (!state.cards[m.item]?.attachedTo || !state.cards[m.to]) return null
+      const cards = { ...state.cards }
+      for (const m of action.moves) {
+        const last = Object.values(cards).filter((c) => c.attachedTo === m.to).reduce((a, c) => Math.max(a, c.index), 99)
+        cards[m.item] = { ...cards[m.item], attachedTo: m.to, index: last + 1 }
+        trace.push({ kind: 'name', text: `付け替え:${m.item}→${m.to}` })
+      }
+      return { state: { ...state, cards }, log: 'アイテムを付け替えた' }
     }
     case 'procDown': {
       if (!onField(state.cards[action.iid])) return { state, log: '' }
@@ -2119,6 +2199,10 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!f || f.kind !== 'damage') return null
       const d = f.damage!
       let s = state
+      if (action.prevent) {
+        trace.push({ kind: 'name', text: `受けない:${d.recipient}:${action.prevent}` })
+        return { state: setFrame(s, { ...f, status: 'done', window: null }), log: `ダメージを受けない（${action.prevent}）` }
+      }
       if (action.recipient && action.recipient !== d.recipient) {
         trace.push({ kind: 'name', text: `受け手の差し替え:${d.recipient}→${action.recipient}` })
         s = setFrame(s, { ...f, damage: { ...d, recipient: action.recipient, rerun: true, origRecipient: d.origRecipient ?? d.recipient } })

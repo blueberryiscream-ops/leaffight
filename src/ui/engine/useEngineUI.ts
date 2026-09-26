@@ -4,6 +4,7 @@
  * このクライアントだけの状態（組み立て中の宣言・選択中の答え）。共有状態には入れない。合法かどうかは declare の答えだけを使う。
  * 入口: 手札ドラッグ（startFor）／DetailPanel・右クリックの「宣言」（declsFor）／EngineBar のボタン。
  * 流れ: 対象（宣言者が指定するもの）→ 支払い（毎回自分で選ぶ。例外は聞かない）→ 宣言の要求。
+ * R3: 宣言がカードの効果による禁止・対象にならない等（K4）に当たるときは、送る前に「警告: 〜（根拠）。それでも宣言する？」と確かめる（stage 'warn'）。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -17,10 +18,12 @@ import { legalDeclarations, paymentNeed, paymentReady, targetsNeeded, type Legal
 export interface Draft {
   req: DeclareReq
   label: string
-  stage: 'target' | 'pay'
+  stage: 'target' | 'pay' | 'warn'
   specs: TargetSpec[]
   picked: string[]
   need: PaymentNeed | null
+  /** stage 'warn': 当たっている禁止・対象にならない等（K4）の文 */
+  warn?: string[]
 }
 
 export interface EngineUI {
@@ -38,6 +41,8 @@ export interface EngineUI {
   cancel: () => void
   /** 対象の指定を終えて支払いへ */
   confirmTargets: () => void
+  /** 警告（K4）を確かめたうえで宣言を送る */
+  confirmWarn: () => void
   togglePool: (id: string) => void
   submitPay: () => void
   payReady: boolean
@@ -71,23 +76,38 @@ export function useEngineUI({
   const [pick, setPick] = useState<string[]>([])
   const [notice, setNotice] = useState<string | null>(null)
 
-  const legal = useMemo(() => (on && ctx ? legalDeclarations(board, ctx, actor) : []), [on, ctx, board, actor])
+  // 画面のボタンには警告つきの宣言も出す（押すと確認する）。自動見送りは違反のある宣言を数えない（host.shouldAutoPass）
+  const legal = useMemo(() => (on && ctx ? legalDeclarations(board, ctx, actor, { withWarned: true }) : []), [on, ctx, board, actor])
   // 盤面が変わったら組み立て中の宣言は捨てる（古い盤面の前提で送らない）
   useEffect(() => setDraft(null), [board])
   useEffect(() => setPick([]), [ch?.id])
+
+  /** 送る前に K4 の違反を確かめる（あれば確認の帯へ） */
+  const send = useCallback(
+    (req: DeclareReq, label: string, specs: TargetSpec[]) => {
+      if (!ctx) return
+      const r = declare(board, ctx, req)
+      if (r.ok && r.violations.length) {
+        setDraft({ req, label, stage: 'warn', specs, picked: req.targets ?? [], need: null, warn: r.violations.map((v) => v.text) })
+        return
+      }
+      setDraft(null)
+      engineRequest({ kind: 'declare', req })
+    },
+    [board, ctx, engineRequest],
+  )
 
   const toPay = useCallback(
     (req: DeclareReq, label: string, specs: TargetSpec[]) => {
       if (!ctx) return
       const need = paymentNeed(board, ctx, req)
       if (!need.choose) {
-        setDraft(null)
-        engineRequest({ kind: 'declare', req: need.autoPool ? { ...req, payPool: need.autoPool } : req })
+        send(need.autoPool ? { ...req, payPool: need.autoPool } : req, label, specs)
         return
       }
       setDraft({ req: { ...req, payWith: [], payPool: [] }, label, stage: 'pay', specs, picked: req.targets ?? [], need })
     },
-    [board, ctx, engineRequest],
+    [board, ctx, send],
   )
 
   const start = useCallback(
@@ -113,6 +133,8 @@ export function useEngineUI({
       if (d) return start(d)
       // 宣言できない理由（declare の答え）を出す。手札のカードの名前は自分にだけ見える帯に出る
       const r = declare(board, ctx, { by: actor, source: iid })
+      // 警告（K4）だけなら宣言を始める（送る前に確認する）
+      if (r.ok && r.violations.length) return start({ req: { by: actor, source: iid }, label: ctx.cards[board.cards[iid]?.cardId ?? '']?.name ?? iid, violations: r.violations })
       setNotice(r.ok ? '今は宣言できない' : r.missingDef ? 'このカードは手動で（カードの記述が無い）' : r.reason)
     },
     [legal, ctx, board, actor, start],
@@ -159,7 +181,7 @@ export function useEngineUI({
     if (ch && ch.by === actor && ch.options.some((o) => o.key === iid)) {
       const n = pick.filter((k) => k === iid).length
       // バトルの選択は何を選んでいるかを札に出す（[7][11] 参加・[16] 種目）
-      const label = ch.purpose === 'battleParticipant' ? '参加' : ch.purpose === 'battleCard' ? '種目' : '選択'
+      const label = ch.purpose === 'battleParticipant' ? '参加' : ch.purpose === 'battleCard' ? '種目' : ch.purpose === 'limitTrash' ? 'ゴミ箱' : '選択'
       return n ? { battleRing: 'selected', battleRingLabel: n > 1 ? `×${n}` : label } : { battleRing: 'candidate' }
     }
     return {}
@@ -180,6 +202,10 @@ export function useEngineUI({
     togglePool: (id: string) => draft?.stage === 'pay' && setDraft({ ...draft, req: { ...draft.req, payPool: toggleIn(draft.req.payPool ?? [], id) } }),
     submitPay: () => {
       if (!draft || draft.stage !== 'pay') return
+      send(draft.req, draft.label, draft.specs)
+    },
+    confirmWarn: () => {
+      if (!draft || draft.stage !== 'warn') return
       setDraft(null)
       engineRequest({ kind: 'declare', req: draft.req })
     },

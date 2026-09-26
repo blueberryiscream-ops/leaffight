@@ -1,0 +1,623 @@
+/*
+ * 継続効果の層（K3）・合法性の判定（K4）・場の制限の是正（K12） — DESIGN §5.4・PHASE-R3 §2
+ *
+ * 層（core の BoardState.layers）は「続く効果1つ＝層1枚」。core は入れ物・連番・期限だけを持ち、中身（body）はここが書いて読む:
+ *   - 効果で足した修正（statMod の Op）: body.mod = { stat, delta }（値は処理したときに決まる 12-1）
+ *   - 効果で足した継続効果（addContinuous の Op）: body.effect（DSL の Continuous）と body.env（評価の環境）。対象は足したときに決まる（targets）
+ *   - 常時効果（12-2。アイテム・フィールド・使用代償の無い特殊能力）: body.effect・body.ei。発生源がフィールドにある間だけ層がある
+ *     （syncActions が発生源を見て足し外しする＝発揮し始めた順の連番がつく）。対象は毎回導き出す
+ * 能力値・気力の上限・状態は、毎回「印刷値に層を連番の順で重ね、最後に人の手直しの層（board.modifiers）を重ねる」で導き出す。
+ *
+ * 原典: 12-1（oldrule.txt:493-500）・12-2（501-515）・10-8（436-441）・20-4[28]（1122-1125）・15-2（590-605）・15-4（612-617）・
+ *       17-1（846-853）・17-2（854-860）・17-5（892-898）・19-1（980-986）・11-3（485-486）・用語【～の対象にならない】（1178-1179）・【特殊能力を失う】（1176-1177）
+ */
+
+import type { BoardAction } from '../core/actions'
+import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
+import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
+import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Op, Selector } from './dsl'
+import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
+import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
+
+export const ATTRS: Attr[] = ['力', '早', '賢', '根', '感']
+
+/** 評価の環境の保存できる形（層の中身に入れる） */
+export interface EnvLite {
+  self: string | null
+  you: Seat
+  slots: Record<string, string[]>
+}
+
+/** 層の中身（engine の持ち物） */
+interface LayerBody {
+  /** 効果で足した修正（statMod の Op） */
+  mod?: { stat: string; delta: number }
+  /** 継続効果 */
+  effect?: Continuous
+  /** 効果で足した継続効果の評価の環境（常時効果は毎回 self＝発生源・you＝その使用者） */
+  env?: EnvLite
+  /** 常時効果: 能力の effects の番号 */
+  ei?: number
+  /** 足した行動の種類（《能力禁止》FAQ:606 は特殊能力の効果を失わせる） */
+  origin?: 'ability' | 'event' | 'static' | 'force'
+  /** stayRested: 消耗状態になって固定されたカード */
+  locked?: string[]
+}
+
+const bodyOf = (l: Layer) => l.body as LayerBody
+
+/** 効果で足した修正の層（statMod の Op・12-1）。期限: バトル終了時まで・攻防修正→ battle、それ以外→ turn */
+export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin']): LayerSeed {
+  return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: { stat, delta }, origin } }
+}
+
+// ───────────────────────────────────────────────────────────────
+// 導き出す（K3）
+// ───────────────────────────────────────────────────────────────
+
+interface Eff {
+  layer: Layer
+  effect: Continuous
+  env: Env
+}
+
+interface Derived {
+  ctx: EngineCtx
+  effs: Eff[]
+  /** 特殊能力を失っているキャラ */
+  lost: Set<string>
+}
+
+const cache = new WeakMap<BoardState, Derived>()
+
+function layerEnv(state: BoardState, l: Layer): Env {
+  const b = bodyOf(l)
+  if (l.ability !== null) {
+    const self = l.source
+    const you = (self ? controllerOf(state, self) : null) ?? l.by
+    return { self, you, slots: {}, trigger: null, declId: null, declared: {}, host: l.host }
+  }
+  const e = b.env ?? { self: l.source, you: l.by, slots: {} }
+  return { self: e.self, you: e.you, slots: e.slots, trigger: null, declId: null, declared: {} }
+}
+
+function derived(ctx: EngineCtx, state: BoardState): Derived {
+  const hit = cache.get(state)
+  if (hit && hit.ctx === ctx) return hit
+  const all: Eff[] = []
+  for (const l of [...state.layers.list].sort((a, b) => a.seq - b.seq)) {
+    const b = bodyOf(l)
+    if (!b.effect) continue
+    all.push({ layer: l, effect: b.effect, env: layerEnv(state, l) })
+  }
+  // 特殊能力を失う（《能力禁止》）: 失っているキャラの常時効果の層は効かない（常時効果の発生源が「特殊能力」＝キャラのものだけ）
+  const d0: Derived = { ctx, effs: all, lost: new Set() }
+  cache.set(state, d0)
+  const lost = new Set<string>()
+  for (const e of all) if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) lost.add(x)
+  const effs = all.filter((e) => !(e.layer.ability !== null && e.layer.source && lost.has(e.layer.source) && isCharOnField(state.cards[e.layer.source])))
+  const d: Derived = { ctx, effs, lost }
+  cache.set(state, d)
+  return d
+}
+
+/** 層の効果を得ているカード（効果で足した層は足したときの対象・常時効果は毎回導き出す） */
+function targetsOf(ctx: EngineCtx, state: BoardState, e: Eff): string[] {
+  if (e.layer.ability === null && e.layer.targets.length) return e.layer.targets.filter((x) => x in state.cards)
+  const who = (e.effect as { who?: CardRef | Selector }).who
+  if (!who) return []
+  return 'zone' in who ? select(ctx, state, e.env, who) : resolveRef(state, e.env, who)
+}
+
+function effectOn(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): boolean {
+  if (!targetsOf(ctx, state, e).includes(iid)) return false
+  const when = (e.effect as { when?: Parameters<typeof evalCond>[3] }).when
+  if (e.effect.ce !== 'prohibit' && when && !evalCond(ctx, state, e.env, when)) return false
+  // 【～の対象にならない】特殊能力: 特殊能力の常時効果（キャラの能力）の影響も受けない（《魔法のサークレット》FAQ:697・709）
+  if (e.layer.ability !== null && e.effect.ce !== 'untargetable' && e.effect.ce !== 'loseAbilities' && isCharSource(ctx, state, e.layer.source) && untargetableBy(ctx, state, iid, '特殊能力', e)) return false
+  return true
+}
+
+function isCharSource(ctx: EngineCtx, state: BoardState, iid: string | null): boolean {
+  const k = iid ? ctx.cards[state.cards[iid]?.cardId ?? '']?.kind : undefined
+  return k === 'c' || k === 't'
+}
+
+/** そのカードが、その種類の行動の対象にならないか（層の untargetable）。skip＝判定中の効果（自分で自分を調べない） */
+function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff): Eff | null {
+  for (const e of derived(ctx, state).effs) {
+    if (e === skip || e.effect.ce !== 'untargetable' || !e.effect.by.kinds.includes(kind)) continue
+    if (targetsOf(ctx, state, e).includes(iid)) return e
+  }
+  return null
+}
+
+/** 今の能力値（K3）: 印刷値に層を連番の順で重ね（修正の足し引き・性格反転 H-6＝今の値を入れ替える）、最後に手直しの層を重ねる */
+export function currentStat(ctx: EngineCtx, state: BoardState, iid: string, stat: string): number {
+  return currentStats(ctx, state, iid)[stat] ?? 0
+}
+
+export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Record<string, number> {
+  const c = state.cards[iid]
+  const printed = c ? ctx.cards[c.cardId]?.stats ?? null : null
+  const v: Record<string, number> = {}
+  for (const a of ATTRS) v[a] = printed?.[a] ?? 0
+  if (!c) return v
+  const d = derived(ctx, state)
+  // 層を連番の順に（効果で足した修正と継続効果を混ぜて並べる）
+  const items: { seq: number; run: () => void }[] = []
+  for (const l of state.layers.list) {
+    const m = bodyOf(l).mod
+    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v) items.push({ seq: l.seq, run: () => (v[m.stat] += m.delta) })
+  }
+  for (const e of d.effs) {
+    const f = e.effect
+    if (f.ce === 'statMod' && f.kind === '能力値修正') {
+      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
+    } else if (f.ce === 'statSwap') {
+      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && swapMaxMin(v) })
+    }
+  }
+  items.sort((a, b) => a.seq - b.seq).forEach((x) => x.run())
+  // 人の手直しの層（最後に・連番の順）
+  for (const m of manualMods(state, iid)) if (m.kind === '能力値修正' && m.stat && m.delta !== undefined) v[m.stat] += m.delta
+  return v
+}
+
+/** H-6（利用者 2026-09-25）: 最高値と最低値を今の値で入れ替える。並びが同じなら原典の能力値の順（力早賢根感）で先のもの【決めたこと】 */
+function swapMaxMin(v: Record<string, number>): boolean {
+  let hi = ATTRS[0]
+  let lo = ATTRS[0]
+  for (const a of ATTRS) {
+    if (v[a] > v[hi]) hi = a
+    if (v[a] < v[lo]) lo = a
+  }
+  if (hi !== lo) [v[hi], v[lo]] = [v[lo], v[hi]]
+  return true
+}
+
+function manualMods(state: BoardState, iid: string) {
+  return Object.values(state.modifiers)
+    .filter((m) => m.targetIid === iid)
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+}
+
+/** 攻防修正の合計（atk・def）: 効果で足した攻防修正の層＋手直しの層の攻防修正 */
+export function battleMod(ctx: EngineCtx, state: BoardState, iid: string, side: 'atk' | 'def'): number {
+  void ctx
+  let n = 0
+  for (const l of state.layers.list) {
+    const m = bodyOf(l).mod
+    if (m && l.kind === '攻防修正' && m.stat === side && l.targets.includes(iid)) n += m.delta
+  }
+  for (const m of manualMods(state, iid)) if (m.kind === '攻防修正' && m.battleStat === side && m.delta !== undefined) n += m.delta
+  return n
+}
+
+/** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
+export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): number | null {
+  const c = state.cards[iid]
+  const info = c ? ctx.cards[c.cardId] : undefined
+  if (!c || !info || info.kiryoku === null) return null
+  let v = c.zone === 'leader' ? info.kiryoku * 2 : info.kiryoku
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'maxKiryoku' || !effectOn(ctx, state, e, iid)) continue
+    if (f.set !== undefined) v = f.set
+    if (f.delta !== undefined) v += f.delta
+  }
+  return v
+}
+
+/** 特殊能力を失っているか（《能力禁止》など） */
+export function abilitiesLost(ctx: EngineCtx, state: BoardState, iid: string): boolean {
+  return derived(ctx, state).lost.has(iid)
+}
+
+/** 層の一覧（画面の表示用）: そのカードに効いている層の名前 */
+export function layersOn(ctx: EngineCtx, state: BoardState, iid: string): string[] {
+  const out: string[] = []
+  for (const l of state.layers.list) if (bodyOf(l).mod && l.targets.includes(iid)) out.push(l.label)
+  for (const e of derived(ctx, state).effs) if (effectOn(ctx, state, e, iid)) out.push(e.layer.label)
+  return out
+}
+
+/**
+ * ダメージを受けない（15-4-2[5] の前。身代わり [4] の後 FAQ:1706）: 進行中のダメージ1件の受け手・発生元に掛かる preventDamage。
+ * 当たれば理由（層の名前）
+ */
+export function damagePrevented(ctx: EngineCtx, state: BoardState, frame: ProcFrame): string | null {
+  const dmg = frame.damage
+  if (!dmg) return null
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'preventDamage') continue
+    if (f.battle === 'only' && !dmg.battle) continue
+    if (f.battle === 'except' && dmg.battle) continue
+    const recv = effectOn(ctx, state, e, dmg.recipient)
+    const deal = !!f.deal && !!dmg.dealerIid && effectOn(ctx, state, e, dmg.dealerIid)
+    if (!recv && !deal) continue
+    if (recv && f.from) {
+      if (!dmg.dealerIid || !evalCond(ctx, state, { ...e.env, it: dmg.dealerIid }, f.from)) {
+        if (!deal) continue
+      }
+    }
+    return e.layer.label
+  }
+  return null
+}
+
+// ───────────────────────────────────────────────────────────────
+// 合法性（K4）: 禁止・強制・対象にならない。違反は警告（止めない。DESIGN §5.4「段階」）
+// ───────────────────────────────────────────────────────────────
+
+export interface Violation {
+  kind: 'prohibit' | 'mandate' | 'untargetable' | 'lostAbility' | 'equipTarget'
+  /** 画面に出す文（根拠つき） */
+  text: string
+  /** 根拠の層（効果）の名前 */
+  source: string
+}
+
+const ACTION_KIND: Record<ProcDecl['kind'], ActionPattern['kinds'][number]> = {
+  ability: '特殊能力',
+  event: 'イベント',
+  costGen: 'コスト発生',
+  equip: 'アイテム装備',
+  call: 'キャラ呼び出し',
+  tag: 'タッグ化',
+  field: 'フィールド配置',
+  battleCard: 'バトル配置',
+  battle: 'バトル',
+}
+
+/** 宣言が層の「禁止・対象にならない・特殊能力を失っている」に当たるか（宣言[1]〜[5] を済ませた ProcDecl で調べる） */
+export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): Violation[] {
+  const out: Violation[] = []
+  const kind = ACTION_KIND[decl.kind]
+  const d = derived(ctx, state)
+  const name = (iid: string) => ctx.cards[state.cards[iid]?.cardId ?? '']?.name ?? iid
+  for (const e of d.effs) {
+    const f = e.effect
+    if (f.ce !== 'prohibit' || !f.action.kinds.includes(kind)) continue
+    if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
+    if (!patternHits(ctx, state, e, f.action, decl)) continue
+    out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label })
+  }
+  for (const t of decl.targets) {
+    const u = untargetableBy(ctx, state, t, kind)
+    if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label })
+  }
+  if (decl.kind === 'ability' && decl.sourceIid && d.lost.has(decl.sourceIid)) {
+    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っている（【特殊能力を失う】）`, source: '特殊能力を失う' })
+  }
+  if (decl.kind === 'equip' && decl.sourceIid && decl.equipTo) {
+    const why = equipProblem(ctx, state, state.cards[decl.sourceIid], decl.equipTo, decl.by)
+    if (why) out.push({ kind: 'equipTarget', text: `${name(decl.sourceIid)}は${name(decl.equipTo)}に装備できない（${why}・17-1）`, source: name(decl.sourceIid) })
+  }
+  return out
+}
+
+function patternHits(ctx: EngineCtx, state: BoardState, e: Eff, p: ActionPattern, decl: ProcDecl): boolean {
+  if (p.by && p.by !== 'any' && resolvePlayer(state, e.env, p.by) !== decl.by) return false
+  if (p.sourceIs) {
+    const xs = resolveRef(state, e.env, p.sourceIs)
+    if (!decl.sourceIid || !xs.includes(decl.sourceIid)) return false
+  }
+  if (p.sourceWhere && (!decl.sourceIid || !evalCond(ctx, state, { ...e.env, it: decl.sourceIid }, p.sourceWhere))) return false
+  if (p.targetWhere && !decl.targets.some((t) => evalCond(ctx, state, { ...e.env, it: t }, p.targetWhere!))) return false
+  return true
+}
+
+// ───────────────────────────────────────────────────────────────
+// 装備対象（17-1・17-5）
+// ───────────────────────────────────────────────────────────────
+
+/** アイテムの装備対象の問題（無ければ null）。by＝装備させるプレイヤー（宣言のとき） */
+function equipProblem(ctx: EngineCtx, state: BoardState, item: CardInstance | undefined, hostIid: string, by?: Seat): string | null {
+  if (!item) return null
+  const def: CardDef | undefined = ctx.defs[item.cardId]
+  const eq = def?.equip
+  const host = state.cards[hostIid]
+  if (!eq || !host) return null
+  if (eq.targetKind === 'バトルカード') return host.zone === 'battle' ? null : 'バトルカードに装備させるアイテム'
+  if (eq.targetKind === 'キャラ') {
+    if (!isCharOnField(host)) return 'フィールドのキャラでない'
+    if (eq.notLeader && host.zone === 'leader') return 'リーダーには装備できない'
+    if (eq.leaderOnly && host.zone !== 'leader') return 'リーダーのみ装備できる'
+    // 味方キャラのみ: 装備させるプレイヤー（宣言のとき）／アイテムの持ち主（付け替えのあと。使用権の移動 K8 は後）の味方【決めたこと】
+    if (eq.friendlyOnly && (by ?? item.owner) !== (controllerOf(state, hostIid) ?? host.owner)) return '味方キャラのみ装備できる'
+    const bound = state.layers.bound[item.iid]
+    if (eq.bound && bound && bound !== hostIid) return '装備対象はこのアイテムで選んだキャラ'
+  }
+  return null
+}
+
+// ───────────────────────────────────────────────────────────────
+// 層の足し外し（常時効果・期限）: drive が状態の変わるたびに呼ぶ
+// ───────────────────────────────────────────────────────────────
+
+/** 常時効果の発生源がフィールドにあるか（12-2）: キャラ・付いているアイテム（キャラ・バトルカードに）・フィールドカード・バトルカード */
+export function staticSourceActive(state: BoardState, iid: string): boolean {
+  const c = state.cards[iid]
+  if (!c) return false
+  if (c.zone === 'field' || (c.zone === 'battle' && !c.attachedTo)) return true
+  if (c.attachedTo) {
+    const h = state.cards[c.attachedTo]
+    return h?.zone === 'battle' || isCharOnField(h)
+  }
+  return isCharOnField(c)
+}
+
+function onFieldAny(c: CardInstance | undefined): boolean {
+  return !!c && (c.zone === 'char' || c.zone === 'leader' || c.zone === 'battle' || c.zone === 'field')
+}
+
+/**
+ * 状態に合わせて層を足し外しする BoardAction（無ければ空）:
+ *  - 常時効果: 発生源がフィールドにある（アイテムは装備対象を満たす 17-5）間だけ層がある。装備先が変わったら古い層を外して新しい層を足す
+ *  - 効果で足した層: 効果を得ていたカードが全部失われたら外す（12-1）。whileSource は発生源が失われたら外す（12-2）
+ *  - whenLost: 常時効果の層が「発生源が離れた・装備先が変わった」で外れたら、その Op を処理する（装備対象を満たせずに外れたときは処理しない FAQ:550）
+ *  - 装備対象が1枚に決まるアイテム（bound）の控え・使用できないバトルカードの控え・常に消耗状態・気力の上限を超えた気力
+ */
+export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
+  const list = state.layers.list
+  const add: LayerSeed[] = []
+  const remove: string[] = []
+  const lostOps: { ops: Op[]; env: Env; label: string; by: Seat }[] = []
+  // ── 常時効果
+  const want = new Map<string, { iid: string; index: number; ei: number; host: string | null; effect: Continuous; label: string }>()
+  const cards = Object.values(state.cards).sort((a, b) => (a.owner === b.owner ? rank(a) - rank(b) || a.index - b.index : a.owner < b.owner ? -1 : 1))
+  for (const c of cards) {
+    const def = ctx.defs[c.cardId]
+    if (!def || !staticSourceActive(state, c.iid)) continue
+    // 17-5: 装備対象を満たしていないアイテムの効果は発揮されない
+    if (c.attachedTo && equipProblem(ctx, state, c, c.attachedTo)) continue
+    def.abilities.forEach((ab, index) => {
+      if (ab.kind !== 'static') return
+      ab.effects.forEach((effect, ei) => {
+        if (effect.ce === 'manual' || effect.ce === 'exemptLimit') return
+        want.set(`${c.iid}#${index}#${ei}`, { iid: c.iid, index, ei, host: c.attachedTo, effect, label: ab.name ?? def.name })
+      })
+    })
+  }
+  const have = new Set<string>()
+  for (const l of list) {
+    if (l.ability === null) continue
+    const b = bodyOf(l)
+    const key = `${l.source}#${l.ability}#${b.ei ?? 0}`
+    const w = want.get(key)
+    if (w && w.host === l.host) {
+      have.add(key)
+      continue
+    }
+    remove.push(l.id)
+    // 発生源が離れた・装備先が変わった（装備対象を満たせなくなっただけのときは処理しない）
+    const src = l.source ? state.cards[l.source] : undefined
+    const mismatchOnly = !!src && staticSourceActive(state, src.iid) && src.attachedTo === l.host && !w
+    if (b.effect?.ce === 'whenLost' && !mismatchOnly) {
+      const env = layerEnv(state, l)
+      lostOps.push({ ops: b.effect.do, env: { ...env, host: l.host }, label: l.label, by: env.you })
+    }
+  }
+  for (const [key, w] of want) {
+    if (have.has(key)) continue
+    add.push({ source: w.iid, ability: w.index, by: controllerOf(state, w.iid) ?? state.cards[w.iid].owner, label: w.label, kind: w.effect.ce === 'statMod' ? w.effect.kind : null, until: 'whileSource', targets: [], host: w.host, body: { effect: w.effect, ei: w.ei, origin: 'static' } })
+  }
+  // ── 効果で足した層（12-1・12-2）
+  const participants = abilityLostChars(ctx, state)
+  for (const l of list) {
+    if (l.ability !== null || remove.includes(l.id)) continue
+    if (l.targets.length && !l.targets.some((x) => onFieldAny(state.cards[x]))) remove.push(l.id)
+    else if (l.until === 'whileSource' && l.source && !staticSourceActive(state, l.source)) remove.push(l.id)
+    // 《能力禁止》: 参加キャラに対して効果を発揮している特殊能力の効果は失われ、バトルの後も戻らない（FAQ:597・606）
+    else if (bodyOf(l).origin === 'ability' && l.targets.some((x) => participants.has(x))) remove.push(l.id)
+  }
+  // ── 控え: bound（装備対象が1枚に決まるアイテム）
+  const bound: Record<string, string | null> = {}
+  for (const c of Object.values(state.cards)) {
+    const eq = ctx.defs[c.cardId]?.equip
+    if (eq?.bound && c.attachedTo && !(c.iid in state.layers.bound)) bound[c.iid] = c.attachedTo
+  }
+  for (const k of Object.keys(state.layers.bound)) if (!state.cards[k]?.attachedTo) bound[k] = null
+  // ── 控え: 使用できないバトルカード
+  const unusable = new Set<string>()
+  const d = derived(ctx, state)
+  for (const e of d.effs) if (e.effect.ce === 'battleCardUnusable') for (const x of targetsOf(ctx, state, e)) unusable.add(x)
+  const unusableList = [...unusable].sort()
+  const unusableChanged = unusableList.join(',') !== [...state.layers.unusable].sort().join(',')
+  // ── 常に消耗状態（stayRested）
+  const orient: { iid: string; to: 'ready' | 'rested'; why: string }[] = []
+  const update: { id: string; body: Record<string, unknown> }[] = []
+  for (const e of d.effs) {
+    const f = e.effect
+    if (f.ce !== 'stayRested') continue
+    const b = bodyOf(e.layer)
+    const locked = new Set(b.locked ?? [])
+    let changed = false
+    for (const x of targetsOf(ctx, state, e)) {
+      const c = state.cards[x]
+      if (!isCharOnField(c)) continue
+      if (f.always || locked.has(x)) {
+        if (c.orientation === 'ready' && !orient.some((o) => o.iid === x)) orient.push({ iid: x, to: 'rested', why: e.layer.label })
+      } else if (c.orientation === 'rested') {
+        locked.add(x)
+        changed = true
+      }
+    }
+    if (changed) update.push({ id: e.layer.id, body: { ...b, locked: [...locked] } })
+  }
+  // ── 気力の上限を超えた気力（15-4・FAQ:249・4203）
+  const clamp: { iid: string; value: number }[] = []
+  for (const c of Object.values(state.cards)) {
+    if (!isCharOnField(c) || c.kiryoku === null) continue
+    const max = maxKiryokuOf(ctx, state, c.iid)
+    if (max !== null && c.kiryoku > max) clamp.push({ iid: c.iid, value: max })
+  }
+  const acts: BoardAction[] = []
+  const hasBound = Object.keys(bound).length > 0
+  if (add.length || remove.length || update.length || hasBound || unusableChanged || clamp.length || orient.length) {
+    acts.push({
+      type: 'procLayers',
+      ...(add.length ? { add } : {}),
+      ...(remove.length ? { remove } : {}),
+      ...(update.length ? { update } : {}),
+      ...(hasBound ? { bound } : {}),
+      ...(unusableChanged ? { unusable: unusableList } : {}),
+      ...(clamp.length ? { clamp } : {}),
+      ...(orient.length ? { orient } : {}),
+    })
+  }
+  // whenLost の Op は、どの宣言にも属さない効果として積む（その場で処理する）
+  for (const x of lostOps) acts.push(lostEffect(x.ops, x.env, x.label, x.by))
+  return acts
+}
+
+function rank(c: CardInstance): number {
+  if (c.attachedTo) return 2
+  return c.zone === 'leader' ? 0 : c.zone === 'char' ? 1 : 3
+}
+
+/** 特殊能力を失っているキャラ（《能力禁止》が効いているバトルの参加キャラ＝層の loseAbilities の対象） */
+function abilityLostChars(ctx: EngineCtx, state: BoardState): Set<string> {
+  return derived(ctx, state).lost
+}
+
+/** 効果の Op を、どの宣言にも属さない効果として積む（drive の forceOp と同じ形） */
+function lostEffect(ops: Op[], env: Env, label: string, by: Seat): BoardAction {
+  const eng = { tasks: ops.map((op) => ({ op })), env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
+  return { type: 'procStart', item: { key: `lost:${label}:${env.self}`, label: `${label}（効果が失われた）`, by, sourceIid: env.self, eng: eng as unknown as Record<string, unknown> } }
+}
+
+// ───────────────────────────────────────────────────────────────
+// 場の制限（K12）: 状態が変わるたびに判定し、違反なら使用権者に選ばせて是正する
+// ───────────────────────────────────────────────────────────────
+
+export interface LimitRule {
+  id: string
+  rule: string
+  where: string
+}
+
+/** 場の制限の表（原典の行つき。HANDOFF-R3 §7-4 と同じ） */
+export const LIMIT_RULES: LimitRule[] = [
+  { id: 'sameName', rule: '同名キャラ制限: 同じカード名のキャラは自分のフィールドに1体まで', where: '15-2 oldrule.txt:597-598' },
+  { id: 'component', rule: '構成要素キャラ制限: タッグとその構成要素キャラ・同じ構成要素を持つ別々のタッグはどちらか1体まで', where: '15-2 oldrule.txt:599-602' },
+  { id: 'charCount', rule: 'キャラ数制限: リーダーを除いて5体まで', where: '15-2 oldrule.txt:603-604' },
+  { id: 'equipTarget', rule: '装備対象: 装備対象と違う対象に装備されたアイテムはゴミ箱送り', where: '17-1 oldrule.txt:846-853' },
+  { id: 'equipSameName', rule: '装備制限（同名制限）: 1つの装備対象に同じカード名のアイテムは1枚まで', where: '17-2 oldrule.txt:854-860' },
+  { id: 'battleCards', rule: 'バトルカードの配置制限: 自分のフィールドに3枚まで', where: '19-1 oldrule.txt:980-986' },
+]
+
+function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'charCount' | 'sameName' | 'component'): boolean {
+  // 例外は DSL の exemptLimit（常時効果。カードの特性 FAQ:1962）
+  const c = state.cards[iid]
+  const def = c ? ctx.defs[c.cardId] : undefined
+  for (const ab of def?.abilities ?? []) {
+    if (ab.kind !== 'static') continue
+    for (const f of ab.effects) {
+      if (f.ce !== 'exemptLimit' || f.limit !== limit) continue
+      const env: Env = { self: iid, you: controllerOf(state, iid) ?? c!.owner, slots: {}, trigger: null, declId: null, declared: {} }
+      const xs = 'zone' in f.who ? select(ctx, state, env, f.who) : resolveRef(state, env, f.who)
+      if (xs.includes(iid)) return true
+    }
+  }
+  return false
+}
+
+interface LimitViolation {
+  seat: Seat
+  rule: LimitRule
+  options: string[]
+}
+
+/** 今の違反（AP の側から）。options＝ゴミ箱送りにする候補（制限を受けているものだけ FAQ:3299） */
+export function limitViolations(ctx: EngineCtx, state: BoardState): LimitViolation[] {
+  const out: LimitViolation[] = []
+  const ap = activeSeat(state)
+  const R = (id: string) => LIMIT_RULES.find((r) => r.id === id)!
+  const nameOf = (c: CardInstance) => ctx.cards[c.cardId]?.name ?? c.cardId
+  for (const seat of [ap, other(ap)]) {
+    const chars = Object.values(state.cards).filter((c) => isCharOnField(c) && (controllerOf(state, c.iid) ?? c.owner) === seat)
+    const trashable = (c: CardInstance) => c.zone !== 'leader'
+    // 同名キャラ制限
+    const byName = new Map<string, CardInstance[]>()
+    for (const c of chars) if (!exempt(ctx, state, c.iid, 'sameName')) byName.set(nameOf(c), [...(byName.get(nameOf(c)) ?? []), c])
+    for (const g of byName.values()) if (g.length > 1) out.push({ seat, rule: R('sameName'), options: g.filter(trashable).map((c) => c.iid) })
+    // 構成要素キャラ制限（タッグの名前は構成要素の名前を「＆」でつないだもの）
+    const tags = chars.filter((c) => ctx.cards[c.cardId]?.kind === 't' && !exempt(ctx, state, c.iid, 'component'))
+    for (const t of tags) {
+      const names = nameOf(t).split('＆')
+      const clash = chars.filter((c) => c.iid !== t.iid && !exempt(ctx, state, c.iid, 'component') && (names.includes(nameOf(c)) || (ctx.cards[c.cardId]?.kind === 't' && nameOf(c).split('＆').some((n) => names.includes(n)))))
+      if (clash.length) out.push({ seat, rule: R('component'), options: [t, ...clash].filter(trashable).map((c) => c.iid) })
+    }
+    // キャラ数制限（例外のキャラは数えず、選ばない FAQ:3329）
+    const counted = chars.filter((c) => c.zone !== 'leader' && !exempt(ctx, state, c.iid, 'charCount'))
+    if (counted.length > 5) out.push({ seat, rule: R('charCount'), options: counted.map((c) => c.iid) })
+    // アイテム（使用権者＝装備しているキャラ／バトルカードの使用者）
+    const items = Object.values(state.cards).filter((c) => c.attachedTo && staticSourceActive(state, c.iid) && (controllerOf(state, c.iid) ?? c.owner) === seat)
+    const bad = items.filter((c) => equipProblem(ctx, state, c, c.attachedTo!))
+    if (bad.length) out.push({ seat, rule: R('equipTarget'), options: bad.map((c) => c.iid) })
+    const byHost = new Map<string, CardInstance[]>()
+    for (const c of items) byHost.set(`${c.attachedTo}:${nameOf(c)}`, [...(byHost.get(`${c.attachedTo}:${nameOf(c)}`) ?? []), c])
+    for (const g of byHost.values()) if (g.length > 1) out.push({ seat, rule: R('equipSameName'), options: g.map((c) => c.iid) })
+    // バトルカード
+    const bcs = Object.values(state.cards).filter((c) => c.zone === 'battle' && c.owner === seat)
+    if (bcs.length > 3) out.push({ seat, rule: R('battleCards'), options: bcs.map((c) => c.iid) })
+  }
+  return out
+}
+
+/**
+ * 是正の1手（無ければ null）: 1枚ずつ選んでゴミ箱送り（15-2・17-1・17-2・19-1「１体（１枚）づつ選択して」）。
+ * 候補が1枚だけのときは聞かずに行う【決めたこと】。手順の選択を待っている間・ゲームが終わった後は行わない
+ */
+export function limitFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  if (state.result || state.procMeta.choice) return null
+  const v = limitViolations(ctx, state)[0]
+  if (!v || v.options.length === 0) return null
+  const reason = `${v.rule.rule}（${v.rule.where}）`
+  if (v.options.length === 1) return { type: 'procLimitTrash', iids: v.options, reason }
+  return {
+    type: 'procChoice',
+    choice: {
+      id: `limit:${state.procMeta.seq}:${v.rule.id}:${v.seat}`,
+      by: v.seat,
+      kind: 'select',
+      purpose: 'limitTrash',
+      prompt: `場の制限: ゴミ箱送りにする1枚を選ぶ — ${reason}`,
+      options: v.options.map((iid) => ({ key: iid, label: ctx.cards[state.cards[iid]?.cardId ?? '']?.name ?? iid })),
+      min: 1,
+      max: 1,
+      frameId: null,
+    },
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// 効果で層を足す（statMod・addContinuous の Op）
+// ───────────────────────────────────────────────────────────────
+
+/** addContinuous の Op の層（対象は足したときに決まる 12-1。期限は Duration から） */
+export function continuousSeed(ctx: EngineCtx, state: BoardState, env: Env, effect: Continuous, duration: 'turn' | 'battle' | 'whileSource', label: string, origin: LayerBody['origin']): LayerSeed {
+  const who = (effect as { who?: CardRef | Selector }).who
+  const targets = who ? ('zone' in who ? select(ctx, state, env, who) : resolveRef(state, env, who)) : []
+  return {
+    source: env.self,
+    ability: null,
+    by: env.you,
+    label,
+    kind: effect.ce === 'statMod' ? effect.kind : null,
+    until: duration,
+    targets,
+    host: null,
+    body: { effect, env: { self: env.self, you: env.you, slots: env.slots }, origin },
+  }
+}
+
+/** 看護（clearMods）: そのカードに効果で足した修正の層（12-1）の id */
+export function clearableMods(state: BoardState, iid: string, kind: '能力値修正' | '攻防修正'): string[] {
+  return state.layers.list.filter((l) => l.ability === null && l.kind === kind && l.targets.includes(iid)).map((l) => l.id)
+}
+
+

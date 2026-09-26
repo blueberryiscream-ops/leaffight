@@ -7,6 +7,7 @@ import type { BoardState, CardInstance, Seat } from '../core/board'
 import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
 import type { CardRef, Cond, Expr, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
+import { battleMod, currentStat } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
   if (typeof p === 'string') {
@@ -44,7 +45,8 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
     case 'slot':
       return (env.slots[r.slot] ?? []).filter((x) => x in state.cards)
     case 'equipped': {
-      const host = env.self ? state.cards[env.self]?.attachedTo : null
+      // 効果が失われたときの処理（whenLost）は、その層を足したときの装備先（env.host）を指す（R3）
+      const host = env.host !== undefined ? env.host : env.self ? state.cards[env.self]?.attachedTo : null
       return host ? [host] : []
     }
     case 'event': {
@@ -101,17 +103,12 @@ function opponentChars(state: BoardState, env: Env, iid: string | undefined): st
   return []
 }
 
-/** 今の能力値＝印刷値＋記録した能力値修正（R2b。層 K3・性格反転などは R3） */
-export function currentStat(ctx: EngineCtx, state: BoardState, iid: string, stat: string): number {
-  const c = state.cards[iid]
-  if (!c) return 0
-  const base = ctx.cards[c.cardId]?.stats?.[stat] ?? 0
-  return base + state.procMeta.mods.filter((m) => m.iid === iid && m.kind === '能力値修正' && m.stat === stat).reduce((a, m) => a + m.delta, 0)
-}
+/** 今の能力値・攻防修正は継続効果の層から導き出す（R3: engine/layers.ts。印刷値＋層を連番の順に＋手直しの層） */
+export { currentStat }
 
-/** 攻防修正の合計（atk・def） */
-export function battleModOf(state: BoardState, iid: string, side: 'atk' | 'def'): number {
-  return state.procMeta.mods.filter((m) => m.iid === iid && m.kind === '攻防修正' && m.stat === side).reduce((a, m) => a + m.delta, 0)
+/** 攻防修正の合計（atk・def）: 層＋手直しの層 */
+export function battleModOf(ctx: EngineCtx, state: BoardState, iid: string, side: 'atk' | 'def'): number {
+  return battleMod(ctx, state, iid, side)
 }
 
 function triggerFrame(state: BoardState, env: Env): ProcFrame | undefined {
@@ -247,6 +244,11 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const host = resolveRef(state, env, c.attachedTo[1])[0]
     return !!host && items.length > 0 && items.every((x) => state.cards[x]?.attachedTo === host)
   }
+  if ('hasAttr' in c) {
+    // 属性が複数でも含めば当たる（FAQ:1709「力属性がその中に含まれていれば「力属性のキャラ」」）
+    const xs = resolveRef(state, env, c.hasAttr[0])
+    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.attr ?? '').includes(c.hasAttr[1]))
+  }
   // pureAttrs は R4 以降
   return false
 }
@@ -266,7 +268,7 @@ export function evalExpr(ctx: EngineCtx, state: BoardState, env: Env, e: Expr): 
     return c ? [...(ctx.cards[c.cardId]?.cost ?? '')].filter((ch) => 'WRGLT'.includes(ch)).length : 0
   }
   if ('stat' in e) {
-    // 能力値（印刷値＋記録した能力値修正。層は R3 の K3）。base＝元の能力値
+    // 能力値（継続効果の層から導き出す R3）。base＝元の能力値
     const c = state.cards[resolveRef(state, env, e.of)[0] ?? '']
     const stat = typeof e.stat === 'string' ? e.stat : env.slots[e.stat.slot]?.[0]
     if (!c || !stat) return 0

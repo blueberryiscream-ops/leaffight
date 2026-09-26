@@ -6,7 +6,9 @@
  * （窓・選択）まで進めて返す。返り値は「適用した BoardAction の列＋最終状態＋警告＋処理の記録」。
  * 宣言（declare）: プレイヤーの宣言を、宣言[1]〜[5]（対象・支払い方法・コスト発生の宣言）を済ませた ProcDecl にする。
  *
- * 警告（R2a）は「manual に倒れた」「カードの記述が無い」の2種類（合法性の判定 K4 は R3）。
+ * 警告（R2a）は「manual に倒れた」「カードの記述が無い」の2種類。
+ * R3: 合法性の判定（K4）は declare の答えの violations（止めずに警告）。drive は状態が変わるたびに継続効果の層を足し外しし（K3）、
+ * 場の制限を是正し（K12）、ダメージ[5] の前に「ダメージを受けない」を当てる（engine/layers.ts）。
  */
 
 import { applyAction, type BoardAction } from '../core/actions'
@@ -29,11 +31,12 @@ import {
   type SimulItem,
 } from '../core/proc'
 import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Play } from './abilities'
-import { controllerOf, isCharOnField, maxKiryoku, nameOf, other, type EngineCtx, type Env } from './ctx'
+import { controllerOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, parseCostText, payNow, planPayment } from './cost'
 import type { Choice, Op } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
+import { clearableMods, continuousSeed, damagePrevented, limitFix, maxKiryokuOf, modSeed, syncActions, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -89,8 +92,12 @@ export interface DeclareReq {
   battle?: boolean
 }
 
+/**
+ * ok でも violations があれば、カードの効果による禁止・強制・対象にならない（K4）に当たっている＝警告して、確認のうえ通す（R3・DESIGN §5.4「段階」）。
+ * ok: false は原典の手順の規則（窓・支払い・宣言時の制限など）で断ったもの
+ */
 export type DeclareOutcome =
-  | { ok: true; actions: BoardAction[]; decl: ProcDecl; warnings: string[] }
+  | { ok: true; actions: BoardAction[]; decl: ProcDecl; warnings: string[]; violations: Violation[] }
   | { ok: false; reason: string; missingDef?: boolean; manual?: boolean }
 
 /** 今の窓で、その宣言ができるか（できるなら BoardAction の列を返す）。
@@ -101,16 +108,25 @@ export function declare(state: BoardState, ctx: EngineCtx, req: DeclareReq): Dec
   if (plays.length > 1) {
     let first: DeclareOutcome | null = null
     for (const p of plays) {
-      const out = declareOne(state, ctx, { ...req, option: (p as Play).name })
-      if (out.ok) return out
+      const out = withViolations(state, ctx, declareOne(state, ctx, { ...req, option: (p as Play).name }))
+      if (out.ok && out.violations.length === 0) return out
+      if (out.ok && (!first || !first.ok)) first = out
       first ??= out
     }
     return first!
   }
-  return declareOne(state, ctx, req)
+  return withViolations(state, ctx, declareOne(state, ctx, req))
 }
 
-function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): DeclareOutcome {
+/** K4（R3）: 宣言[1]〜[5] を済ませた宣言を、層の「禁止・対象にならない・特殊能力を失う」と装備対象（17-1）に照らす */
+function withViolations(state: BoardState, ctx: EngineCtx, out: Omit<Extract<DeclareOutcome, { ok: true }>, 'violations'> | Extract<DeclareOutcome, { ok: false }>): DeclareOutcome {
+  if (!out.ok) return out
+  return { ...out, violations: violations(ctx, state, out.decl) }
+}
+
+type DeclareOne = Omit<Extract<DeclareOutcome, { ok: true }>, 'violations'> | Extract<DeclareOutcome, { ok: false }>
+
+function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): DeclareOne {
   const cur = currentWindow(state)
   if (!cur) return { ok: false, reason: '宣言の機会が無い（窓が開いていない）' }
   if (awaitingSeat(state) !== req.by) return { ok: false, reason: '宣言の機会はそのプレイヤーの番でない（11-2）' }
@@ -307,6 +323,35 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
   for (let guard = 0; guard < 5000; guard++) {
     const s = out.state
     if (s.result || s.procMeta.choice) break
+    // K3（R3）: 状態が変わるたびに継続効果の層を足し外しする（常時効果・期限・効果が失われたときの処理・常に消耗状態・気力の上限）
+    const sync = syncActions(ctx, s)
+    if (sync.length) {
+      const before = out.state
+      sync.forEach(apply)
+      if (out.state === before) {
+        out.warnings.push('継続効果の層の足し外しが受け付けられない')
+        break
+      }
+      continue
+    }
+    // K12（R3）: 場の制限の是正（15-2・17-1・17-2・19-1。違反なら使用権者が選ぶ）
+    const fix = limitFix(ctx, s)
+    if (fix) {
+      const before = out.state
+      apply(fix)
+      if (out.state === before) {
+        out.warnings.push('場の制限の是正が受け付けられない')
+        break
+      }
+      continue
+    }
+    // 「ダメージを受けない」（15-4-2[5] の前＝身代わりの後 FAQ:1706）。[5] の窓で誰も宣言していないうちに当てる
+    const top0 = topFrame(s)
+    if (top0?.kind === 'damage' && top0.step === 5 && top0.status === 'window' && top0.window?.state === 'awaitActive' && !top0.window.active && !top0.eng.receiveChecked) {
+      const why = damagePrevented(ctx, s, top0)
+      apply(why ? { type: 'procDamageEdit', frameId: top0.id, prevent: why } : { type: 'procEngine', frameId: top0.id, patch: { receiveChecked: true } })
+      continue
+    }
     // 宣言のあとの選択（相手が対象を指定する《マジカルサンダー》FAQ:1992 など）
     const patch = declPatch(ctx, s)
     if (patch) {
@@ -456,7 +501,7 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
       continue
     }
     const p = ps[0]
-    out[seat] = { atk: currentStat(ctx, state, p, atkAttr) + battleModOf(state, p, 'atk'), def: currentStat(ctx, state, p, defAttr) + battleModOf(state, p, 'def') }
+    out[seat] = { atk: currentStat(ctx, state, p, atkAttr) + battleModOf(ctx, state, p, 'atk'), def: currentStat(ctx, state, p, defAttr) + battleModOf(ctx, state, p, 'def') }
   }
   return out
 }
@@ -479,12 +524,12 @@ function placeKiryoku(ctx: EngineCtx, state: BoardState, frame: ProcFrame): numb
 }
 
 /** 20-2・20-3: バトルを行うアクションの宣言（自分のメインフェイズにアクションとして・待機状態のキャラ・選択可能なバトルカード） */
-function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOutcome {
+function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOne {
   const cur = currentWindow(state)
   if (!cur || cur.frame) return { ok: false, reason: 'バトルの宣言はメインフェイズにアクションとしてのみ（20-2）' }
   if (req.by !== activeSeat(state) || state.turn?.phase !== 'メイン') return { ok: false, reason: '自分のメインフェイズでない（20-2・20-3）' }
   if (state.turn?.n === 1) return { ok: false, reason: '先攻の1ターン目はバトルを行えない（10-2-4）' }
-  if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used)) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
+  if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used && !state.layers.unusable.includes(c.iid))) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
   if (!Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === req.by && c.orientation === 'ready')) return { ok: false, reason: '待機状態のキャラがいない（20-3）' }
   void ctx
   const decl = battleDecl(id, req.by)
@@ -495,7 +540,7 @@ function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: s
  * 手札のカードを使う行動: キャラの呼び出し（15-10-1）・タッグ化（15-10-2）・アイテムの装備（17-3）・フィールドの配置（18-2）・
  * バトルカードの配置（19-2）。どれも AP がメインフェイズに行う（10-5-1）。カードの記述は要らない（原典の手順だけ）
  */
-function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOutcome {
+function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: string): DeclareOne {
   const cur = currentWindow(state)!
   const src = state.cards[req.source]
   const info = ctx.cards[src.cardId]
@@ -566,7 +611,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   return { ok: true, actions: [{ type: 'procDeclare', by: req.by, decl }], decl, warnings: plan.warn }
 }
 
-/** 今の能力値（印刷値＋記録した能力値修正）。画面・FAQ テスト用 */
+/** 今の能力値（継続効果の層から導き出す R3）。画面・FAQ テスト用 */
 export { currentStat }
 
 function optionOf(ctx: EngineCtx, d: ProcDecl): string | undefined {
@@ -738,7 +783,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'kiryoku': {
       const delta = evalExpr(ctx, state, env, op.delta)
-      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryoku(ctx, state, iid) }) as BoardAction) }
+      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
     }
     case 'setKiryoku':
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procSetKiryoku', iid, value: op.value }) as BoardAction) }
@@ -886,13 +931,33 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     // ── R2b
     case 'statMod': {
-      // 修正を記録する（層 K3 は R3）。期間: バトル終了時まで→[28]、それ以外の能力値修正→ターン終了時（12-1・10-8）
+      // 修正の層を足す（K3・R3）。値は処理したときに決まる（12-1）。期間: バトル終了時まで・攻防修正→[28]、それ以外→ターン終了時（12-1・10-8）
       const stat = typeof op.stat === 'string' ? op.stat : env.slots[op.stat.slot]?.[0]
       if (!stat) return { tasks: rest, actions: [] }
       const delta = evalExpr(ctx, state, env, op.delta)
       const until = op.duration === 'endOfBattle' || op.kind === '攻防修正' ? 'battle' : 'turn'
-      if (op.duration !== 'endOfBattle' && op.duration !== 'endOfTurn' && op.duration !== 'instant') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い（R3）`)
-      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procMod', iid, stat, delta, kind: op.kind, until }) as BoardAction) }
+      if (op.duration !== 'endOfBattle' && op.duration !== 'endOfTurn' && op.duration !== 'instant') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い`)
+      const origin = originOf(state, env)
+      const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin))
+      return { tasks: rest, actions: add.length ? [{ type: 'procLayers', add }] : [] }
+    }
+    case 'addContinuous': {
+      // 継続効果の層を足す（K3・R3）。対象は足したときに決まる（12-1）。期限: ターン終了時まで／バトル終了時まで／発生源がある間
+      const until = op.duration === 'endOfBattle' ? 'battle' : op.duration === 'whileSource' ? 'whileSource' : 'turn'
+      if (op.duration === 'instant' || typeof op.duration === 'object') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い`)
+      return { tasks: rest, actions: [{ type: 'procLayers', add: [continuousSeed(ctx, state, env, op.effect, until, item.label, originOf(state, env))] }] }
+    }
+    case 'clearMods': {
+      const ids = refs(op.who).flatMap((iid) => clearableMods(state, iid, op.kind))
+      return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: `修正を0にする:${refs(op.who).join(',')}` } }, ...(ids.length ? [{ type: 'procLayers', remove: ids } as BoardAction] : [])] }
+    }
+    case 'swapItems': {
+      const a = refs(op.a)[0]
+      const b = refs(op.b)[0]
+      const ha = a ? state.cards[a]?.attachedTo : null
+      const hb = b ? state.cards[b]?.attachedTo : null
+      if (!a || !b || !ha || !hb) return manual('交換するアイテムが装備されていない')
+      return { tasks: rest, actions: [{ type: 'procAttach', moves: [{ item: a, to: hb }, { item: b, to: ha }] }] }
     }
     case 'battleDamage': {
       const bf = nearestBattle(state)
@@ -945,6 +1010,13 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     default:
       return manual(`R2a の範囲外の操作 ${op.op}`)
   }
+}
+
+/** 効果の層を足した行動の種類（《能力禁止》FAQ:606: 特殊能力の効果は失われる） */
+function originOf(state: BoardState, env: Env): 'ability' | 'event' | 'force' {
+  const k = env.self ? state.cards[env.self] : undefined
+  if (!k) return 'force'
+  return (k.zone === 'char' || k.zone === 'leader') && !k.attachedTo ? 'ability' : 'event'
 }
 
 /** そのカードの宣言された特殊能力（処理中のフレームか、まだ処理されていない宣言） */

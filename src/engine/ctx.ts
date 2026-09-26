@@ -50,6 +50,8 @@ export interface Env {
   /** 宣言した時点の状態（「宣言した時点で消耗状態ならば」FAQ:2298・3097） */
   declared: Record<string, 'ready' | 'rested'>
   it?: string
+  /** 参照 equipped の差し替え（常時効果の層が失われたときの処理は、その層を足したときの装備先を指す。R3） */
+  host?: string | null
 }
 
 export function other(seat: Seat): Seat {
@@ -74,7 +76,7 @@ export function controllerOf(state: BoardState, iid: string): Seat | null {
   return c.owner
 }
 
-/** 気力の上限（リーダーは元×2・maxKiryokuFor と同じ） */
+/** 元の気力の上限（リーダーは元×2・maxKiryokuFor と同じ）。層を重ねた今の上限は engine/layers.ts の maxKiryokuOf（R3） */
 export function maxKiryoku(ctx: EngineCtx, state: BoardState, iid: string): number | null {
   const c = state.cards[iid]
   const info = c ? ctx.cards[c.cardId] : undefined

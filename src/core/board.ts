@@ -59,7 +59,54 @@ export interface Modifier {
   note?: string
   kind: ModifierKind
   scope: ModScope
+  /**
+   * 手直しの層（DESIGN §5.4「人の手直しの層」・R3）の連番。エンジンの導出（継続効果の層 K3）の後に、この順で重ねる。
+   * 旧データ（R3 より前の保存盤面）には無い → fillBoardDefaults が並びの順で補う
+   */
+  seq?: number
 }
+
+/**
+ * 継続効果の層（DESIGN §5.4 K3・R3）。続く効果1つ＝層1枚。core は入れ物と連番と期限だけを持ち、中身（body）は読まない
+ * （中身＝DSL の Continuous と評価の環境。エンジンが書き、エンジンが読む）。
+ * 期限（until）: turn＝ターン終了時まで（12-1・10-8）／battle＝バトル終了時まで（20-4[28]）／
+ * whileSource＝発生源がフィールドにある間（12-2 常時効果。エンジンが発生源を見て足し外しする）
+ */
+export type LayerUntil = 'turn' | 'battle' | 'whileSource'
+
+export interface Layer {
+  id: string
+  /** 発揮し始めた順（12-2「既に発揮した全ての効果の後に発揮したとみなされ」oldrule.txt:505-506）。procMeta.seq から取る */
+  seq: number
+  /** 発生源（カード）。無ければ null */
+  source: string | null
+  /** 常時効果なら発生源の能力の番号（エンジンが発生源を見て足し外しする）。null＝効果で足した層（12-1） */
+  ability: number | null
+  by: Seat
+  label: string
+  /** 修正の種類（原典の用語 oldrule.txt:1212-1215）。[28] は攻防修正を、10-8 は能力値修正を失わせる。修正でない層は null */
+  kind: ModifierKind | null
+  until: LayerUntil
+  /** until battle・攻防修正のとき、そのバトル（最も近いバトルのフレーム） */
+  battleId: string | null
+  /** 効果を得たカード（12-1「これらの効果を得ていた対象が失われた場合…失われます」）。空＝決まった対象が無い（常時効果は毎回導き出す） */
+  targets: string[]
+  /** アイテムの常時効果: 層を足したときの装備先（装備先が変わったら層は終わる） */
+  host: string | null
+  /** 中身（エンジンの持ち物。DSL の Continuous・評価の環境）。core は読まない */
+  body: Record<string, unknown>
+}
+
+/** 層の入れ物。bound・unusable はエンジンが導き出して置く控え（core の手順が読む。中身の意味は持たない） */
+export interface LayerState {
+  list: Layer[]
+  /** アイテム → 装備対象として指定されたキャラ（17-1。装備対象がその1枚に決まるアイテム《電波での復活》） */
+  bound: Record<string, string>
+  /** 使用できないバトルカード（効果による。20-3・20-4[5][16] の「選択可能な」から除く） */
+  unusable: string[]
+}
+
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [] }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
@@ -73,7 +120,10 @@ export interface SetupState {
 
 export interface BoardState {
   cards: Record<string, CardInstance>
+  /** 人の手直しの層（右クリックの能力値修正・攻防修正）。エンジンの間も手動の間も、層の最後に重なる（R3） */
   modifiers: Record<string, Modifier>
+  /** 継続効果の層（K3・R3） */
+  layers: LayerState
   /** engine＝エンジンが進める／free＝手動（R2u §2-3）。共有・同期される */
   mode: Mode
   /** 開始準備の状態（座席ごと）。PHASE5b.md §1-1 */
@@ -104,7 +154,6 @@ export const EMPTY_PROC_META: ProcMeta = {
   used: {},
   leaderLost: [],
   aborted: [],
-  mods: [],
   battles: [],
   phaseRun: null,
 }
@@ -112,6 +161,7 @@ export const EMPTY_PROC_META: ProcMeta = {
 export const EMPTY_BOARD: BoardState = {
   cards: {},
   modifiers: {},
+  layers: EMPTY_LAYERS,
   mode: 'free',
   setup: { A: null, B: null },
   proc: [],
@@ -134,7 +184,49 @@ export function fillBoardDefaults(saved: Partial<BoardState>): BoardState {
   void _p
   void _b
   const mode: Mode | undefined = (rest.mode as string | undefined) === 'assist' ? 'free' : rest.mode
-  return { ...EMPTY_BOARD, ...rest, ...(mode ? { mode } : {}), procMeta: { ...EMPTY_PROC_META, ...(rest.procMeta ?? {}) } }
+  // R3: R2b の修正の記録（procMeta.mods）は継続効果の層に移す。手直しの層（modifiers）に連番が無ければ並びの順で補う
+  const { mods: oldMods, ...procMeta } = (rest.procMeta ?? {}) as Partial<ProcMeta> & { mods?: OldProcMod[] }
+  const layers: LayerState = { ...EMPTY_LAYERS, ...(rest.layers ?? {}) }
+  if (oldMods?.length && !rest.layers) layers.list = oldMods.map((m, i) => oldModToLayer(m, i))
+  let modifiers = rest.modifiers
+  if (modifiers && Object.values(modifiers).some((m) => m.seq === undefined)) {
+    modifiers = Object.fromEntries(Object.entries(modifiers).map(([id, m], i) => [id, m.seq === undefined ? { ...m, seq: i + 1 } : m]))
+  }
+  return { ...EMPTY_BOARD, ...rest, ...(mode ? { mode } : {}), ...(modifiers ? { modifiers } : {}), layers, procMeta: { ...EMPTY_PROC_META, ...procMeta } }
+}
+
+/** R2b の修正の記録（procMeta.mods）の形。旧データを読むときだけ使う */
+interface OldProcMod {
+  id: string
+  iid: string
+  stat: string
+  delta: number
+  kind: ModifierKind
+  until: 'turn' | 'battle'
+  battleId: string | null
+}
+
+/** 旧データの修正の記録を層1枚にする（中身はエンジンが効果で足す修正と同じ形: engine/layers.ts の modBody） */
+function oldModToLayer(m: OldProcMod, i: number): Layer {
+  return {
+    id: `old${m.id}`,
+    seq: i + 1,
+    source: null,
+    ability: null,
+    by: 'A',
+    label: '修正（旧データ）',
+    kind: m.kind,
+    until: m.until,
+    battleId: m.battleId,
+    targets: [m.iid],
+    host: null,
+    body: { mod: { stat: m.stat, delta: m.delta } },
+  }
+}
+
+/** 手直しの層の次の連番（R3） */
+export function nextModifierSeq(state: BoardState): number {
+  return Object.values(state.modifiers).reduce((a, m) => Math.max(a, m.seq ?? 0), 0) + 1
 }
 
 /**
@@ -408,7 +500,8 @@ export function flip(state: BoardState, args: { iid: string; cardName: string })
 
 export function addModifier(state: BoardState, args: { modifier: Modifier; cardName: string }): Result {
   const next = cloneBoard(state)
-  next.modifiers[args.modifier.id] = args.modifier
+  // 手直しの層（R3）: 連番を付けて最後に重ねる
+  next.modifiers[args.modifier.id] = args.modifier.seq === undefined ? { ...args.modifier, seq: nextModifierSeq(state) } : args.modifier
   const statPart = args.modifier.stat
     ? `${args.modifier.stat}${(args.modifier.delta ?? 0) >= 0 ? '+' : ''}${args.modifier.delta ?? 0}`
     : (args.modifier.note ?? '')

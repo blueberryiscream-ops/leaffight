@@ -78,3 +78,18 @@ body {
   outline: 3px solid var(--color-warn);
   outline-offset: 1px;
 }
+
+/* R3⑤（利用者 2026-09-26）: 自分のメインフェイズで宣言できるものが無いとき、フェイズ終了ボタンを光らせて誘導する */
+@keyframes lf-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-accent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+.lf-glow {
+  outline: 2px solid var(--color-accent);
+  animation: lf-pulse 1.1s ease-in-out infinite;
+}

@@ -11,9 +11,10 @@ import { EMPTY_BOARD, EMPTY_PROC_META, fillBoardDefaults, type BoardState, type 
 import { emptyHistory, undo, type History } from '../src/core/history'
 import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, topFrame } from '../src/core/proc'
 import type { CardInfo } from '../src/engine/ctx'
-import { drive } from '../src/engine/drive'
+import { applyAction } from '../src/core/actions'
+import { currentStat, declare, drive } from '../src/engine/drive'
 import type { CardDef } from '../src/engine/dsl'
-import { applyEngineReq, buildEngineCtx, foldLog, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
+import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 
 let failures = 0
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -87,7 +88,10 @@ eq(applyEngineReq(h0, ctx, { kind: 'pass', by: 'A' }, 'B').ok, false, '② 他�
 eq(applyEngineReq(h0, ctx, { kind: 'choose', by: 'B', id: 'x', pick: [] }, 'B').ok, false, '② 無い選択への答えは捨てる')
 
 // ③ 自動見送り: 宣言できるものが無ければ見送る・番でない席は見送らない
-eq(shouldAutoPass(s0, ctx, 'A'), true, '③ 宣言できるものが無い A は自動見送り（§2-2）')
+// R3⑤（利用者 2026-09-26）: 自分（AP）のメインフェイズだけは例外＝宣言できるものが無くても自動で終わらせない（フェイズ終了ボタンを光らせて誘導）
+eq(isOwnMainDeclareWindow(s0, 'A'), true, '③ s0 は A の自分のメインフェイズの窓（R3⑤）')
+eq(isOwnMainDeclareWindow(s0, 'B'), false, '③ B は AP でないので自分のメインフェイズの窓ではない')
+eq(shouldAutoPass(s0, ctx, 'A'), false, '③ 自分のメインフェイズは宣言できるものが無くても自動見送りしない（R3⑤）')
 eq(shouldAutoPass(s0, ctx, 'B'), false, '③ 番でない B は自動見送りしない')
 
 // ④ 1要求＝history 1件（Undo 1回で要求の前に戻る）
@@ -369,6 +373,97 @@ function battleStart(battleCard: string): History {
   eq([logs.length > 1, logs.every((l) => l.auto), rows.length, rows[0]?.text.startsWith('自動で見送り ×')], [true, true, 1, true], '⑮ 続いた自動の見送りは「自動で見送り ×N」の1行になる（Undo は1要求ずつのまま）')
   const pe = applyEngineReq(hist(s0), ctx, { kind: 'pass', by: 'A', auto: true })
   eq(pe.ok && pe.history.past[0].log.auto, undefined, '⑮ 自動でもフェイズ終了の宣言（10-2-2）はログで畳まない')
+}
+
+// =============================================================================
+// R3: 継続効果の層（K3）・人の手直しの層・合法性の警告（K4）・場の制限の是正（K12）— PHASE-R3 §3-7
+//   12-1（oldrule.txt:493-500）「これらの効果によって得られた能力値修正はターン終了時に失われます」「対象が失われた場合…失われます」
+//   12-2（501-515）「新たにこれらの効果が発揮した場合は、既に発揮した全ての効果の後に発揮したとみなされ」「発生元がフィールドから失われた場合、その効果も失われます」
+//   H-6（DESIGN §5.3・利用者 2026-09-25）「今の値を入れ替える（例 元 力5・感1＋力+2 → 力1・感7）」
+//   DESIGN §5.4「人の手直しの層」: 人が盤面を直した修正は導出の最後に重ねる・消すのも人
+//   11-3（485-486）「プレイヤーは空打ちのアクションの宣言をすることができません」・【～の対象にならない】（1178-1179）・DESIGN §5.4「段階」（R3 は警告だけ）
+//   15-2（590-605）「該当プレイヤーは即座に…１体づつ選択してゴミ箱送り」・17-1（846-853）・FAQ:3329（キャラ数制限を受けないキャラ）
+// =============================================================================
+{
+  const st = (id: string, kind: CardInfo['kind'], stats: Record<string, number> | null, kiryoku: number | null = 5, abilities: { header: string; cost: string }[] = []): CardInfo => ({ id, name: id.replace(/\d+$/, ''), kind, kiryoku, stats, cost: '', attr: '', abilities })
+  const S = (p: number, h: number, k: number, n: number, s: number) => ({ 力: p, 早: h, 賢: k, 根: n, 感: s })
+  const R3I: CardInfo[] = [
+    st('LA', 'c', S(1, 1, 1, 1, 1)),
+    st('LB', 'c', S(1, 1, 1, 1, 1)),
+    st('Q', 'c', S(5, 3, 3, 3, 1)),
+    st('P', 'c', S(3, 1, 2, 2, 2), 5, [{ header: 'Zap', cost: '' }]),
+    st('Y', 'c', S(1, 1, 1, 1, 1)),
+    st('Same1', 'c', S(1, 1, 1, 1, 1)),
+    st('Same2', 'c', S(1, 1, 1, 1, 1)),
+    st('Kinoko', 'i', null, null),
+    st('Circ', 'i', null, null),
+    st('LOnly', 'i', null, null),
+    st('Denpa', 'i', null, null),
+    st('Plain', 'i', null, null),
+    st('NoEv', 'f', null, null),
+    st('Hit', 'e', null, null),
+  ]
+  const self = { ref: 'self' as const }
+  const equipped = { ref: 'equipped' as const }
+  const R3D: Record<string, CardDef> = {
+    Kinoko: { id: 'Kinoko', name: 'Kinoko', kind: 'i', status: 'draft', holes: ['H-6'], equip: { targetKind: 'キャラ' }, abilities: [{ kind: 'static', effects: [{ ce: 'statSwap', who: equipped, tieBreak: { chooser: 'equipper', when: 'apply' } }] }] },
+    Circ: { id: 'Circ', name: 'Circ', kind: 'i', status: 'draft', equip: { targetKind: 'キャラ' }, abilities: [{ kind: 'static', effects: [{ ce: 'untargetable', who: equipped, by: { kinds: ['特殊能力'] } }] }] },
+    LOnly: { id: 'LOnly', name: 'LOnly', kind: 'i', status: 'draft', equip: { targetKind: 'キャラ', leaderOnly: true }, abilities: [] },
+    Denpa: { id: 'Denpa', name: 'Denpa', kind: 'i', status: 'draft', equip: { targetKind: 'キャラ', bound: true }, abilities: [{ kind: 'static', effects: [{ ce: 'whenLost', do: [{ op: 'down', who: equipped }] }] }] },
+    NoEv: { id: 'NoEv', name: 'NoEv', kind: 'f', status: 'draft', abilities: [{ kind: 'static', effects: [{ ce: 'prohibit', action: { kinds: ['イベント'], by: 'any' } }] }] },
+    P: { id: 'P', name: 'P', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Zap', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [{ slot: 't', chooser: 'you', pick: { cards: { zone: 'field', side: 'opponent', class: 'キャラ', excludeLeader: true } }, count: [1, 1], mode: 'target', when: 'declare' }], effect: [{ op: 'damage', to: { ref: 'slot', slot: 't' }, amount: 1 }] }] },
+    Hit: DEFS.Hit,
+  }
+  const ctx3 = { cards: Object.fromEntries(R3I.map((c) => [c.id, c])), defs: R3D }
+  const base3 = (cs: CardInstance[]) => ({ ...board([card('LA', 'A', 'leader', { kiryoku: 10 }), card('LB', 'B', 'leader', { kiryoku: 10 }), card('dA', 'A', 'deck'), card('dB', 'B', 'deck'), ...cs]), mode: 'engine' as const })
+  const act3 = (s: BoardState, a: Parameters<typeof applyAction>[1]) => applyAction(s, a).state
+  const modSeed = (iid: string, stat: string, delta: number) => ({ source: null, ability: null, by: 'A' as const, label: `${stat}${delta}`, kind: '能力値修正' as const, until: 'turn' as const, targets: [iid], host: null, body: { mod: { stat, delta } } })
+
+  // ⑯ H-6 と層の順・手直しの層は最後（右クリックの修正はエンジンの導出の後も残る）
+  let s = base3([card('Q', 'A', 'char', { kiryoku: 5 }), card('Kinoko', 'A', 'hand')])
+  s = act3(s, { type: 'procLayers', add: [modSeed('Q', '力', 2)] }) // 先に掛かった修正（力+2）
+  s = act3(s, { type: 'attach', itemIid: 'Kinoko', targetIid: 'Q', itemName: 'Kinoko', targetName: 'Q' })
+  s = act3(s, { type: 'moveCard', iid: 'Kinoko', toZone: 'char', toIndex: 100, cardName: 'Kinoko' })
+  s = drive(s, ctx3).state // 常時効果の層（Kinoko の入れ替え）が足される＝力+2 の後
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [1, 7], '⑯a H-6: 今の値を入れ替える（元 力5・感1＋力+2 → 力1・感7）')
+  s = act3(s, { type: 'procLayers', add: [modSeed('Q', '力', 1)] })
+  s = act3(s, { type: 'addModifier', modifier: { id: 'hand1', targetIid: 'Q', sourceLabel: '手', stat: '感', delta: 1, kind: '能力値修正', scope: 'その他' }, cardName: 'Q' })
+  s = drive(s, ctx3).state
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感')], [2, 8], '⑯b 後から来た修正は入れ替わらない・右クリックの修正（手直しの層）は導出の最後に重なる')
+  s = act3(s, { type: 'procPhase', to: 'ターン終了' })
+  s = drive(s, ctx3).state
+  eq([currentStat(ctx3, s, 'Q', '力'), currentStat(ctx3, s, 'Q', '感'), Object.keys(s.modifiers), s.layers.list.length], [1, 6, ['hand1'], 1], '⑯c 10-8 で効果の修正（ターン終了時まで）は外れ、常時効果（入れ替え）と手直しの層は残る（元 力5・感1 → 力1・感5 に手直し 感+1…の入れ替えは今の値）')
+  s = act3(s, { type: 'removeModifier', modId: 'hand1', cardName: 'Q' })
+  eq(currentStat(ctx3, s, 'Q', '感'), 5, '⑯d 手直しを消すのは人（消したら導出だけの値）')
+
+  // ⑰ K4: 対象にならない（空打ち）・禁止は警告だけ（止めない）。自動見送りは違反のある宣言を数えない
+  let k = drive(base3([card('P', 'A', 'char'), card('Y', 'B', 'char'), card('Circ', 'B', 'char', { attachedTo: 'Y', kiryoku: null, index: 100 })]), ctx3).state
+  const zap = declare(k, ctx3, { by: 'A', source: 'P', ability: 'Zap', targets: ['Y'] })
+  eq([zap.ok, zap.ok && zap.violations.map((v) => v.kind)], [true, ['untargetable']], '⑰a 対象にならないキャラを対象に宣言＝空打ちの警告（宣言そのものは通る）')
+  eq([legalDeclarations(k, ctx3, 'A').some((d) => d.req.ability === 'Zap'), legalDeclarations(k, ctx3, 'A', { withWarned: true }).find((d) => d.req.ability === 'Zap')?.violations?.length], [false, 1], '⑰b 自動見送りの「宣言できるもの」に数えない（画面のボタンには警告つきで出す）')
+  const ok = applyEngineReq(hist(k), ctx3, { kind: 'declare', req: { by: 'A', source: 'P', ability: 'Zap', targets: ['Y'] } })
+  eq([ok.ok, ok.ok && ok.warnings.some((w) => w.startsWith('警告（K4）')), ok.ok && ok.trace.some((t) => t.kind === 'warn')], [true, true, true], '⑰c 確認のうえ送られた宣言は通す（警告はログに残す）')
+  k = drive(base3([card('Hit', 'A', 'hand'), card('Y', 'B', 'char'), card('NoEv', 'B', 'field')]), ctx3).state
+  const hit = declare(k, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
+  // 「宣言できるもの」に数えない＝legalDeclarations（withWarned なし）に出ない。shouldAutoPass 自体は R3⑤ で自分のメインフェイズは常に false（別に検証済み・③）
+  eq([hit.ok, hit.ok && hit.violations.map((v) => v.kind), legalDeclarations(k, ctx3, 'A').filter((d) => !d.req.costGen).length], [true, ['prohibit'], 0], '⑰d 「〜できない」（prohibit）も警告・自動見送りでは宣言できないものとして数える')
+  eq(shouldAutoPass(k, ctx3, 'A'), false, '⑰d′ 自分のメインフェイズなので shouldAutoPass 自体は R3⑤ により常に false')
+
+  // ⑱ K12: 場の制限を満たせない→使用権者が1体ずつ選んでゴミ箱送り（15-2）。候補が1枚なら聞かない（17-1）
+  let l = drive(base3([card('Same1', 'A', 'char'), card('Same2', 'A', 'char')]), ctx3).state
+  const ch = l.procMeta.choice
+  eq([ch?.purpose, ch?.by, ch?.options.map((o) => o.key)], ['limitTrash', 'A', ['Same1', 'Same2']], '⑱a 同名キャラ制限（15-2）: 違反しているキャラから使用権者が選ぶ')
+  l = drive(act3(l, { type: 'procChoose', id: ch!.id, pick: ['Same2'] }), ctx3).state
+  eq([l.cards.Same2.zone, l.cards.Same1.zone, l.downs.A, l.procMeta.choice], ['trash', 'char', 0, null], '⑱b 選んだキャラだけゴミ箱送り（ダウンではない）・満たしたらそれ以上は送らない')
+  l = drive(base3([card('Y', 'A', 'char'), card('LOnly', 'A', 'char', { attachedTo: 'Y', kiryoku: null, index: 100 })]), ctx3).state
+  eq([l.cards.LOnly.zone, l.procMeta.choice], ['trash', null], '⑱c 装備対象（17-1）を満たさないアイテムは即座にゴミ箱送り（候補1枚は聞かない）')
+
+  // ⑲ 常時効果の層の期限と「効果が失われたとき」: 装備先が変わったら元の装備先に処理する／装備対象を満たせずに外れたときは処理しない（FAQ:550・559）
+  let w = drive(base3([card('Y', 'A', 'char'), card('P', 'A', 'char', { index: 1 }), card('Denpa', 'A', 'char', { attachedTo: 'Y', kiryoku: null, index: 100 }), card('Plain', 'A', 'char', { attachedTo: 'P', kiryoku: null, index: 101 }), card('dA2', 'A', 'deck'), card('dB2', 'B', 'deck')]), ctx3).state
+  eq([w.layers.bound.Denpa, w.layers.list.filter((x) => x.source === 'Denpa').map((x) => x.host)], ['Y', ['Y']], '⑲a 装備対象が1枚に決まるアイテムは最初の装備先を控える・層は装備先つき')
+  w = drive(act3(w, { type: 'procAttach', moves: [{ item: 'Denpa', to: 'P' }, { item: 'Plain', to: 'Y' }] }), ctx3).state
+  w = passUntil({ ...hist(w) }, (x) => x.proc.length === 0).present
+  eq([w.cards.Y.zone, w.cards.Plain.zone, w.cards.Denpa.zone, w.cards.P.zone, w.downs.A], ['trash', 'trash', 'trash', 'char', 1], '⑲b 外れた瞬間に元の装備先はダウン（入れ替えたアイテムも一緒にゴミ箱）・移った先はアイテムだけゴミ箱送り')
 }
 
 if (failures) {

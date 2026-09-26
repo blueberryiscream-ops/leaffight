@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
-import { db, migrateAliasReferences, readAnnotations, readCardDefs, readInterrupts, writeAnnotations, writeBundleMeta, writeCardDefs, writeInterrupts } from './db'
-import type { AliasMap, AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
+import { db, migrateAliasReferences, readAnnotations, readCardDefs, writeAnnotations, writeBundleMeta, writeCardDefs } from './db'
+import type { AliasMap, AnnotationsMap, BundleMeta, PoolCard, StoredImage } from './types'
 
 // ZIP展開はブラウザ内で行う（サーバーを持たないため）。fflate は軽くて依存ゼロ。
 
@@ -70,9 +70,8 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   const annotationsRaw = entries['annotations.json']
   const annotations: AnnotationsMap = annotationsRaw ? (JSON.parse(strFromU8(annotationsRaw)) as AnnotationsMap) : {}
 
-  // 割り込みの注釈（PHASE3c.md §1）。旧バンドル（interrupts.json未収載）では空扱い
-  const interruptsRaw = entries['interrupts.json']
-  const interrupts: InterruptsMap = interruptsRaw ? (JSON.parse(strFromU8(interruptsRaw)) as InterruptsMap) : {}
+  // 割り込みの注釈（interrupts.json）は R3 で読むのをやめた（旧 assist の窓の候補。R2u-2 で画面から使われなくなった）。
+  // 旧 zip に入っていても読まない。原本 _local/interrupt-annotations.json は利用者の校正の成果として残す
 
   // カードの記述（R2u）。旧バンドル（carddefs.json未収載）では空扱い
   const cardDefsRaw = entries['carddefs.json']
@@ -107,7 +106,6 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
     const cardImageCount = images.filter((img) => img.id !== CARD_BACK_IMAGE_ID).length
     await writeBundleMeta({ ...meta, cardCount: cards.length, imageCount: cardImageCount })
     await writeAnnotations(annotations)
-    await writeInterrupts(interrupts)
     await writeCardDefs(cardDefs)
   })
 
@@ -119,12 +117,11 @@ export async function importBundle(file: File, onProgress?: ImportProgress): Pro
   return { ...meta, cardCount: cards.length, imageCount: cardImageCount }
 }
 
-/** 一覧描画用に、カードと画像のURL・起動能力/割り込みの注釈をまとめて取り出す。URLは呼び出し側が revoke する */
+/** 一覧描画用に、カードと画像のURL・起動能力の注釈・カードの記述をまとめて取り出す。URLは呼び出し側が revoke する */
 export async function loadLibrary(): Promise<{
   cards: PoolCard[]
   imageUrls: Map<string, string>
   annotations: AnnotationsMap
-  interrupts: InterruptsMap
   cardDefs: Record<string, unknown>
 }> {
   const cards = await db.cards.toArray()
@@ -135,7 +132,6 @@ export async function loadLibrary(): Promise<{
     imageUrls.set(img.id, URL.createObjectURL(img.blob))
   }
   const annotations = await readAnnotations()
-  const interrupts = await readInterrupts()
   const cardDefs = await readCardDefs()
-  return { cards, imageUrls, annotations, interrupts, cardDefs }
+  return { cards, imageUrls, annotations, cardDefs }
 }

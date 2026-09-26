@@ -13,7 +13,7 @@ import type { BoardState, Seat } from '../../core/board'
 import { activeSeat, awaitingSeat, currentWindow, phaseEndPending, topFrame } from '../../core/proc'
 import type { EngineCtx } from '../../engine/ctx'
 import type { EngineReq, PublicStep } from '../../net/session'
-import { setupDone, shouldAutoPass } from './host'
+import { isOwnMainDeclareWindow, setupDone, shouldAutoPass } from './host'
 import { publicName, type EngineUI } from './useEngineUI'
 
 type AutoPass = 'now' | 'wait'
@@ -86,14 +86,18 @@ export function EngineBar({
   const actor = ui.actor
   const pePending = phaseEndPending(board)
   const inPhaseWindow = !!win && win.frame === null && !!board.turn
+  // R3⑤（利用者 2026-09-26）: 自分（AP）のメインフェイズは自動で終わらない（host.shouldAutoPass が判定。ここはボタンを光らせる条件に使う）
+  const apOwnMainWindow = !!waiting && isOwnMainDeclareWindow(board, waiting)
 
   // §2-2 自動見送り: 宣言できるものが1つも無ければ止まらない（即／約1.5秒）。NAP のフェイズ終了への答えも同じ（認める）。
   // エンジンが進めた直後（steps.n が変わったとき）に1回だけ（Undo で戻した盤面では自動で見送らない）【決めたこと・承認済み】。
   // 一人のときは両方の席を自動見送りする（統括11 のレビュー）
+  // R3⑤: 自分のメインフェイズだけは例外＝宣言できるものが無くても自動で終わらせず、フェイズ終了ボタンを光らせて誘導する
   const autoDoneN = useRef(-1)
   useEffect(() => {
     if (!engineOn || !ctx || autoDoneN.current === steps.n || !waiting) return
     if (!solo && waiting !== localSeat) return
+    if (apOwnMainWindow) return
     if (!shouldAutoPass(board, ctx, waiting)) return
     const n = steps.n
     const t = window.setTimeout(() => {
@@ -101,7 +105,7 @@ export function EngineBar({
       engineRequest({ kind: 'pass', by: waiting, auto: true })
     }, autoPass === 'now' ? 0 : WAIT_MS)
     return () => window.clearTimeout(t)
-  }, [engineOn, ctx, board, localSeat, solo, waiting, autoPass, engineRequest, steps.n])
+  }, [engineOn, ctx, board, localSeat, solo, waiting, autoPass, engineRequest, steps.n, apOwnMainWindow])
 
   // §2-4 段ごとに一瞬見せる: 関係するカードを約0.6秒ずつ順に光らせる（両方の画面で同じ steps が届く）
   const [flashText, setFlashText] = useState<string | null>(null)
@@ -259,7 +263,8 @@ export function EngineBar({
                 {pePending ? `相手が${turn?.phase}フェイズの終了を宣言（10-2-2）` : `宣言の機会${win.frame ? `（${win.frame.label ?? win.frame.kind}）` : `（${turn?.phase ?? 'メイン'}）`}`}
               </span>
               {ui.legal.map((d, i) => (
-                <button key={i} type="button" className={btn} onClick={() => ui.start(d)}>
+                <button key={i} type="button" className={btn} onClick={() => ui.start(d)} title={d.violations?.map((v) => `警告: ${v.text}`).join('\n')}>
+                  {d.violations?.length ? '⚠ ' : ''}
                   {d.label}
                 </button>
               ))}
@@ -273,7 +278,11 @@ export function EngineBar({
                   </button>
                 </>
               ) : inPhaseWindow && actor === ap && win.window.state === 'awaitActive' ? (
-                <button type="button" className={btn} onClick={() => engineRequest({ kind: 'pass', by: actor })}>
+                <button
+                  type="button"
+                  className={`${btn}${apOwnMainWindow && ui.legal.length === 0 ? ' lf-glow' : ''}`}
+                  onClick={() => engineRequest({ kind: 'pass', by: actor })}
+                >
                   {turn?.phase}フェイズ終了を宣言
                 </button>
               ) : (
@@ -333,6 +342,21 @@ export function EngineBar({
           })}
           <button type="button" className={btn} disabled={!ui.payReady} title={ui.payReady ? undefined : 'まだ足りない'} onClick={ui.submitPay}>
             宣言
+          </button>
+          <button type="button" className={btn} onClick={ui.cancel}>
+            やめる
+          </button>
+        </div>
+      )}
+
+      {/* K4（R3）: カードの効果による禁止・対象にならない等。止めずに警告して確かめる（DESIGN §5.4「段階」） */}
+      {engineOn && draft?.stage === 'warn' && (
+        <div className="flex flex-wrap items-center gap-1 text-warn">
+          <span className="font-bold">
+            警告: {draft.warn?.join('／')}。それでも「{draft.label}」を宣言する？
+          </span>
+          <button type="button" className={btn} onClick={ui.confirmWarn}>
+            それでも宣言する
           </button>
           <button type="button" className={btn} onClick={ui.cancel}>
             やめる

@@ -124,6 +124,8 @@ export type Cond =
   | { battlePlace: [CardRef, '屋内' | '屋外'] } // バトルカードの分類
   | { joinedReady: CardRef }                   // 待機状態でバトルに参加したキャラ（《エキサイト》）
   | { attachedTo: [CardRef, CardRef] }        // アイテムがそのキャラに装備されている（「このキャラが装備しているアイテム」）
+  // ── R3 で足した
+  | { hasAttr: [CardRef, Attr] }               // キャラの属性にその属性が含まれる（「[力]属性のキャラ」。複数の属性なら含めば当たる FAQ:1709）
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -237,6 +239,12 @@ export type Op =
   | { op: 'atBattleEnd'; do: Op[] }                                                 // [28]《バトル終了時》に処理する
   | { op: 'moveItem'; item: CardRef; to: CardRef }                                  // アイテムを移し替える（装備と同じ扱い 17-3[11] から FAQ:804・2874）
   | { op: 'down'; who: CardRef }                                                    // キャラをダウンさせる（15-5 のダウン処理。《サクリファイス》）
+  // ── R3 で足した（HANDOFF-R3「決めたこと」）
+  /** 「適用されている能力値修正を０にする」（《桑嶋高子》看護）: 効果で足した能力値修正の層（12-1）を外す。常時効果の修正はすぐにまた適用される（FAQ:2433・2436）。
+   *  「能力値修正を０にする」自身は能力値修正ではない（FAQ:2442） */
+  | { op: 'clearMods'; who: CardRef; kind: '能力値修正' | '攻防修正' }
+  /** 2枚のアイテムの装備先を入れ替える（《替え玉》）。装備の手順ではない。入れ替えたアイテムは装備の順の最後（FAQ:1484） */
+  | { op: 'swapItems'; a: CardRef; b: CardRef }
 
 // ───────────────────────────────────────────────────────────────
 // §7 継続効果（常時効果 12-2。エンジンは毎回「盤面＋継続効果の一覧」から現在値を導出する）
@@ -248,10 +256,15 @@ export interface ActionPattern {
   kinds: ('特殊能力' | 'イベント' | 'アイテム装備' | 'キャラ呼び出し' | 'タッグ化' | 'バトル' | 'フィールド配置' | 'バトル配置' | 'コスト発生')[]
   by?: PlayerRef | 'any'
   sourceIs?: CardRef          // 「このアイテムを装備したキャラの特殊能力」等
+  /** 発生源がこの条件を満たす（it＝発生源）。R3 */
+  sourceWhere?: Cond
+  /** 対象のどれかがこの条件を満たす（it＝対象。「参加キャラを対象にとる特殊能力」FAQ:600・603）。R3 */
+  targetWhere?: Cond
 }
 
 export type Continuous =
-  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr; delta: Expr; kind: '能力値修正' | '攻防修正' }
+  /** when: この条件を満たしている間だけ（《柏木千鶴》恐怖「このキャラが挑んだバトルに参加している間」。R3） */
+  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
   /** 最高値と最低値を入れ替える。入れ替えるのは**今の値**（H-6: 元 力5・感1＋力+2 → 力1・感7）。
    *  層の順で、これより前に掛かった修正ごと入れ替わり、後から来た修正は入れ替わらない */
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }
@@ -267,6 +280,24 @@ export type Continuous =
   | { ce: 'cannotEquip'; who: CardRef }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
+  // ── R3 で足した（HANDOFF-R3「決めたこと」）
+  /** 【～の対象にならない】（oldrule.txt:1178-1179）。by の種類の行動の対象に指定すると空打ち（11-3・FAQ:706）。
+   *  その種類の常時効果の影響も受けない（《魔法のサークレット》FAQ:697・709） */
+  | { ce: 'untargetable'; who: CardRef | Selector; by: ActionPattern }
+  /** 「ダメージを受けない」「ダメージを与えない」。from＝ダメージの発生元の条件（it＝発生元）。battle: only＝バトルの結果ダメージだけ・except＝それ以外だけ。
+   *  処理するのは 15-4-2[5] の前（身代わり [4] の後 FAQ:1706）。deal＝このキャラが与えるダメージも（《インスタントヴィジョン》） */
+  | { ce: 'preventDamage'; who: CardRef | Selector; from?: Cond; battle?: 'only' | 'except'; deal?: boolean }
+  /** 「常に消耗状態になる」。always＝待機状態でも即座に消耗させる（《立川郁美》病弱 FAQ:3184・4229）。
+   *  無ければ「消耗状態になったら待機状態に戻らない」（《御影すばる》地竜走破 FAQ:2476・2482） */
+  | { ce: 'stayRested'; who: CardRef | Selector; always?: boolean }
+  /** 【特殊能力を失う】（oldrule.txt:1176-1177）。そのキャラの特殊能力が存在しないものとして扱う（《能力禁止》FAQ:593・597） */
+  | { ce: 'loseAbilities'; who: CardRef | Selector }
+  /** 気力の上限を変える（15-4）。set＝その値にする・delta＝増減。層の順で重ねる（《ベース・ライフ》FAQ:4206・4209）。残り気力は変えない（FAQ:240・4212） */
+  | { ce: 'maxKiryoku'; who: CardRef | Selector; set?: number; delta?: number }
+  /** この効果が失われたとき（発生源がフィールドを離れた・装備先が変わった）に処理する。装備対象を満たせずに失ったときは処理しない（《電波での復活》FAQ:550・559） */
+  | { ce: 'whenLost'; do: Op[] }
+  /** 使用できないバトルカード（「使用できなくなる」《大雨》ではなく《大嵐》。使用済みにはしない FAQ:1499） */
+  | { ce: 'battleCardUnusable'; who: CardRef | Selector }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）
@@ -343,7 +374,11 @@ export interface CardDef {
   /** この記述が依存しているルールの穴 */
   holes?: HoleId[]
   cost?: Cost
-  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean }
+  /**
+   * 装備対象（17-1）。notLeader＝リーダーには装備できない／leaderOnly＝リーダーのみ／friendlyOnly＝味方キャラのみ（持ち主の味方。使用権の移動 K8 は後）／
+   * bound＝装備対象がそのアイテムを使って選んだ1枚に決まる（《電波での復活》「ゴミ箱のキャラクター」。付け替え・タッグの引き継ぎで満たさなくなる FAQ:550・559）。R3 で足した
+   */
+  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean; leaderOnly?: boolean; friendlyOnly?: boolean; bound?: boolean }
   battle?: {
     atk: BattleExpr
     def: BattleExpr

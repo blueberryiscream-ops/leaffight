@@ -157,6 +157,7 @@ export function CardPiece({
         style={style}
         data-iid={instance.iid}
         data-orientation={instance.orientation}
+        title={faceUp && mods.length > 0 ? '手で直した値があります（右クリックで消す）' : undefined}
         {...attributes}
         {...listeners}
         onClick={onClick}
@@ -201,6 +202,8 @@ export function CardPiece({
             )}
             {mods.length > 0 && (
               <div className="flex flex-wrap gap-0.5">
+                {/* 手直しの層（R3）: 人が入れた修正が残っている印。エンジンの導出の後に重なる。消すのも人（DESIGN §5.4） */}
+                <span className="rounded bg-warn/90 px-0.5 text-[7px] font-bold text-on-accent">手直し</span>
                 {ATTRS.filter((a) => mods.some((m) => m.stat === a)).map((a) => {
                   const base = card?.stats?.[a] ?? 0
                   const eff = effectiveStat(board, instance.iid, base, a)

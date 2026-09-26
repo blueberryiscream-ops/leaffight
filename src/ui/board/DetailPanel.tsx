@@ -17,6 +17,7 @@ export function DetailPanel({
   imageUrlOf,
   annotationsOf,
   engineActions = [],
+  derived = null,
 }: {
   iid: string | null
   board: BoardState
@@ -26,6 +27,8 @@ export function DetailPanel({
   annotationsOf: (cardId: string) => AbilityAnnotation[] | undefined
   /** エンジンモード（R2u §3-3）: このカードで今宣言できるもの（declare の答え）。押すと宣言を組み立て始める */
   engineActions?: { label: string; onClick: () => void }[]
+  /** エンジンモード（R3）: 継続効果の層から導き出した今の能力値・気力の上限・効いている層（手直しの層は最後に重なっている） */
+  derived?: { stats: Record<string, number>; max: number | null; layers: string[] } | null
 }) {
   const instance = iid ? board.cards[iid] : undefined
 
@@ -110,6 +113,16 @@ export function DetailPanel({
             </div>
           )}
 
+          {derived && !hiddenFromMe && (
+            <div className="mb-2 text-[10px] text-ink-muted">
+              <div>
+                エンジン（層＋手直し）: {card?.stats ? ATTRS.map((a) => `${a}${derived.stats[a]}`).join(' ') : ''}
+                {derived.max !== null && ` ／ 気力の上限 ${derived.max}`}
+              </div>
+              {derived.layers.length > 0 && <div>効いている効果: {derived.layers.join('・')}</div>}
+            </div>
+          )}
+
           {(card?.battleAtk || card?.battleDef) && (
             <div className="mb-2 text-ink">
               攻:{card?.battleAtk} 防:{card?.battleDef}
@@ -118,7 +131,8 @@ export function DetailPanel({
 
           {mods.length > 0 && (
             <div className="mb-2">
-              <div className="mb-1 font-semibold text-ink-muted">修正</div>
+              <div className="mb-1 font-semibold text-ink-muted">修正（手直しの層）</div>
+              <div className="mb-1 text-[10px] text-warn">手で直した値があります（エンジンの導出の後に重なる。消すのは右クリックで）</div>
               <ul className="flex flex-col gap-0.5 text-[10px] text-ink-muted">
                 {mods.map((m) => (
                   <li key={m.id}>

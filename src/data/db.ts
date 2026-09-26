@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import type { BoardState } from '../core/board'
 import type { Deck } from './deck'
-import type { AliasMap, AnnotationsMap, BundleMeta, InterruptsMap, PoolCard, StoredImage } from './types'
+import type { AliasMap, AnnotationsMap, BundleMeta, PoolCard, StoredImage } from './types'
 
 // カードデータと画像はリポジトリに入れない（権利面。DESIGN.md §7.5）。
 // ユーザーがローカルのZIPを読み込み、その中身をこの IndexedDB に保存して以後使う。
@@ -54,7 +54,6 @@ const META_KEY = 'bundle'
 const BOARD_KEY = 'board'
 const ANNOTATIONS_KEY = 'annotations'
 const CARDDEFS_KEY = 'carddefs'
-const INTERRUPTS_KEY = 'interrupts'
 
 export async function readBundleMeta(): Promise<BundleMeta | null> {
   const row = await db.meta.get(META_KEY)
@@ -83,16 +82,6 @@ export async function readCardDefs(): Promise<Record<string, unknown>> {
 
 export async function writeCardDefs(defs: Record<string, unknown>): Promise<void> {
   await db.meta.put({ key: CARDDEFS_KEY, value: defs })
-}
-
-/** 割り込みの注釈（PHASE3c.md §1）。interrupts.json が無いzip（旧バンドル）では空のまま */
-export async function readInterrupts(): Promise<InterruptsMap> {
-  const row = await db.meta.get(INTERRUPTS_KEY)
-  return (row?.value as InterruptsMap | undefined) ?? {}
-}
-
-export async function writeInterrupts(interrupts: InterruptsMap): Promise<void> {
-  await db.meta.put({ key: INTERRUPTS_KEY, value: interrupts })
 }
 
 /** 「データを削除して読み込み直す」用。カード定義が消えるので、それを参照する盤面も一緒に消す */

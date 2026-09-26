@@ -31,6 +31,7 @@ import { buildEngineCtx } from '../engine/host'
 import { ProcPanel } from '../engine/ProcPanel'
 import { useEngineUI } from '../engine/useEngineUI'
 import type { CardDef } from '../../engine/dsl'
+import { currentStats, layersOn, maxKiryokuOf } from '../../engine/layers'
 
 // 盤面レイアウト（PHASE2.7.md。原本図 _local/reference/layout_sketch.png.png が正）。
 // 🚨 マスをflex-1で引き伸ばさない（PHASE2.6の元凶）。マスの大きさはrowHeightから計算した
@@ -691,6 +692,11 @@ export function Board({
                 imageUrlOf={imageUrlOf}
                 annotationsOf={annotationsOf}
                 engineActions={engineActionsFor(selectedIid)}
+                derived={
+                  ui.on && selectedIid && board.cards[selectedIid]
+                    ? { stats: currentStats(engineCtx, board, selectedIid), max: maxKiryokuOf(engineCtx, board, selectedIid), layers: layersOn(engineCtx, board, selectedIid) }
+                    : null
+                }
               />
             </div>
             {/* レイアウトAのみ: 右カラム下に手順（proc）の置き場（Bは専用枠がある。PHASE3a-2a.md §2-1）。

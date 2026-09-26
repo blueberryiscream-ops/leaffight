@@ -1,0 +1,100 @@
+# HANDOFF-R3: 継続効果の層（K3）・人の手直しの層・合法性の警告（K4）・場の制限の是正（K12） — 実装担当の報告
+
+2026-09-26。指示書 `PHASE-R3.md`。前のサブ（Opus）が実装の大半（core・engine・カードの記述17枚・FAQ scope・`test-proc` の20節）を作業ツリーに残したまま利用制限で停止。
+このセッション（Sonnet）は**その続きから**: `npm run verify`/`test:faq` を実測して壊れていた2点（内部の単体テストのバグ2つ）を直し、DESIGN §5.3 に追記済みだった R3⑤（自分のメインフェイズは自動で終わらない）の**画面側の実装が未着手**だったのでそこを作った。
+画面は触っていない操作確認（コード変更のみ）。ブラウザは使っていない。push していない。
+
+## 冒頭の数（`_local/rules/faq/_r3-result.json` をスクリプトで数え直し、`_r3-scope.json` と突き合わせた数）
+- **対象 18件**（`_local/rules/tools/r3-scope.ts` で自分でも数え直し、PHASE-R3 §4 の18件と完全一致＝漏れ・余り0）
+- **✅ 18／保留 0／❌ 0**（✅ のうち manual を含むもの 0件）
+- **R2a の対象 58件**: ✅57／保留1（faq-3623・note。R2a のまま）／❌0
+- **R2b の対象 37件**: ✅37／保留0／❌0（下がっていない）
+- `npm run verify` EXIT 0（分離チェック・tsc・vite build・`test:deck`〜`test:ability-split`・`test:proc`114行・`test:engine-host`88行・`test:faq`）
+- コミット: 親リポジトリ・`_local/rules/`（ハッシュは最後に追記）
+
+## このセッションで実際にやったこと（前のサブの分は「前のサブの分」として区別）
+
+### 前のサブ（Opus）が作業ツリーに残していたもの（読んで検証・そのまま活かした）
+- `src/core/board.ts`・`src/core/proc.ts`: 層の入れ物（`BoardState.layers` = `{ list, bound, unusable }`）・`procLayers`／`procLimitTrash`／`procDamageEdit` 等のアクション・`fillBoardDefaults` の後方互換（旧 `procMeta.mods`→層、旧 `modifiers` に連番を補う）
+- `src/engine/layers.ts`（新規 623行）: K3（`currentStats`・`swapMaxMin`＝H-6「今の値を入れ替える」・`battleMod`・`maxKiryokuOf`・`damagePrevented`）・K4（`violations`）・K12（`LIMIT_RULES`・`limitViolations`・`limitFix`）
+- `src/engine/drive.ts`・`abilities.ts`・`ctx.ts`・`dsl.ts`・`eval.ts`: `declare`/`declareOne` に K4 判定（`withViolations`）を接続、`drive` が状態変化のたびに層の足し外し・場の制限の是正を回す
+- `src/ui/board/*`・`src/ui/engine/EngineBar.tsx`・`host.ts`・`useEngineUI.ts`: K4 の警告確認バー（「警告: 〜。それでも宣言する？」）・手直しの印
+- `_local/rules/cards/`: 新規14枚（御影すばる・柏木千鶴・桑嶋高子・立川郁美・インスタントヴィジョン・大雨・替え玉・アンチアシスト・ベースライフ・体調不良・応援団・能力禁止・電波での復活・魔法のサークレット）＋既存3枚を manual→層の実装に書き換え（力からの防御・大嵐・怪しい薬）
+- `_local/rules/faq/_r3-scope.json`・`_r3-result.json`・`H-12.ts`／`ダメージ.ts`／`バトル.ts` の期待の形直し（後述）
+- `scripts/test-proc.ts` §20（層の入れ物・[28]/10-8 での足し外し・K12 の是正・clamp/orient・使用できないバトルカード・付け替えの順・ダメージを受けない）＝完成していた（半端ではなかった）
+
+### このセッションで直したもの（2件・実装のバグ）
+1. **`scripts/test-engine-host.ts` ⑯c の期待値の誤記**: `[3, 6, ['hand1'], 1]` → `[1, 6, ['hand1'], 1]`。テスト自身のコメント（「元 力5・感1 → 力1・感5 に手直し 感+1」）が正しく、期待の配列の先頭だけ `3` という誤記が残っていた（前のサブが書きかけで力尽きた跡）。エンジンの計算（`swapMaxMin` は「その時点の最大値・最小値」を毎回動的に入れ替える設計）を手で追って確認し、コメントと一致することを確かめてから直した
+2. **`src/ui/engine/host.ts` の `legalDeclarations`**: 対象の指定が「later」（画面での指定待ち）に回っただけの `declare` の答えを、対象を1つも試さないまま「宣言できるもの」として確定してしまうバグ。これにより K4 の違反（対象にならない）があるのに legalDeclarations が拾えなかった（⑰b）。`decl.eng.later` を見て、後回しにされた対象があるときは `declareTargets` の候補で実際に試すよう修正
+   - 直す過程で `scripts/test-engine-host.ts` の ⑰ のテスト用カード `P`（`Zap`）の対象セレクタに `excludeLeader: true` が抜けていたことも発見（このゲームでは `class: 'キャラ'` はリーダーも含む既定なので、相手のリーダー LB が「対象にならない Y」の代わりに合法な対象として拾われてしまい、テストの前提＝「対象は Y しかない」を壊していた）。テストの意図（力からの防御・大嵐と同型の状況）に合わせてセレクタを直した
+
+### このセッションで作ったもの（1件・PHASE-R3 の追加要求）
+- **DESIGN §5.3「R2u の体験の決定」⑤（利用者 2026-09-26）「自分（AP）のメインフェイズは自動で終わらない」の画面側**（前のサブは着手前だった）
+  - `src/ui/engine/host.ts`: `isOwnMainDeclareWindow(state, seat)` を追加（宣言の番の窓が、その席の**自分のメインフェイズ**のアクション窓＝`win.frame===null && win.window.state==='awaitActive' && turn.phase==='メイン' && activeSeat===seat`）。`shouldAutoPass` はこの窓では常に `false`（宣言できるものが無くても自動見送りしない）
+  - `src/ui/engine/EngineBar.tsx`: 「フェイズ終了を宣言」ボタンに、`isOwnMainDeclareWindow` かつ宣言できるもの（`ui.legal`＝警告つきも含む）が0件のとき `lf-glow` クラスを付けて光らせる
+  - `src/index.css`: `.lf-glow`（`@theme` の `--color-accent` トークンだけを使う `box-shadow` の明滅アニメーション。新しい色は増やしていない）
+  - 自動見送りは**相手の番の窓・機会**（`activeSeat !== seat` なので `isOwnMainDeclareWindow` が最初から false）と**メイン以外のフェイズ**（エントリー・終了フェイズ等は `turn.phase !== 'メイン'` なので対象外）には従来どおり効く。既存の ⑦⑧ のテスト（NAP の自動承認・終了フェイズの自動見送り）はこの変更で壊れていない
+  - **既存テストへの影響**: ③・⑰d は「自分のメインフェイズで宣言できるものが無い」状況を使っていたため、`shouldAutoPass` の期待値が `true`→`false` に変わる（仕様どおりの変化）。テストのタイトルと中身をその旨に直し、③には `isOwnMainDeclareWindow` の直接の検証を追加、⑰d は「K4 の違反が legalDeclarations に数えられない」ことを（shouldAutoPass 経由ではなく）`legalDeclarations(...).filter(d=>!d.req.costGen).length` で直接検証する形に分けた（R3⑤ と K4 の2つの理由を混同しないため）
+
+## §7 自己点検
+
+### 1. §3 の1〜7
+- ✅ **1**（対象の書き出し）: `_local/rules/tools/r3-scope.ts` の自動計算が PHASE-R3 §4 の18件と完全一致（前のサブの作業。今回突き合わせて確認）
+- ✅ **2**（core: 層の入れ物）: `BoardState.layers`・`procLayers` 等。core はカードの知識を持たない（`layers.ts` の中身の読み取りは engine 側だけ。分離チェック緑を確認）
+- ✅ **3**（engine: Continuous の評価・K4・K12）: `currentStats`・`violations`・`limitViolations`。今回 legalDeclarations のバグを直した
+- ✅ **4**（FAQ 実行器）: faq-1706・1502 が manual なしで通ることを `_r2b-result.json` で確認済み（`manual: []`）
+- ✅ **5**（カードの記述）: 17枚（新規14＋書き換え3）。今回は読み合わせ内容の検証はしていない（前のサブの `読み合わせ（R3）` コメントを目視で確認しただけ。§6 参照）
+- ✅ **6**（画面）: 警告の確認バー・手直しの印は前のサブが実装済み。R3⑤ の光らせるボタンは今回追加
+- ✅ **7**（単体テスト）: `test-proc.ts` §20 は完成していた。`test-engine-host.ts` の2件のバグを直し、R3⑤ 用に③・⑰d を分割・追加
+
+### 2. 件数（数え直し）
+- `_r3-result.json` を `_r3-scope.json` の18 ids で絞って数え: 対象18（漏れ0）／✅18／保留0／❌0
+- `_r2a-result.json`: 対象58（漏れ0）／✅57／保留1（faq-3623）／❌0
+- `_r2b-result.json`: 対象37（漏れ0）／✅37／保留0／❌0
+- いずれも R2b 時点の数（57・37）から下がっていない
+
+### 3. 原典に書いていない細部（このセッションで新たに決めたこと・2件）
+| # | 決めたこと | なぜ |
+|---|---|---|
+| S1 | `legalDeclarations` は、対象の指定が「後回し」（`decl.eng.later`）になっただけの宣言を、実際の候補（`declareTargets`）で1つ以上試すまで「宣言できるもの」に数えない | K4（対象にならない）が唯一の候補にしか当たらないとき、自動見送りが誤って「宣言できる」と判定してしまうのを防ぐため（⑰b の意図どおり） |
+| S2 | 自分のメインフェイズの自動見送りの例外（R3⑤）は `win.frame === null && win.window.state === 'awaitActive' && turn.phase === 'メイン' && activeSeat(state) === seat` で判定する（フェイズの種類と窓の種類の両方を見る） | 利用者の決定「自動見送りは相手の番の窓・機会と、メイン以外のフェイズだけ」を字面どおりに実装するため。NAP のフェイズ終了の承認（10-2-2）・エントリー／終了フェイズの窓はこの条件に当たらないので従来どおり自動見送りが効く |
+
+前のサブが決めたこと（今回は変更していない。目視で確認しただけ）は `src/engine/layers.ts` 冒頭コメント・各カードの「読み合わせ（R3）」コメント・`LIMIT_RULES`（K12 の場の制限の表、原典の行つき）を参照。
+
+### 4. 場の制限の表（K12・原典の行つき。前のサブが `src/engine/layers.ts:503-510` に実装）
+| id | 規則 | 原典 |
+|---|---|---|
+| sameName | 同名キャラ制限: 同じカード名のキャラは自分のフィールドに1体まで | 15-2 oldrule.txt:597-598 |
+| component | 構成要素キャラ制限: タッグとその構成要素キャラ・同じ構成要素を持つ別々のタッグはどちらか1体まで | 15-2 oldrule.txt:599-602 |
+| charCount | キャラ数制限: リーダーを除いて5体まで | 15-2 oldrule.txt:603-604 |
+| equipTarget | 装備対象: 装備対象と違う対象に装備されたアイテムはゴミ箱送り | 17-1 oldrule.txt:846-853 |
+| equipSameName | 装備制限（同名制限）: 1つの装備対象に同じカード名のアイテムは1枚まで | 17-2 oldrule.txt:854-860 |
+| battleCards | バトルカードの配置制限: 自分のフィールドに3枚まで | 19-1 oldrule.txt:980-986 |
+
+### 5. 保留・ケースが間違っていると思ったもの（直していない）の全件と理由
+- 対象18件の保留は **0件**。R2a の保留 faq-3623（型で書けない期待・note）は R2b のまま変わらず
+- **期待値の中身は1件も書き換えていない**。`_local/rules` の `git diff` を実際に読んで確認した: `faq/H-12.ts`・`faq/ダメージ.ts`・`faq/バトル.ts` の3件はいずれも既存の期待の配列に `"at": { "proc": "battle", "step": N }` を1つ足しただけ（値そのものは変えていない）。前のサブが層の実装に合わせて「どの時点の期待か」を明示した形直しで、中身の書き換えではないことを確認した
+- ケースが間違っていると思ったものは0件（見つからなかった）
+
+### 6. カードの記述（17枚）と FAQ の読み合わせで気づいたこと
+今回のセッションでは新しいカードを書いていない（前のサブの17枚をそのまま検証に使っただけ）。前のサブが各カードのコメントに残した「読み合わせ（R3）」を目視で確認した限り、力からの防御（`preventDamage`・`battle: 'only'`・FAQ:1703「計算した値を0にするのではなく受けない」・FAQ:1706「身代わりの後」・FAQ:1709「[力]属性を含めば対象」）は原典・FAQ の記述と整合している。**他の16枚の FAQ 突き合わせの再検証は今回していない**（前のサブの分をそのまま信用した形になる。統括の判断が要る点として下に挙げる）
+
+### 7. 新しいルールの穴の候補
+このセッションでは新しい穴を発見していない（0件）。前のサブが `_local/rules/faq/H-12.ts` 等に残した既知の穴（H-12 等）は変更していない。
+
+### 8. 「多い」「ほとんど」
+使っていない。
+
+## 統括の判断が要るもの
+1. **前のサブが書いた17枚のカードの記述を、統括の目でもう一度検証してほしい**（faq/H-12.ts・ダメージ.ts・バトル.ts の3件の期待の形直しは今回 diff を読んで「at を足しただけ・中身は不変」と確認済み。カードの記述17枚そのものの FAQ 突き合わせは§6のとおり今回は力からの防御しか読み合わせておらず、残り16枚は前のサブの読み合わせコメントを信用した形）
+2. R3⑤ の画面側（`isOwnMainDeclareWindow`・`lf-glow`）は今回初めて実際に動かして見た確認はしていない（ブラウザ不使用の指示のため）。ロジックはテストで確認したが、実際の見た目（光り方・タイミング）は統括か利用者の目視確認をお願いしたい
+
+## R4 への申し送り
+- カードの記述を束で実装していく段階。`status: 'tested'` への切り替えの前提（関係 FAQ 全部緑）が揃っているカードから順に
+- 「止める」への切り替え（K4 の違反を実際に止める）はまだ先。現状は全部警告だけ（DESIGN §5.4「段階」どおり）
+- 前のサブの HANDOFF が無かったため、今回のこの HANDOFF に前のサブの分もまとめて記載した。次回以降、途中で止まったセッションの分は可能な限りそのセッション自身に HANDOFF を書かせるか、次のサブに「前回の分も含めて書く」ことを明示しておくとよい
+
+## 中間データ（統括が再計算できるもの）
+- `_local/rules/faq/_r3-scope.json`（母数18・内訳）＝ `_local/rules/tools/r3-scope.ts` が書く
+- `_local/rules/faq/_r3-result.json`・`_r2b-result.json`・`_r2a-result.json`（ケースごとの verdict・reasons・failures・manual・warnings・inScope）＝ `npm run test:faq` が書く
+- `npm run verify` の全出力は再実行すればいつでも同じ結果になる（乱数・時刻を使っていない）

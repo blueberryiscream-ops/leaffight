@@ -12,6 +12,7 @@ import type { History, LogEntry } from '../../core/history'
 import { activeSeat, awaitingSeat, canDeclarePhaseEnd, currentWindow, phaseEndPending, type ProcTrace } from '../../core/proc'
 import type { CardInfo, EngineCtx } from '../../engine/ctx'
 import { declare, declareTargets, drive, validPick, type DeclareReq, type TargetSpec } from '../../engine/drive'
+import type { Violation } from '../../engine/layers'
 import { costOfAbility, paymentCovers, poolOnlyPayment } from '../../engine/cost'
 import type { CardDef } from '../../engine/dsl'
 import type { EngineReq, PublicStep } from '../../net/session'
@@ -87,7 +88,10 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
       if (state.procMeta.choice) return { ok: false, reason: '選択の答えを待っている' }
       const out = declare(state, ctx, req.req)
       if (!out.ok) return { ok: false, reason: out.reason, missingDef: out.missingDef, manual: out.manual }
-      return { ok: true, actions: out.actions, warnings: out.warnings }
+      // K4（R3）: カードの効果による禁止・対象にならない等は止めずに警告（画面で確認してから送られてくる）。ログにも残す
+      const warn = out.violations.map((v) => `警告（K4）: ${v.text}`)
+      const trace: BoardAction[] = warn.map((text) => ({ type: 'procTrace', entry: { kind: 'warn', text } }))
+      return { ok: true, actions: [...out.actions, ...trace], warnings: [...warn, ...out.warnings] }
     }
     case 'pass': {
       if (state.procMeta.choice) return { ok: false, reason: '選択の答えを待っている' }
@@ -226,6 +230,8 @@ export function applyEngineReq(history: History, ctx: EngineCtx, req: EngineReq,
 export interface LegalDecl {
   req: DeclareReq
   label: string
+  /** カードの効果による禁止・対象にならない等（K4・R3）。あれば警告して確認のうえ通す。自動見送りでは宣言できるものに数えない */
+  violations?: Violation[]
 }
 
 /**
@@ -234,17 +240,27 @@ export interface LegalDecl {
  * 対象が要る宣言: 宣言者が指定する対象（declareTargets）は候補の先頭で試す。それでも「対象」の理由で断られたものも出す
  * （対象を選べば出せるかもしれない。自動見送りで取りこぼさないため）
  */
-export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat): LegalDecl[] {
+export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat, opts: { withWarned?: boolean } = {}): LegalDecl[] {
   if (state.result || state.procMeta.choice || !currentWindow(state) || awaitingSeat(state) !== seat) return []
   const out: LegalDecl[] = []
+  // K4（R3）: 違反のある宣言は「宣言できるもの」に数えない（withWarned のときは violations つきで出す＝画面のボタン）
+  const clean = (r: ReturnType<typeof declare>) => r.ok && r.violations.length === 0
   const tryReq = (req: DeclareReq, label: string) => {
-    if (declare(state, ctx, req).ok) {
+    const r0 = declare(state, ctx, req)
+    // 対象の選択が「later」（画面での指定待ち）へ回っただけの ok は、まだどの候補も violations に照らしていない。
+    // 実際の候補（declareTargets）で試すまでは「宣言できるもの」と決めない（K4・⑰b）
+    const deferred = r0.ok && ((r0.decl.eng as { later?: string[] } | undefined)?.later?.length ?? 0) > 0
+    if (clean(r0) && !deferred) {
       out.push({ req, label })
       return
     }
+    let warned = r0.ok && !deferred ? r0.violations : null
     // 宣言者が指定する対象（装備対象・構成要素など）があるなら、候補の組で試す（1つの枠は2枚までの組み合わせ・それ以外は先頭）
     const specs = declareTargets(state, ctx, req)
-    if (specs.length === 0 || specs.some((s) => s.options.length < s.min)) return
+    if (specs.length === 0 || specs.some((s) => s.options.length < s.min)) {
+      if (warned && opts.withWarned) out.push({ req, label, violations: warned })
+      return
+    }
     const combos: string[][] = []
     if (specs.length === 1 && specs[0].max <= 2 && specs[0].options.length <= 12) {
       const { options, min } = specs[0]
@@ -252,7 +268,15 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat)
       if (n === 1) options.forEach((o) => combos.push([o]))
       else options.forEach((a, i) => options.slice(i + 1).forEach((b) => combos.push([a, b])))
     } else combos.push(specs.flatMap((s) => s.options.slice(0, Math.max(s.min, 1))))
-    if (combos.some((targets) => declare(state, ctx, { ...req, targets }).ok)) out.push({ req, label })
+    for (const targets of combos) {
+      const r = declare(state, ctx, { ...req, targets })
+      if (clean(r)) {
+        out.push({ req, label })
+        return
+      }
+      if (r.ok && !warned) warned = r.violations
+    }
+    if (warned && opts.withWarned) out.push({ req, label, violations: warned })
   }
   for (const c of Object.values(state.cards)) {
     const info = ctx.cards[c.cardId]
@@ -274,9 +298,21 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat)
   return out
 }
 
-/** 自動見送りの判定（§2-2）: 宣言の番がこの席で、選択が無く、宣言できるものが1つも無い（NAP のフェイズ終了への答えも同じ＝認める） */
+/**
+ * 自分（AP）が自分のメインフェイズのアクションの窓で、宣言の番を待っているか（R3⑤・利用者 2026-09-26）。
+ * ここでは自動見送りをしない＝宣言できるものが無くても止まり、「フェイズ終了」ボタンを光らせて誘導する。
+ * 自動見送りは相手の番の窓・機会と、メイン以外のフェイズだけ
+ */
+export function isOwnMainDeclareWindow(state: BoardState, seat: Seat): boolean {
+  const win = currentWindow(state)
+  return !!win && win.frame === null && win.window.state === 'awaitActive' && state.turn?.phase === 'メイン' && activeSeat(state) === seat
+}
+
+/** 自動見送りの判定（§2-2）: 宣言の番がこの席で、選択が無く、宣言できるものが1つも無い（NAP のフェイズ終了への答えも同じ＝認める）。
+ *  自分のメインフェイズだけは例外（R3⑤）: 宣言できるものが無くても自動で見送らない */
 export function shouldAutoPass(state: BoardState, ctx: EngineCtx, seat: Seat): boolean {
   if (state.result || state.procMeta.choice || !currentWindow(state) || awaitingSeat(state) !== seat) return false
+  if (isOwnMainDeclareWindow(state, seat)) return false
   // 【決めたこと】コスト発生だけの宣言は数えない（支払いの中で選ぶもの §2-1。数えると手札にキャラがある限り止まってしまう）
   return legalDeclarations(state, ctx, seat).filter((d) => !d.req.costGen).length === 0
 }

@@ -565,16 +565,16 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
   const s0 = startBattleAt(battleBoard(), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' })
   const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
   const bt = topFrame(sim.s)!.id
-  act(sim, { type: 'procMod', iid: 'a1', stat: 'atk', delta: 2, kind: '攻防修正', until: 'battle' })
-  act(sim, { type: 'procMod', iid: 'a1', stat: '力', delta: 1, kind: '能力値修正', until: 'battle' })
-  act(sim, { type: 'procMod', iid: 'a1', stat: '早', delta: 1, kind: '能力値修正', until: 'turn' })
+  // R3: 修正の記録（procMod）は継続効果の層（procLayers）に移した。期待は同じ（[28] の逐語から）
+  const mod = (stat: string, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle') => ({ source: null, ability: null, by: 'A' as const, label: `${stat}`, kind, until, targets: ['a1'], host: null, body: { mod: { stat, delta: 1 } } })
+  act(sim, { type: 'procLayers', add: [mod('atk', '攻防修正', 'battle'), mod('力', '能力値修正', 'battle'), mod('早', '能力値修正', 'turn')] })
   act(sim, { type: 'procBattle', frameId: bt, abort: 'テスト（放棄）' })
   act(sim, { type: 'procPass', by: 'A' })
   act(sim, { type: 'procPass', by: 'B' })
   runAll(sim)
   const bs = sim.stops.filter((x) => x.startsWith('battle['))
   eq([bs.includes('battle[28]timing'), bs.some((x) => x.startsWith('battle[29]')), bs.some((x) => x.startsWith('battle[20]'))], [true, false, false], '12a: 中断したら [28] だけ（[29] も残りの段も無い）')
-  eq(sim.s.procMeta.mods.map((m) => `${m.stat}${m.kind}`), ['早能力値修正'], '12b: [28] で攻防修正と「バトル終了時まで」の効果は失われ、能力値修正（ターン終了時まで）は残る')
+  eq(sim.s.layers.list.map((m) => `${m.label}${m.kind}`), ['早能力値修正'], '12b: [28] で攻防修正と「バトル終了時まで」の効果は失われ、能力値修正（ターン終了時まで）は残る')
   eq(sim.s.procMeta.battles[0]?.aborted, 'テスト（放棄）', '12c: 中断の記録')
 }
 {
@@ -734,12 +734,12 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
 {
   const hand = Array.from({ length: 8 }, (_, i) => card(`h${i}`, 'A', 'hand'))
   const sim: Sim = { s: board([card('a1', 'A', 'char'), ...hand], { turn: { active: 'A', phase: '手札調整' }, costs: { A: [{ id: 'k', icon: 'W', attrs: [], frameId: null }], B: [] } }), trace: [], stops: [] }
-  sim.s = { ...sim.s, procMeta: { ...sim.s.procMeta, mods: [{ id: 'm', iid: 'a1', stat: '力', delta: 2, kind: '能力値修正', until: 'turn', battleId: null }] } }
+  sim.s = { ...sim.s, layers: { ...sim.s.layers, list: [{ id: 'm', seq: 1, source: null, ability: null, by: 'A', label: '力+2', kind: '能力値修正', until: 'turn', battleId: null, targets: ['a1'], host: null, body: { mod: { stat: '力', delta: 2 } } }] } }
   act(sim, { type: 'procPhaseStart' })
   runAll(sim, { pick: (ch) => (ch.purpose === 'handDiscard' ? ['h0'] : undefined) })
   eq([sim.s.cards.h0.zone, Object.values(sim.s.cards).filter((c) => c.zone === 'hand').length], ['trash', 7], '17e: [3] 上限7枚を超えた分を選んでゴミ箱送り')
   eq(sim.stops.includes('turnEnd[1]timing'), true, '17f: 手札調整フェイズの後にターン終了（10-8）《ターン終了時》の処理')
-  eq([sim.s.costs.A.length, sim.s.procMeta.mods.length], [0, 0], '17g: 10-8 コストの破棄・能力値修正を失わせる')
+  eq([sim.s.costs.A.length, sim.s.layers.list.length], [0, 0], '17g: 10-8 コストの破棄・能力値修正を失わせる')
 }
 
 // =============================================================================
@@ -755,7 +755,92 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
 // =============================================================================
 {
   const f = fillBoardDefaults({ procMeta: { seq: 1, base: null, mainClosed: false, choice: null, answers: {}, used: {}, leaderLost: [], aborted: [] } } as unknown as Partial<BoardState>)
-  eq([f.procMeta.mods, f.procMeta.battles, f.procMeta.phaseRun], [[], [], null], '19a: procMeta.mods・battles・phaseRun を既定値で補う')
+  eq([f.layers.list, f.procMeta.battles, f.procMeta.phaseRun], [[], [], null], '19a: 層・battles・phaseRun を既定値で補う')
+  // R3: R2b の修正の記録（procMeta.mods）は層に移す（旧データ）。R3 より前の手直しの層（modifiers）には連番を補う
+  const g = fillBoardDefaults({
+    modifiers: { m1: { id: 'm1', targetIid: 'a1', sourceLabel: '手', stat: '力', delta: 1, kind: '能力値修正', scope: 'その他' } },
+    procMeta: { seq: 3, base: null, mainClosed: false, choice: null, answers: {}, used: {}, leaderLost: [], aborted: [], mods: [{ id: 'mod2', iid: 'a1', stat: '早', delta: 2, kind: '能力値修正', until: 'turn', battleId: null }] },
+  } as unknown as Partial<BoardState>)
+  eq(
+    [g.layers.list.map((l) => [l.kind, l.until, l.targets, l.body]), 'mods' in g.procMeta, g.modifiers.m1.seq],
+    [[['能力値修正', 'turn', ['a1'], { mod: { stat: '早', delta: 2 } }]], false, 1],
+    '19c: 旧データの procMeta.mods は層に、modifiers に連番を補う',
+  )
+}
+
+// =============================================================================
+// 20. 継続効果の層の入れ物（K3・R3。core は入れ物・連番・期限だけ。中身は読まない）
+//     12-2「新たにこれらの効果が発揮した場合は、既に発揮した全ての効果の後に発揮したとみなされ」（oldrule.txt:505-506）＝連番は足した順
+//     12-2「これらの効果は効果の発生元が存在し続ける必要があります」（510-511）＝常時効果（whileSource）は [28]・10-8 では外さない
+//     20-4[28]「・攻防修正値を失わせる処理・バトル終了時に失われる効果の処理」（1122-1124）／10-8「・能力値修正を失わせる処理・《ターン終了時》に失われる効果の処理」（439-441）
+// =============================================================================
+{
+  const seed = (label: string, kind: '能力値修正' | '攻防修正' | null, until: 'turn' | 'battle' | 'whileSource') => ({ source: null, ability: until === 'whileSource' ? 0 : null, by: 'A' as const, label, kind, until, targets: ['a1'], host: null, body: {} })
+  const s0 = startBattleAt(battleBoard(), { challenger: 'A', at: 19, participants: { A: ['a1'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  const bt = topFrame(sim.s)!.id
+  act(sim, { type: 'procLayers', add: [seed('能力・ターン', '能力値修正', 'turn'), seed('攻防・バトル', '攻防修正', 'battle'), seed('常時の攻防', '攻防修正', 'whileSource'), seed('常時の能力', '能力値修正', 'whileSource')] })
+  const l = sim.s.layers.list
+  eq([l.map((x) => x.seq).every((q, i) => i === 0 || q > l[i - 1].seq), l[1].battleId, l[0].battleId], [true, bt, null], '20a: 層の連番は足した順・バトル終了時まで／攻防修正はそのバトルに結びつく')
+  act(sim, { type: 'procBattle', frameId: bt, abort: 'テスト' })
+  act(sim, { type: 'procPass', by: 'A' })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq(sim.s.layers.list.map((x) => x.label), ['能力・ターン', '常時の攻防', '常時の能力'], '20b: [28] は攻防修正（効果で足したもの）とバトル終了時までの効果を外す。常時効果の層は残す（12-2）')
+  act(sim, { type: 'procPhase', to: 'ターン終了' })
+  runAll(sim)
+  eq(sim.s.layers.list.map((x) => x.label), ['常時の攻防', '常時の能力'], '20c: 10-8 は能力値修正（効果で足したもの）とターン終了時までの効果を外す。常時効果の層は残す')
+  act(sim, { type: 'procLayers', remove: [sim.s.layers.list[0].id], update: [{ id: sim.s.layers.list[1].id, body: { x: 1 } }], bound: { i1: 'a1' }, unusable: ['bc'] })
+  eq([sim.s.layers.list.map((x) => [x.label, x.body]), sim.s.layers.bound, sim.s.layers.unusable], [[['常時の能力', { x: 1 }]], { i1: 'a1' }, ['bc']], '20d: 層を外す・中身を書き換える・控え（bound・unusable）を置く')
+}
+{
+  // 15-4「気力は気力上限以上の値はとりません」（616）・FAQ:249 取り除いたら残り気力は上限と同じ値に調整。orient は効果で状態を戻す（「常に消耗状態」FAQ:2476）
+  const sim: Sim = { s: board([card('a1', 'A', 'char', { kiryoku: 6 }), card('a2', 'A', 'char')]), trace: [], stops: [] }
+  act(sim, { type: 'procLayers', clamp: [{ iid: 'a1', value: 5 }, { iid: 'a2', value: 9 }], orient: [{ iid: 'a2', to: 'rested', why: 'テスト' }] })
+  eq([sim.s.cards.a1.kiryoku, sim.s.cards.a2.kiryoku, sim.s.cards.a2.orientation], [5, 5, 'rested'], '20e: clamp は上限を超えた分だけ下げる（上げない）・orient は状態を変える')
+}
+{
+  // 20-3「選択可能なバトルカードがある」・20-4[16]: 効果で使用できないバトルカードは選べない（控え unusable）
+  const s0 = board([card('la', 'A', 'leader'), card('a1', 'A', 'char'), card('lb', 'B', 'leader'), card('b1', 'B', 'char'), card('bc', 'B', 'battle', { used: false }), ...deck('A', 5), ...deck('B', 5)])
+  const sim: Sim = { s: { ...s0, layers: { ...s0.layers, unusable: ['bc'] } }, trace: [], stops: [] }
+  act(sim, { type: 'procOpenMain' })
+  act(sim, { type: 'procDeclare', by: 'A', decl: battleDecl('BT', 'A') })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq(sim.s.procMeta.battles[0]?.aborted, '選択可能なバトルカードが無い（20-3・20-4[5]）', '20f: 使用できないバトルカードしか無ければ [5] で中断（20-3）')
+}
+{
+  // 15-2「キャラは１体づつ選択してゴミ箱送りにします」（594-596）・17-1（851-853）: 場の制限の是正は選んだものをゴミ箱送り（ダウンではない）。リーダーは選ばせない
+  const sim: Sim = { s: board([card('la', 'A', 'leader'), card('a1', 'A', 'char'), card('it', 'A', 'char', { attachedTo: 'a1', kiryoku: null }), card('a2', 'A', 'char')]), trace: [], stops: [] }
+  act(sim, { type: 'procChoice', choice: { id: 'lim', by: 'A', kind: 'select', purpose: 'limitTrash', prompt: '場の制限', options: [{ key: 'a1', label: 'a1' }, { key: 'a2', label: 'a2' }], min: 1, max: 1, frameId: null } })
+  act(sim, { type: 'procChoose', id: 'lim', pick: ['a1'] })
+  eq([sim.s.cards.a1.zone, sim.s.cards.it.zone, sim.s.cards.a2.zone, sim.s.downs.A], ['trash', 'trash', 'char', 0], '20g: 選んだキャラ（と装備していたアイテム）をゴミ箱送り・ダウン数は増えない')
+  act(sim, { type: 'procLimitTrash', iids: ['la', 'a2'], reason: 'テスト' })
+  eq([sim.s.cards.la.zone, sim.s.cards.a2.zone], ['leader', 'trash'], '20h: 選ぶ余地が無いときのゴミ箱送り（リーダーは送らない）')
+}
+{
+  // FAQ:1484「入れ替えたアイテムが一番最後になります」: 付け替えは同時・装備の順の最後
+  const sim: Sim = { s: board([card('x', 'A', 'char'), card('y', 'B', 'char'), card('p', 'A', 'char', { attachedTo: 'x', kiryoku: null }), card('q', 'B', 'char', { attachedTo: 'y', kiryoku: null }), card('r', 'B', 'char', { attachedTo: 'y', kiryoku: null })]), trace: [], stops: [] }
+  sim.s = { ...sim.s, cards: { ...sim.s.cards, q: { ...sim.s.cards.q, index: 100 }, r: { ...sim.s.cards.r, index: 101 } } }
+  act(sim, { type: 'procAttach', moves: [{ item: 'p', to: 'y' }, { item: 'q', to: 'x' }] })
+  eq([sim.s.cards.p.attachedTo, sim.s.cards.q.attachedTo, sim.s.cards.p.index > sim.s.cards.r.index], ['y', 'x', true], '20i: 2枚の付け替えは同時・付け替えたアイテムは装備の順の最後')
+}
+{
+  // 15-4-2「[5] 《ダメージを与えたとき》《ダメージを受けたとき》…[6] ダメージの値分、気力を減らす」: 受けない（prevent）なら [5] の処理も [6] も無い
+  const sim: Sim = { s: board([card('b1', 'B', 'char')]), trace: [], stops: [] }
+  act(sim, { type: 'procDamage', damages: [{ value: 2, recipient: 'b1', dealerIid: null, dealerSeat: 'A' }] })
+  runAll(sim, { onEngine: (s) => false })
+  // [5] の窓まで進んだ（runAll は窓を見送るので、手で止める）
+  const sim2: Sim = { s: board([card('b1', 'B', 'char')]), trace: [], stops: [] }
+  act(sim2, { type: 'procDamage', damages: [{ value: 2, recipient: 'b1', dealerIid: null, dealerSeat: 'A' }] })
+  for (let g = 0; g < 50 && !(topFrame(sim2.s)?.kind === 'damage' && topFrame(sim2.s)!.step === 5 && topFrame(sim2.s)!.status === 'window'); g++) {
+    const t = topFrame(sim2.s)!
+    if (t.status === 'window') act(sim2, { type: 'procPass', by: awaitingSeat(sim2.s)! })
+    else if (t.status === 'engine' && t.engineWhat === 'timing') act(sim2, { type: 'procTimingDone', frameId: t.id, items: [] })
+  }
+  act(sim2, { type: 'procDamageEdit', frameId: topFrame(sim2.s)!.id, prevent: 'テスト' })
+  runAll(sim2)
+  eq([sim.s.cards.b1.kiryoku, sim2.s.cards.b1.kiryoku, sim2.s.proc.length, sim2.trace.some((t) => t.text.startsWith('受けない:b1'))], [3, 5, 0, true], '20j: ダメージを受けない（[5] の前）＝気力は減らない・手順は終わる')
 }
 
 console.log(failures === 0 ? '\n✅ 全成功' : `\n❌ ${failures} 件失敗`)

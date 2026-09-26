@@ -8,6 +8,7 @@ import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
 import { evalCond, resolveRef } from './eval'
+import { abilitiesLost } from './layers'
 
 export type Activated = Extract<Ability, { kind: 'activated' }>
 export type Play = Extract<Ability, { kind: 'play' }>
@@ -48,8 +49,18 @@ export function sourceActive(state: BoardState, iid: string): boolean {
   const c = state.cards[iid]
   if (!c) return false
   if (c.zone === 'field') return true
-  if (c.attachedTo) return isCharOnField(state.cards[c.attachedTo])
+  // 付いているアイテム: キャラに・バトルカードに（《能力禁止》R3）
+  if (c.attachedTo) {
+    const h = state.cards[c.attachedTo]
+    return h?.zone === 'battle' || isCharOnField(h)
+  }
   return isCharOnField(c)
+}
+
+/** キャラの特殊能力が今あるか（【特殊能力を失う】の層 R3）。アイテム・フィールドの効果は特殊能力でない */
+function abilitiesOn(ctx: EngineCtx, state: BoardState, iid: string): boolean {
+  const c = state.cards[iid]
+  return !c || !!c.attachedTo || !isCharOnField(c) || !abilitiesLost(ctx, state, iid)
 }
 
 export interface CondHit {
@@ -68,7 +79,7 @@ export function conditionalHits(ctx: EngineCtx, state: BoardState, frame: ProcFr
     .sort((a, b) => (a.owner === b.owner ? zoneRank(a.zone, a.attachedTo) - zoneRank(b.zone, b.attachedTo) || a.index - b.index : a.owner < b.owner ? -1 : 1))
   for (const c of cards) {
     const def = ctx.defs[c.cardId]
-    if (!def) continue
+    if (!def || !abilitiesOn(ctx, state, c.iid)) continue
     def.abilities.forEach((ab, index) => {
       if (ab.kind !== 'conditional') return
       // フィールドカードの「お互いの」効果（eachPlayer）は AP→NAP の順にそれぞれのプレイヤーのものとして処理する（18-1・FAQ:4105）
@@ -94,7 +105,7 @@ function zoneRank(zone: string, attachedTo: string | null): number {
 export function stillMatches(ctx: EngineCtx, state: BoardState, iid: string, index: number, triggerId: string, seat?: Seat): boolean {
   const frame = findFrame(state, triggerId)
   const c = state.cards[iid]
-  if (!frame || !c || !sourceActive(state, iid)) return false
+  if (!frame || !c || !sourceActive(state, iid) || !abilitiesOn(ctx, state, iid)) return false
   if (frame.kind === 'down' && frame.down?.canceled) return false
   const ab = ctx.defs[c.cardId]?.abilities[index]
   if (!ab || ab.kind !== 'conditional') return false

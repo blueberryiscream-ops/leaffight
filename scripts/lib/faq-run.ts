@@ -16,6 +16,10 @@
 //    選択も、相手の選択が来たら続く step のうちその席の choose で選択肢に合うものを先に使う（steps の並びと処理の順が違うケース）
 //  - choose の選択が最後まで来なかったら「その選択はできない」（合法でない）。core が答えを受け付けなかったら合法でない
 //  - 期待の at は「その手順がその段以降で最初に止まった点」の盤面で確かめる。zone 'field' はバトルカード・フィールドカードの置き場も含む
+// R3 で足した約束（HANDOFF-R3「決めたこと」F24〜）:
+//  - declare の答えに violations（カードの効果による禁止・対象にならない・特殊能力を失っている・装備対象 K4）があれば、その窓では「合法でない」
+//    （画面では警告して通すが、FAQ の「できません」はその宣言をしないプレイヤーとして扱う。盤面は宣言の前に戻す）
+//  - force は、それより前の step で始めた手順（宣言の処理）を終えてから起こす（状況を作る出来事は、宣言した行動の処理の後のこと）
 
 import type { BoardAction } from '../../src/core/actions'
 import { EMPTY_BOARD, type BoardState, type CardInstance, type Seat, type ZoneId } from '../../src/core/board'
@@ -232,6 +236,7 @@ function tryDeclare(run: Run, req: DeclReq): { ok: true; declId: string } | { ok
     costGen: req.costGen,
     battle: req.battle,
   })
+  if (out.ok && out.violations.length) return { ok: false, reason: `警告（K4）: ${out.violations.map((v) => v.text).join('／')}` }
   if (out.ok) {
     run.warnings.push(...out.warnings)
     out.actions.forEach((a) => apply(run, a))
@@ -269,6 +274,7 @@ function doDeclare(run: Run, i: number, req: DeclReq) {
   let lastReason = '宣言できる窓が無かった'
   /** この窓（フレームと段）で今の step の席が宣言できずに見送った */
   let refusedAt: string | null = null
+  let triedFresh = false
   const winKey = () => {
     const w = currentWindow(run.state)
     return w ? `${w.frame?.id ?? 'base'}:${w.frame?.step ?? 0}:${run.state.procMeta.seq}` : ''
@@ -283,8 +289,24 @@ function doDeclare(run: Run, i: number, req: DeclReq) {
       if (!lookaheadChoose(run, i, s.procMeta.choice.by) && !autoStep(run)) break
       continue
     }
-    // 手順の中を探していて、手順が全部終わった＝ここまでに宣言できる窓が無かった
-    if (sawProc && s.proc.length === 0 && !baseOpen(s)) break
+    // 手順の中を探していて、手順が全部終わった＝ここまでに宣言できる窓が無かった。
+    // ただし、1つ前の step が同じ席のメインフェイズの窓での宣言（続けて行う行動）で、開き直したメインフェイズの窓がその席の番なら、
+    // そこで1度だけ試す（《地竜走破》の後に《応援》FAQ:2479。F26・R3）。相手の割り込みの後の step（FAQ:2225）には使わない
+    if (sawProc && s.proc.length === 0 && !baseOpen(s)) {
+      const fresh = currentWindow(s)
+      const prev = i > 0 ? run.all[i - 1] : undefined
+      const chained = !!prev && 'declare' in prev && prev.declare.by === req.by && !prev.declare.at && !req.at
+      if (chained && !triedFresh && fresh && !fresh.frame && awaitingSeat(s) === by) {
+        triedFresh = true
+        const r = tryDeclare(run, req)
+        if (r.ok) {
+          run.steps[i] = { legal: true, declId: r.declId, consumed: true }
+          return
+        }
+        lastReason = r.reason
+      }
+      break
+    }
     const w = currentWindow(s)
     const seat = awaitingSeat(s)
     if (w && seat === by && atMatches(w.frame, req.at)) {
@@ -479,10 +501,10 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     return { ok: !!hit, msg: `steps[${e.fizzled.step}] の立ち消え: ${hit ? hit.reason : 'なし'}` }
   }
   if ('stat' in e) {
-    // 能力値＝印刷値＋記録した能力値修正（R2b。層 K3 は R3）
+    // 能力値＝継続効果の層から導き出した今の値（R3: 印刷値＋層を連番の順に＋手直しの層）
     const x = card(e.stat[0])
     const v = x ? currentStat(run.ctx, s, x.iid, e.stat[1]) : undefined
-    return { ok: v === e.stat[2], msg: `能力値 ${e.stat[0]} ${e.stat[1]} = ${v}（印刷値＋能力値修正の記録）（期待 ${e.stat[2]}）` }
+    return { ok: v === e.stat[2], msg: `能力値 ${e.stat[0]} ${e.stat[1]} = ${v}（層から導き出した値）（期待 ${e.stat[2]}）` }
   }
   if ('order' in e) {
     const names = run.trace.filter((t) => t.kind === 'name')
@@ -539,6 +561,8 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
       if (run.pending.length) return
       if (run.steps[i]?.consumed) return // 先に使った（F10・F11）
       if ('force' in step) {
+        // 前の step で始めた手順を終えてから（F25）
+        if (i > 0) for (let g = 0; g < 600 && (run.state.proc.length || baseOpen(run.state)) && !run.state.result; g++) if (!autoStep(run)) break
         const bind: Record<string, string[]> = {}
         for (const [k, v] of Object.entries(refs)) bind[k] = [v]
         apply(run, forceOp(run.state, step.force, bind))

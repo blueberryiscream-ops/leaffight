@@ -9,7 +9,7 @@
 //   5. holes の ID が src/engine/holes.ts にある
 //   6. 窓の指定（at）が原典の宣言の機会の段か（R2a）
 // 実行（R2a §3-3）: grade T のケースを setup → steps → drive → expect でエンジンに通す（scripts/lib/faq-run.ts）。
-//   ✅ 通った／❌ 期待と違う／保留（理由つき）。R2a の対象（_local/rules/faq/_r2a-scope.json）の ❌ は終了コード1。
+//   ✅ 通った／❌ 期待と違う／保留（理由つき）。R2a・R2b・R3 の対象（_local/rules/faq/_r2a-scope.json・_r2b-scope.json・_r3-scope.json）の ❌ は終了コード1。
 //   対象の外のケースも実行して記録するが、❌ は「参考」として保留に数える（R2b 以降の手順・記述の無いカードが多いため）。
 // _local/rules/faq が無い環境（公開リポジトリだけ）では 0件・スキップで成功する。
 
@@ -225,7 +225,8 @@ const readScope = (name: string) => {
 }
 const scopeA = readScope('_r2a-scope.json')
 const scopeB = readScope('_r2b-scope.json')
-const scope = new Set<string>([...scopeA, ...scopeB])
+const scopeC = readScope('_r3-scope.json')
+const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
   const results: (CaseResult & { inScope: boolean })[] = []
@@ -234,14 +235,14 @@ if (Object.keys(cardInfos).length) {
     const inScope = scope.has(c.id)
     if (!inScope && r.verdict === '❌') {
       r.verdict = '保留'
-      r.reasons.unshift('対象外（R2a・R2b の外）の参考実行で期待と違った')
+      r.reasons.unshift('対象外（R2a・R2b・R3 の外）の参考実行で期待と違った')
     }
     results.push({ ...r, inScope })
   }
   const count = (xs: typeof results) => ({ total: xs.length, ok: xs.filter((r) => r.verdict === '✅').length, hold: xs.filter((r) => r.verdict === '保留').length, ng: xs.filter((r) => r.verdict === '❌').length })
   // R2a・R2b の対象ごとに結果のファイルを書く（inScope はそのフェイズの対象か）
   let ng = 0
-  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB]] as const) {
+  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB], ['R3', scopeC]] as const) {
     const rs = results.map((r) => ({ ...r, inScope: sc.has(r.id) }))
     const inS = rs.filter((r) => r.inScope)
     const missing = [...sc].filter((id) => !rs.some((r) => r.id === id))
