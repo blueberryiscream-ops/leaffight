@@ -118,13 +118,13 @@ function effectOn(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): boole
   return true
 }
 
-function isCharSource(ctx: EngineCtx, state: BoardState, iid: string | null): boolean {
+export function isCharSource(ctx: EngineCtx, state: BoardState, iid: string | null): boolean {
   const k = iid ? ctx.cards[state.cards[iid]?.cardId ?? '']?.kind : undefined
   return k === 'c' || k === 't'
 }
 
 /** そのカードが、その種類の行動の対象にならないか（層の untargetable）。skip＝判定中の効果（自分で自分を調べない） */
-function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff): Eff | null {
+export function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff): Eff | null {
   for (const e of derived(ctx, state).effs) {
     if (e === skip || e.effect.ce !== 'untargetable' || !e.effect.by.kinds.includes(kind)) continue
     if (targetsOf(ctx, state, e).includes(iid)) return e
@@ -335,6 +335,69 @@ export const ACTION_KIND: Record<ProcDecl['kind'], ActionPattern['kinds'][number
   battle: 'バトル',
 }
 
+/**
+ * (A) 選ばずに決まるキャラに効果を及ぼす特殊能力の「暗黙の対象」（PHASE-R4b0 §2(A)）: choices を経ずに op の
+ * who/to 等（CardRef。Selector は forEach で処理する＝(B)）が決まるキャラに効果を及ぼす op を、宣言の効果（ab.effect）
+ * から拾い集める。if は宣言時点の状態で分岐を決め、simul はそのまま中を見る。forEach の中は (B) が処理するので見ない。
+ */
+function implicitTargetsOf(ctx: EngineCtx, state: BoardState, decl: ProcDecl): string[] {
+  if (decl.kind !== 'ability' && decl.kind !== 'event') return []
+  const cardId = decl.eng.cardId as string | undefined
+  const idx = decl.eng.index as number | undefined
+  if (cardId === undefined || idx === undefined) return []
+  const ab = ctx.defs[cardId]?.abilities[idx]
+  if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play')) return []
+  const env: Env = { self: decl.sourceIid, you: decl.by, slots: (decl.eng.slots as Record<string, string[]>) ?? {}, trigger: decl.trigger, declId: decl.id, declared: (decl.eng.declared as Env['declared']) ?? {} }
+  return collectEffectTargets(ctx, state, env, ab.effect)
+}
+
+/** op の中で「効果を及ぼす」CardRef（Selector は含めない＝forEach の中は (B) が別に処理する）。§2(A) の分類表は HANDOFF-R4b0 参照 */
+function effectRefsOf(op: Op): CardRef[] {
+  switch (op.op) {
+    case 'statMod':
+    case 'kiryoku':
+    case 'setKiryoku':
+    case 'orient':
+    case 'clearMods':
+      return [op.who]
+    case 'damage':
+    case 'redirectDamage':
+      return [op.to]
+    case 'trash':
+    case 'moveTo':
+    case 'callByEffect':
+    case 'putOntoField':
+      return [op.what]
+    case 'grantAbility':
+      return [op.to]
+    case 'battleDamage':
+      return op.to === 'all' ? [] : [op.to]
+    case 'addContinuous': {
+      const who = (op.effect as { who?: CardRef | Selector }).who
+      return who && !('zone' in who) ? [who] : []
+    }
+    default:
+      return []
+  }
+}
+
+function collectEffectTargets(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[]): string[] {
+  const out: string[] = []
+  for (const op of ops) {
+    if (op.op === 'if') {
+      out.push(...collectEffectTargets(ctx, state, env, evalCond(ctx, state, env, op.cond) ? op.then : op.else ?? []))
+      continue
+    }
+    if (op.op === 'simul') {
+      out.push(...collectEffectTargets(ctx, state, env, op.do))
+      continue
+    }
+    if (op.op === 'forEach') continue // (B): forEach・selector は drive.ts の実行時に別に外す
+    for (const ref of effectRefsOf(op)) out.push(...resolveRef(state, env, ref))
+  }
+  return out
+}
+
 /** 宣言が層の「禁止・対象にならない・特殊能力を失っている」に当たるか（宣言[1]〜[5] を済ませた ProcDecl で調べる） */
 export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): Violation[] {
   const out: Violation[] = []
@@ -348,7 +411,8 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     if (!patternHits(ctx, state, e, f.action, decl)) continue
     out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label, sourceIid: e.layer.source })
   }
-  for (const t of decl.targets) {
+  const allTargets = new Set([...decl.targets, ...implicitTargetsOf(ctx, state, decl)])
+  for (const t of allTargets) {
     const u = untargetableBy(ctx, state, t, kind)
     if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
   }

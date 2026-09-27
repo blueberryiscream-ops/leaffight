@@ -35,10 +35,10 @@ import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activa
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
-import type { Ability, CardRef, Choice, Op } from './dsl'
+import type { Ability, CardRef, Choice, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { clearableMods, continuousSeed, damagePrevented, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, violations, type Violation } from './layers'
+import { clearableMods, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -853,6 +853,17 @@ function opLabel(op: Op): string {
   }
 }
 
+/**
+ * (B) forEach・selector で複数のキャラに効果を及ぼす特殊能力（PHASE-R4b0 §2(B)）: 特殊能力の対象にならないキャラを
+ * 処理の時点（select する今）の状態で外す（FAQ:709・3573）。外すのは発生源がキャラ（リーダー・タッグを含む）の
+ * 特殊能力のときだけ（layers.ts の isCharSource と同じ線。イベント・フィールド・アイテムの効果は外さない FAQ:1264）
+ */
+function targetableSelect(ctx: EngineCtx, state: BoardState, env: Env, sel: Selector): string[] {
+  const iids = select(ctx, state, env, sel)
+  if (!isCharSource(ctx, state, env.self)) return iids
+  return iids.filter((iid) => !untargetableBy(ctx, state, iid, '特殊能力'))
+}
+
 function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: SimulItem, eng: ItemEng, env: Env, task: Task, rest: Task[], warnings: string[]): OpResult {
   const op = task.op
   const refs = (r: Parameters<typeof resolveRef>[2]) => resolveRef(state, env, r)
@@ -1041,7 +1052,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'if':
       return { tasks: [...(evalCond(ctx, state, env, op.cond) ? op.then : op.else ?? []).map((o) => ({ op: o, bind: task.bind, bundle: task.bundle })), ...rest], actions: [] }
     case 'forEach': {
-      const iids = select(ctx, state, env, op.in)
+      const iids = targetableSelect(ctx, state, env, op.in)
       const bundle = task.bundle ?? `${frame.id}:${item.key}:fe${eng.seq}`
       const expanded = iids.flatMap((iid) => op.do.map((o) => ({ op: o, bind: { ...(task.bind ?? {}), [op.as]: [iid] }, bundle })))
       return { tasks: [...expanded, ...rest], actions: [] }
@@ -1054,7 +1065,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         // 中の forEach もここで展開して、ダメージを1つのまとまりにする（同時に発生 FAQ:1235）
         const expanded: Task[] = op.do.flatMap((o): Task[] =>
           o.op === 'forEach'
-            ? select(ctx, state, env, o.in).flatMap((iid) => o.do.map((x): Task => ({ op: x, bind: { ...(task.bind ?? {}), [o.as]: [iid] }, bundle })))
+            ? targetableSelect(ctx, state, env, o.in).flatMap((iid) => o.do.map((x): Task => ({ op: x, bind: { ...(task.bind ?? {}), [o.as]: [iid] }, bundle })))
             : [{ op: o, bind: task.bind, bundle }],
         )
         return { tasks: [...expanded, ...rest], actions: [] }
