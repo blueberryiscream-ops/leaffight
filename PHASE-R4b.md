@@ -55,6 +55,7 @@
 - カードの記述は `_local/rules/cards/<id>.ts`（`export const def: CardDef`・status 'draft'）。頭の `@header` は `node _local/rules/tools/card-header.mjs` が書く（手で直さない）。faqReview の書き方は `PHASE-R4a-2B.md` §2（関係 FAQ を全部 case/ok/manual/na で。本文の一部を記述で省いたら manual）。**status は手で直さない**（`tested.ts` が決める）
 - ケースの正は `_local/rules/tools/authored/*.mjs`。`tools/gen-cases.mjs` で `faq/*.ts` を生成し直す（`faq/*.ts` を手で直さない。「authored は使われていない」は誤り）。R4b のケースの範囲は R4a の `r4a-scope.ts` にならって足す
 - 既存の FAQ ケースの期待値を書き換えない。直す必要があると思ったら報告
+- 🚨 **コミットの前に `node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts` を回して `faq/_tested.json` を作り直し、一緒にコミットする**（test:faq の表示だけでは書き換わらない。R4b-1 で古いまま入り、zip の status がずれた）
 - `core/` はカード知識ゼロのまま（core に ui/net/data・外部パッケージを import しない）。乱数・時刻を core に持ち込まない
 - `npm run test:faq` で R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30／R4b0 のケースが下がらないこと。`npm run verify` 緑
 - 「既定でそうなる」と書くなら実装を grep で確かめてから
