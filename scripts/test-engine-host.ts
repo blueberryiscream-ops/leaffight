@@ -13,7 +13,7 @@ import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, p
 import type { CardInfo } from '../src/engine/ctx'
 import { applyAction } from '../src/core/actions'
 import { currentStat, declare, drive } from '../src/engine/drive'
-import { staticSourceActive } from '../src/engine/layers'
+import { applyCostMod, staticSourceActive } from '../src/engine/layers'
 import { select } from '../src/engine/eval'
 import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
@@ -411,6 +411,10 @@ function battleStart(battleCard: string): History {
     st('Snatch', 'e', null, null),
     { ...st('Robo', 'c', S(1, 1, 1, 1, 1)), charTypes: ['ロボ'] },
     { ...st('GC', 'c', S(1, 1, 1, 1, 1)), cost: 'WW' },
+    st('OF', 'c', S(1, 1, 1, 1, 1), 5),
+    st('CallSrc', 'c', S(1, 1, 1, 1, 1), 3),
+    st('Caller', 'c', S(1, 1, 1, 1, 1)),
+    st('Sabo', 'e', null, null),
   ]
   const self = { ref: 'self' as const }
   const equipped = { ref: 'equipped' as const }
@@ -437,6 +441,12 @@ function battleStart(battleCard: string): History {
         { kind: 'activated', name: 'Gen2', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'generateCost', icons: { callCostOf: self, extra: ['W'] } }] },
       ],
     },
+    // D20・R4a-2 単体テスト用: offer（払う→ generateCost の useAs で相手のコストになる／払わない→気力－２）
+    OF: { id: 'OF', name: 'OF', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Ask', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'offer', to: 'opponent', prompt: 'pay', pay: [], ifPaid: [{ op: 'generateCost', who: 'opponent', icons: ['W'], useAs: 'you' }], ifDeclined: [{ op: 'kiryoku', who: self, delta: -2 }] }] }] },
+    // D17・R4a-2 単体テスト用: 効果で呼び出す（callByEffect）。呼び出されるとき（窓）はまだ場に出ていないことを確かめる
+    Caller: { id: 'Caller', name: 'Caller', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'DoCall', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'choose', choice: { slot: 'w', chooser: 'you', pick: { cards: { zone: 'hand', side: 'you', class: 'キャラクター' } }, count: [1, 1], mode: 'select', when: 'resolve' } }, { op: 'callByEffect', what: { ref: 'slot', slot: 'w' }, orientation: 'ready' }] }] },
+    // 妨害工作の最小限（割込型「キャラクターカードが呼び出されるとき」でゴミ箱送り）
+    Sabo: { id: 'Sabo', name: 'Sabo', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '割込型', trigger: { timing: 'キャラクターカードが呼び出されるとき', actor: 'opponent' }, choices: [], effect: [{ op: 'trash', what: { ref: 'event', role: 'summonedChar' } }] }] },
   }
   const ctx3 = { cards: Object.fromEntries(R3I.map((c) => [c.id, c])), defs: R3D }
   const base3 = (cs: CardInstance[]) => ({ ...board([card('LA', 'A', 'leader', { kiryoku: 10 }), card('LB', 'B', 'leader', { kiryoku: 10 }), card('dA', 'A', 'deck'), card('dB', 'B', 'deck'), ...cs]), mode: 'engine' as const })
@@ -543,6 +553,106 @@ function battleStart(battleCard: string): History {
     eq([ch?.by, ch?.options.map((o) => o.key).sort()], ['B', ['Q', 'Y']], '対象の選び直し: 乗っ取った側（B）が改めて対象を選ぶ（Q・Y どちらも候補）')
     m = drive(act3(m, { type: 'procChoose', id: ch!.id, pick: ['Y'] }), ctx3).state
     eq([m.cards.Y.kiryoku, m.cards.Q.kiryoku], [4, 1], '対象の選び直し: 選び直した Y が回復・宣言時に指定した Q は元の使用者が使えず変わらない')
+  }
+
+  // K6・R4a-2 単体テスト: costMod（0コスト＋追加アイコン・下限）。applyCostMod は純関数（layers.ts）
+  {
+    eq(applyCostMod({ icons: [], attrs: [] }, { icons: { W: 1 }, kiryoku: 0 }).icons, ['W'], 'costMod: 0コストのアイコンにアイコンを1枚足すと[W]になる')
+    eq(applyCostMod({ icons: ['W'], attrs: [] }, { icons: { W: -5 }, kiryoku: 0 }).icons, [], 'costMod: アイコンは種類ごとに0未満にならない（[W]1枚から5枚引いても0枚のまま）')
+    eq(applyCostMod({ icons: [], attrs: [], other: [{ kiryoku: 2 }] }, { icons: {}, kiryoku: -5 }).other, [{ kiryoku: 0 }], 'costMod: 気力コストの最終値も0未満にならない')
+  }
+
+  // D20・R4a-2 単体テスト: offer（払う／払わない）。払う→ generateCost の useAs で発生させたコストが使用者（you）のものになる。
+  // 払わない→ ifDeclined の気力減少が働く
+  {
+    const of0 = drive(base3([card('OF', 'A', 'char', { kiryoku: 5 })]), ctx3).state
+    const ofDecl = declare(of0, ctx3, { by: 'A', source: 'OF', ability: 'Ask' })
+    if (!ofDecl.ok) throw new Error(`Ask declare failed: ${ofDecl.reason}`)
+    const passUntilChoice = (s: BoardState): BoardState => {
+      let cur = s
+      for (let i = 0; i < 50 && !cur.procMeta.choice; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+      }
+      return cur
+    }
+    let asked = of0
+    ofDecl.actions.forEach((a) => (asked = act3(asked, a)))
+    asked = passUntilChoice(drive(asked, ctx3).state)
+    const offerCh = asked.procMeta.choice
+    eq([offerCh?.by, offerCh?.kind, offerCh?.options.map((o) => o.key)], ['B', 'use', ['pay']], 'offer: B（opponent）に払うかを問う（procChoice kind:use）')
+    const paid = drive(act3(asked, { type: 'procChoose', id: offerCh!.id, pick: ['pay'] }), ctx3).state
+    eq([paid.costs.A.map((t) => t.icon), paid.costs.B.length], [['W'], 0], 'offer 払う: generateCost の useAs どおり、発生させたコストは you（A）のものになる（B には残らない）')
+    const declined = drive(act3(asked, { type: 'procChoose', id: offerCh!.id, pick: [] }), ctx3).state
+    eq(declined.cards.OF.kiryoku, 3, 'offer 払わない: ifDeclined の気力－２が働く（5→3）')
+  }
+
+  // D17・R4a-2 単体テスト: 効果で呼び出す（callByEffect）。《キャラクターカードが呼び出されるとき》の窓では、
+  // 呼び出されるキャラはまだ場に出ていない（手札のまま）ことを確かめる
+  {
+    const passOne = (s: BoardState, seat: Seat): BoardState => drive(act3(s, { type: 'procPass', by: seat }), ctx3).state
+    const passUntilChoice2 = (s: BoardState): BoardState => {
+      let cur = s
+      for (let i = 0; i < 50 && !cur.procMeta.choice; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = passOne(cur, seat)
+      }
+      return cur
+    }
+    let c0 = drive(base3([card('Caller', 'A', 'char'), card('CallSrc', 'A', 'hand')]), ctx3).state
+    const callDecl = declare(c0, ctx3, { by: 'A', source: 'Caller', ability: 'DoCall' })
+    if (!callDecl.ok) throw new Error(`DoCall declare failed: ${callDecl.reason}`)
+    let cc = c0
+    callDecl.actions.forEach((a) => (cc = act3(cc, a)))
+    cc = passUntilChoice2(drive(cc, ctx3).state)
+    // choose 'w' の候補は CallSrc だけ（自動で答える）
+    const chW = cc.procMeta.choice
+    if (!chW) throw new Error('choose w が来ない')
+    cc = drive(act3(cc, { type: 'procChoose', id: chW.id, pick: ['CallSrc'] }), ctx3).state
+    // ここが summon フレームの [1]《キャラクターカードが呼び出されるとき》の窓（両者見送るまで開いている）
+    eq([topFrame(cc)?.kind, topFrame(cc)?.step, cc.cards.CallSrc.zone], ['summon', 1, 'hand'], 'D17: 呼び出されるときの窓では、呼び出されるキャラはまだ場に出ていない（手札のまま）')
+    for (let i = 0; i < 10 && cc.cards.CallSrc.zone === 'hand'; i++) {
+      const seat = awaitingSeat(cc)
+      if (!seat) break
+      cc = passOne(cc, seat)
+    }
+    eq([cc.cards.CallSrc.zone, cc.cards.CallSrc.orientation], ['char', 'ready'], 'D17: 窓が閉じると場に出る（指定の向き＝ready）')
+  }
+
+  // D17・R4a-2 単体テスト: 妨害工作と同じ形（割込型「キャラクターカードが呼び出されるとき」）で、呼び出されるキャラをゴミ箱送りにできる
+  {
+    const passUntilChoice3 = (s: BoardState): BoardState => {
+      let cur = s
+      for (let i = 0; i < 50 && !cur.procMeta.choice; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+      }
+      return cur
+    }
+    let s0 = drive(base3([card('Caller', 'A', 'char'), card('CallSrc', 'A', 'hand'), card('Sabo', 'B', 'hand')]), ctx3).state
+    const callDecl = declare(s0, ctx3, { by: 'A', source: 'Caller', ability: 'DoCall' })
+    if (!callDecl.ok) throw new Error(`DoCall declare failed: ${callDecl.reason}`)
+    let ss = s0
+    callDecl.actions.forEach((a) => (ss = act3(ss, a)))
+    ss = passUntilChoice3(drive(ss, ctx3).state)
+    const chW2 = ss.procMeta.choice
+    if (!chW2) throw new Error('choose w が来ない')
+    ss = drive(act3(ss, { type: 'procChoose', id: chW2.id, pick: ['CallSrc'] }), ctx3).state
+    // 窓は AP（A）の番から。B が割り込むには A がまず見送る（11-2）
+    if (awaitingSeat(ss) === 'A') ss = drive(act3(ss, { type: 'procPass', by: 'A' }), ctx3).state
+    const saboDecl = declare(ss, ctx3, { by: 'B', source: 'Sabo' })
+    if (!saboDecl.ok) throw new Error(`Sabo declare failed: ${saboDecl.reason}`)
+    saboDecl.actions.forEach((a) => (ss = act3(ss, a)))
+    ss = drive(ss, ctx3).state
+    for (let i = 0; i < 10 && ss.cards.CallSrc.zone === 'hand'; i++) {
+      const seat = awaitingSeat(ss)
+      if (!seat) break
+      ss = drive(act3(ss, { type: 'procPass', by: seat }), ctx3).state
+    }
+    eq(ss.cards.CallSrc.zone, 'trash', '妨害工作: 呼び出されるとき（まだ場に出ていない）にゴミ箱送りにできる')
   }
 
   // D2（12-2 但し書き oldrule.txt:509-510）: バトルカードは、バトルが行われている限りカードの有無は問われず、バトルが行われている間有効
