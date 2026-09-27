@@ -69,6 +69,62 @@ PHASE-R4b.md の R4b-1 の残りをやってください:
 詳細は HANDOFF-R4b.md を読んで。
 ```
 
+## R4b-1 続き
+
+### 冒頭
+- **未完**（残り3点のうち①battleUserだけ完了。②隠し芸のTケース・③画面⑥⑦は未着手・ツール呼び出し予算切れ）
+- tested の数: 前 59／後 59（draft 6・manual 41・対象カード 106）＝変化なし（今回はカードの faqReview を触っていない。エンジンの不具合修正のみ）
+- verify: 緑（test:faq: R2a✅57・保留1／R2b✅37／R3✅18／R4a✅30・確かめ1〜6失敗0。件数は下がっていない）
+- コミット: 親 `5ac3195`（battleUser等の席をaddContinuous時点で層に固定・dsl.ts/eval.ts/layers.ts/scripts/test-engine-host.ts）／`_local/rules` 変更なし（このカードの記述は触っていないので前回の `e2a45ec` のまま）
+
+### §5 自己点検（①battleUserのみ）
+
+**1. 足した T ケース（直す前に❌だった出力）**
+FAQ 形式（authored/gen-cases）ではなく `scripts/test-engine-host.ts`（engine 単体テスト。前回の 13c/13d/13e と同じ扱い）に足した。理由: この不具合はどの FAQ の逐語にも直接対応しない（H-9c は仮の既定の穴そのもので、FAQ索引に該当エントリが無い。gen-cases.mjs は authored の各 case id が `_local/rules/faq/_index.json` に実在することを要求するため、架空のシナリオを authored に書けない）。
+- シナリオ: B が置いた鬼ごっこ系のバトルカードを A が挑んだバトルの種目に選ぶ（`addContinuous` 実行時 env.you=B・その時点の nearestBattle().challenger=A）。バトル終了後（nearestBattle が無くなった後）、A はバトルを宣言できない（prohibit）べきで、B はできるべき（H-9c＝挑んだ側）
+- 直す前 ❌（実行して確認・再現実験ずみ）:
+  ```
+  ❌ battleUser①: 挑んだ側（A）はバトル終了後もターン終了時まで宣言できない（層を作った時点で席を確定・H-9c）
+     実際: []
+     期待: ["prohibit"]
+  ❌ battleUser②: 置いた側（B）は禁止されない（このバトルを使用したのは挑んだ側 A）
+     実際: ["prohibit"]
+     期待: []
+  ```
+- 直した後: 上記2件とも ✅（`npm run test:engine-host` 全項目 ✅・`npm run verify` 緑）
+
+**2. 変えた型・関数（ファイル:行）**
+- `src/engine/dsl.ts`: `PlayerRef` に `{ seat: 'A' | 'B' }` を追加（既に決めた席をそのまま持たせる形。既存の 'battleUser'/'challenger'/'challenged' 等は変更していない）
+- `src/engine/eval.ts` `resolvePlayer`: 先頭に `if ('seat' in p) return p.seat` を追加（既存の分岐は無変更）
+- `src/engine/layers.ts`: `freezeBattleRef`／`freezeBattleRefsIn`（新設）と `continuousSeed`（`body.effect` を `effect` のまま持たせていたのを `freezeBattleRefsIn(state, env, effect)` の結果に変更）。効果が `prohibit`（`action.by`）・`costMod`（`applies.by`）のときだけ、`by` が 'battleUser'/'challenger'/'challenged' なら層を作る時点（＝そのカードの conditional が「バトルカードを選択したとき」に発動する時点。まだバトル進行中で nearestBattle が有効）で `resolvePlayer` して席を確定し、`{ seat }` に書き換える。他の効果種・他の `by` の値（'any' やカードで使っていない値）はそのまま
+- 既存の動きが変わっていない根拠: `resolvePlayer` の既存分岐はどれも削除・変更していない（'seat' は新しい分岐を先頭に足しただけ）。`continuousSeed` は effect が `prohibit`/`costMod` 以外（statMod・controller 等）なら `freezeBattleRefsIn` はそのまま素通り（`return effect`）。`prohibit`/`costMod` でも `by` が 'battleUser' 等の3つ以外（'any' や PlayerRef の他の形）ならそのまま。既存の全項目（`npm run verify`・`test:proc`・`test:faq`・`test:engine-host` の既存ケース）が緑のまま（NoEv/NoEvT の `by: 'any'` を使う既存テスト ⑰d・⑳a〜c も含めて確認）
+
+**3〜5（隠し芸・画面2点）**: 未着手（下記「次の依頼」参照）
+
+**6. tested の数・test:faq・verify**
+上の冒頭を参照（変化なし）
+
+**7. 仕様に無くて決めたこと・迷ったこと・新しい穴の候補**
+- `freezeBattleRefsIn` は `prohibit`（`action.by`）と `costMod`（`applies.by`）だけを対象にした（現在のカードでこの2種以外に `by: 'battleUser'`等を使うものが無いため）。将来 `mandate`/`untargetable` 等に `by`（または同種のバトル依存 PlayerRef）を使うカードが出たら、同じ関数に追記が必要（型上は今のところそれらに `by` フィールドが無い）
+- `{ seat }` は resolvePlayer の他の分岐（'controllerOf' 等）と同じ形で足した。PlayerRef の判定順は `typeof p === 'string'` のガードの後に来る `if ('seat' in p)` を先頭に置いたので、既存の `'controllerOf' in p`／`'slot' in p` の判定順とは競合しない（プロパティ名が重複しないため）
+
+### 次のセッションへの依頼（コピー用）
+
+```
+リーフファイト対戦ツールの実装継続です。C:\Claudecode作業スペース\leaffight（親コミット 5ac3195・_local/rules は e2a45ec のまま）。
+PHASE-R4b.md の R4b-1 の残り2点をやってください（battleUser の席の不具合は前回の続きセッションで直し済み・HANDOFF-R4b.md「## R4b-1 続き」参照）:
+1. 隠し芸（_local/rules/cards/b_隠し芸.ts）の faq-3854（「選択したときに行う」）・faq-3857（「最終的な値は結果計算時に決まる」）の
+   T ケースを書く。FAQ の逐語は _local/rules/faq/_index.json の該当id（related-faq.mjs で拾える）・oldfaq.txt:3854-3855・3857-3858。
+   authored の case は _local/rules/faq/_index.json に実在するプールの実カード（架空カード不可）で盤面を組む必要がある。
+   期待: 3854＝バトルカードを選択したとき（trigger のタイミング）に choose が発生する。3857＝選択後に能力値を変える効果を挟んでも、
+   最終的な攻防は「結果を出す計算時」（[23]）の値を使う（chosenStat が選択時点の値に固定されず currentStat を都度評価することを確認）。
+   gen-cases.mjs → tested.ts → test:faq で確かめて、期待どおりなら faqReview の 'ok' を 'case' に。
+2. DESIGN §5.3 R2u ⑥⑦・PHASE-R4b.md §2(C)（画面）: ⑥ legalDeclarations が ok:false で blocked を返す宣言をボタン列に灰色・押せないで出し、
+   触れると理由を表示（src/ui/engine/host.ts）。⑦ drive.ts awaiting kind 'offer' の画面を「払う」「払わない」の2ボタンに（今は決定(0)のボタン表記）。
+   色は src/index.css の @theme トークンだけ。overflow-auto を盤面に使わない。可能なら scripts のテストでロジックを確かめる。
+詳細は PHASE-R4b.md §2(C)・§3・§5 と HANDOFF-R4b.md「## R4b-1 続き」を読んで。
+```
+
 ## 統括16の検証（R4b-1 の途中まで）— 合格（残り3点）
 - サブのツール: **記録 141回**（申告「約88回」・上限120 超え）
 - verify 緑・test:faq R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30 を統括が回して一致。tested 59／draft 6／manual 41
