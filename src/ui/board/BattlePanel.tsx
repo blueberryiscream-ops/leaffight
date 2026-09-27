@@ -166,12 +166,20 @@ export function BattlePanel({
                 </button>
               )
             })}
-            {b.values?.[s] && (
-              <div className="text-ink-muted">
-                攻{b.values[s]!.atk}・防{b.values[s]!.def}
-              </div>
-            )}
-            {b.damage && <div className={b.damage[s] > 0 ? 'text-danger' : 'text-ink-muted'}>結果ダメージ {Math.max(b.damage[s], 0)}</div>}
+            {b.values?.[s] &&
+              Object.entries(b.values[s]!).map(([iid, v]) => (
+                <div key={iid} className="text-ink-muted">
+                  {name(iid)}: 攻{v.atk}・防{v.def}
+                </div>
+              ))}
+            {b.damage &&
+              b.damage
+                .filter((d) => d.seat === s)
+                .map((d, i) => (
+                  <div key={i} className={d.value > 0 ? 'text-danger' : 'text-ink-muted'}>
+                    結果ダメージ {name(d.recipient)}: {Math.max(d.value, 0)}
+                  </div>
+                ))}
           </div>
         ))}
       </div>

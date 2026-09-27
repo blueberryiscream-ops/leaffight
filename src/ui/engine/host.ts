@@ -129,7 +129,14 @@ export function reqToActions(state: BoardState, ctx: EngineCtx, req: EngineReq):
         return !!v && Number.isInteger(v.atk) && Number.isInteger(v.def)
       })
       if (!ok) return { ok: false, reason: '攻撃・防御の値を両方の席に整数で入れる' }
-      return { ok: true, actions: [{ type: 'procBattle', frameId: top.id, values: { A: req.values.A, B: req.values.B } }], warnings: [] }
+      // K9: 複数参加のときは人が入れた1組の値を、その席の参加キャラ全員に同じ値として当てる（人の手入力の近似・報告）
+      const b = top.battle!
+      const perSeat = (x: Seat): Record<string, { atk: number; def: number }> => {
+        const out: Record<string, { atk: number; def: number }> = {}
+        for (const iid of b.participants[x]) out[iid] = req.values[x]
+        return out
+      }
+      return { ok: true, actions: [{ type: 'procBattle', frameId: top.id, values: { A: perSeat('A'), B: perSeat('B') } }], warnings: [] }
     }
     case 'start':
     case 'engineOn':

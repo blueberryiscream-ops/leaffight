@@ -400,19 +400,32 @@ export interface TokenSpec {
   traits: Continuous[]
 }
 
-/** バトルカードの[攻][防]。値は手順[23]で評価する（FAQ oldfaq.txt:3857-3858） */
+/**
+ * バトルカードの[攻][防]。値は手順[23]で評価する（FAQ oldfaq.txt:3857-3858）。
+ * R4b（統括16・PHASE-R4b §2(B)）で足した: sub（減算・野球拳「5－賢」）／statPick（最も高い／最も低い能力値。ライバル対決。
+ * 同値のときは使用者が決める FAQ:3840-3841＝タイブレークは manual に倒す）／kiryoku（残り気力。くすぐりマシーン・潜水にらめっこ）／
+ * count（数。応援合戦「待機状態の味方キャラ数」FAQ:3861-3868）／itemCost（参加キャラの装備アイテムのコスト総数。持ち物自慢 FAQ:3935-3942）／
+ * none（攻防が無い「-/-」。リラクゼーション。ダメージ計算に関与しない FAQ:1446-1447）。
+ * R4b-1 では型と評価だけを足す（使うカードは R4b-2・R4b-3）
+ */
 export type BattleExpr =
   | { attr: Attr }
   | { chosenStat: { chooser: 'eachSide'; order: 'battleCardChooserFirst'; when: 'onSelect' }; plus: number }
   | { sum: BattleExpr[] }
+  | { sub: [BattleExpr, BattleExpr] }
+  | { statPick: 'max' | 'min' }
+  | { kiryoku: true }
+  | { count: Selector }
+  | { itemCost: true }
+  | { none: true }
   | { const: number }
   | { manual: string }
 
 /** 記述の段階（DESIGN §5.4「段階」）。tested＝関係する FAQ ケースが全部通った */
 export type DefStatus = 'draft' | 'tested' | 'manual'
 
-/** ルールの穴の ID（DESIGN §5.3）。値の型と既定は holes.ts */
-export type HoleId = `H-${number}${'' | 'a' | 'b' | 'c' | 'd' | 'e'}`
+/** ルールの穴の ID（DESIGN §5.3）。値の型と既定は holes.ts。NH-* は「仮の既定」のうち holes.ts に登録したもの（R4b で NH-8 を足した） */
+export type HoleId = `H-${number}${'' | 'a' | 'b' | 'c' | 'd' | 'e'}` | `NH-${number}`
 
 /** カード1枚の記述。本文（text）は持たない（本文は pool.json・非公開） */
 export interface CardDef {

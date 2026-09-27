@@ -59,7 +59,13 @@ function where(s: BoardState): string {
 /** エンジンの代役: 窓は両者見送り、エンジンの段は「何もない・払えた・確かめた」で返す。止まった点を記録する */
 function runAll(
   sim: Sim,
-  opts: { onEngine?: (sim: Sim) => boolean; pick?: (ch: ProcChoice) => string[] | undefined; values?: Record<Seat, { atk: number; def: number } | null>; kiryoku?: number | null } = {},
+  opts: {
+    onEngine?: (sim: Sim) => boolean
+    pick?: (ch: ProcChoice) => string[] | undefined
+    /** 席に1組（旧来の形。K9 の代役が参加キャラ全員に同じ値として広げる） */
+    values?: Record<Seat, { atk: number; def: number } | null>
+    kiryoku?: number | null
+  } = {},
 ) {
   for (let g = 0; g < 500; g++) {
     const w = where(sim.s)
@@ -95,9 +101,20 @@ function runAll(
         case 'item':
           act(sim, { type: 'procItemDone', frameId: top.id })
           break
-        case 'battleValues':
-          act(sim, { type: 'procBattle', frameId: top.id, values: opts.values ?? { A: { atk: 3, def: 2 }, B: { atk: 3, def: 2 } } })
+        case 'battleValues': {
+          // K9: values は参加キャラごと（iid→値）。この代役は旧来どおり「席に1組」で受け取り、その席の全参加キャラに同じ値を当てる
+          const bySeat = opts.values ?? { A: { atk: 3, def: 2 }, B: { atk: 3, def: 2 } }
+          const b = top.battle!
+          const perSeat = (seat: Seat): Record<string, { atk: number; def: number }> | null => {
+            const v = bySeat[seat]
+            if (!v) return null
+            const out: Record<string, { atk: number; def: number }> = {}
+            for (const iid of b.participants[seat]) out[iid] = v
+            return out
+          }
+          act(sim, { type: 'procBattle', frameId: top.id, values: { A: perSeat('A'), B: perSeat('B') } })
           break
+        }
         case 'place':
           act(sim, { type: 'procPlace', frameId: top.id, kiryoku: opts.kiryoku ?? null })
           break
@@ -585,7 +602,7 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
   act(sim, { type: 'procPass', by: 'A' })
   act(sim, { type: 'procPass', by: 'B' })
   runAll(sim)
-  eq([sim.s.procMeta.battles[0]?.aborted, sim.stops.some((x) => x.startsWith('battle[29]'))], ['バトル参加キャラが失われた（20-6）', false], '12d: 参加キャラが失われたら中断（[28] だけ）')
+  eq([sim.s.procMeta.battles[0]?.aborted, sim.stops.some((x) => x.startsWith('battle[29]'))], ['バトル参加キャラが失われた（20-6・NH-8: その陣営の参加キャラが全員失われた）', false], '12d: 参加キャラが失われたら中断（[28] だけ）')
 }
 {
   // バトルの結果でダウンしたら中断しない（[29] がある）
@@ -614,6 +631,34 @@ function battleBoard(extra: CardInstance[] = []): BoardState {
   runAll(sim, { values: { A: null, B: { atk: 3, def: 2 } } })
   eq(sim.s.procMeta.battles[0]?.participants.A, ['a1', 'a2'], '13a: 参加キャラを複数持てる')
   eq(sim.trace.some((t) => t.kind === 'manual'), true, '13b: 複数参加・値の無いバトルの結果は人が処理（manual の記録）')
+}
+{
+  // NH-8（決定 2026-09-27・holes.ts）: 複数参加で参加キャラが1体だけ失われても中断しない（残りで続ける）
+  const s0 = startBattleAt(battleBoard([card('a2', 'A', 'char')]), { challenger: 'A', at: 19, participants: { A: ['a1', 'a2'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  act(sim, { type: 'procMove', iid: 'a2', to: 'trash' })
+  act(sim, { type: 'procPass', by: 'A' })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim, { values: { A: null, B: { atk: 3, def: 2 } } })
+  eq(sim.s.procMeta.battles[0]?.aborted, null, '13c: NH-8: 参加キャラ2体のうち1体が失われても中断しない（残りの1体で続ける）')
+}
+{
+  // NH-8: その陣営の参加キャラが（resultDowned を除いて）全員失われたら中断する
+  const s0 = startBattleAt(battleBoard([card('a2', 'A', 'char')]), { challenger: 'A', at: 19, participants: { A: ['a1', 'a2'], B: ['b1'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  act(sim, { type: 'procMove', iid: 'a2', to: 'trash' })
+  act(sim, { type: 'procMove', iid: 'a1', to: 'trash' })
+  act(sim, { type: 'procPass', by: 'A' })
+  act(sim, { type: 'procPass', by: 'B' })
+  runAll(sim)
+  eq(sim.s.procMeta.battles[0]?.aborted, 'バトル参加キャラが失われた（20-6・NH-8: その陣営の参加キャラが全員失われた）', '13d: NH-8: その陣営の参加キャラが全員失われたら中断する')
+}
+{
+  // FAQ:3878-3879: 挑んだキャラ1体×挑まれたキャラN体のNペア。挑んだキャラはN件のダメージを受け、挑まれた側は1件ずつ受ける
+  const s0 = startBattleAt(battleBoard([card('b2', 'B', 'char')]), { challenger: 'A', at: 22, participants: { A: ['a1'], B: ['b1', 'b2'] }, battleCard: 'bc' })
+  const sim: Sim = { s: applyAction(s0, { type: 'procRun' }).state, trace: [], stops: [] }
+  runAll(sim, { values: { A: { atk: 3, def: 2 }, B: { atk: 3, def: 2 } } })
+  eq([sim.s.cards.a1.kiryoku, sim.s.cards.b1.kiryoku, sim.s.cards.b2.kiryoku], [3, 4, 4], '13e: FAQ:3878-3879 挑んだキャラ1体は挑まれた2体それぞれから結果ダメージを受ける（1点ずつ2件＝気力5→3）・挑まれた側は1件ずつ（気力5→4）')
 }
 
 // =============================================================================

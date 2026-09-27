@@ -332,8 +332,8 @@ export function evalExpr(ctx: EngineCtx, state: BoardState, env: Env, e: Expr): 
     const b = nearestBattle(state)?.battle
     const x = resolveRef(state, env, e.battleDamage)[0]
     if (!b || !b.damage || !x) return 0
-    for (const seat of ['A', 'B'] as Seat[]) if (b.participants[seat].includes(x)) return Math.max(0, b.damage[seat])
-    return 0
+    // K9: 複数参加では同じ受け手に複数件のダメージがありうる（FAQ:3878-3879）。合計を返す
+    return b.damage.filter((d) => d.recipient === x).reduce((s, d) => s + Math.max(0, d.value), 0)
   }
   return 0
 }

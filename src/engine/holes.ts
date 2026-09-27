@@ -39,6 +39,7 @@ export const HOLES = {
   'H-11': { options: ['noReduce', 'reduce'], value: 'noReduce', status: 'provisional', note: 'W 減で [G][R] は減らない（FAQ:25 の逆向き）' },
   'H-12': { options: ['narrow', 'wide'], value: 'narrow', status: 'decided', note: '割り込み中の保留は派生元のダウン処理が加えたダウン数（と終了判定）だけ。他の途中結果は即座に効く（利用者 2026-09-25・候補A）' },
   'H-13': { options: ['originalOpponent', 'none'], value: 'originalOpponent', status: 'provisional', note: '身代わりで受け渡されたバトルの結果ダメージの受け手にとっての「対戦キャラ」＝元の受け手の対戦キャラ（FAQ:2352）' },
+  'NH-8': { options: ['continue', 'abort'], value: 'continue', status: 'decided', note: '複数参加のバトルで参加キャラが1体だけ失われても中断しない。残りの参加キャラで続け、失われたキャラとの組は計算しない。その陣営の参加キャラが全員失われたら中断（利用者 2026-09-27・DESIGN §5.3・20-6 の1体だけの場合を扱う明文は無い）。core/proc.ts の battleLost がこの決定を直接実装（NH-* は holes.ts 未登録のものが多く core に直接ハードコードするのが従来の作り。PHASE-R4b の指示でここに登録もする）' },
 } as const satisfies Partial<Record<HoleId, HoleSetting>>
 
 export type KnownHole = keyof typeof HOLES

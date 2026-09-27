@@ -25,6 +25,7 @@ import {
   battleDecl,
   nearestBattle,
   topFrame,
+  type BattleState,
   type ProcChoice,
   type ProcDecl,
   type ProcFrame,
@@ -35,10 +36,10 @@ import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activa
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
-import type { Ability, CardRef, Choice, Op, Selector } from './dsl'
+import type { Ability, Attr, BattleExpr, CardRef, Choice, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { clearableMods, collectEffectTargets, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -518,34 +519,90 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
 }
 
 /**
- * 20-4[18] 2.3.・[23]: 攻撃能力値・防御能力値。バトルカードの攻撃属性・防御属性（[16] で決まる。場を離れても有効 20-9）の
- * 今の能力値＋攻防修正。属性が能力値アイコン1つでない（特殊な攻防）・複数参加は人が入れる（K13・K9 は R4）
+ * BattleExpr を1参加キャラについて評価する（[23]・K13。統括16で attr/chosenStat/sum/const に足した6種）。
+ * null＝書けない（none・manual、または chosenStat が未選択）＝そのバトル全体を人が入れる
  */
-export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, { atk: number; def: number } | null> {
+export function evalBattleExpr(ctx: EngineCtx, state: BoardState, iid: string, seat: Seat, b: BattleState, expr: BattleExpr): number | null {
+  if ('attr' in expr) return currentStat(ctx, state, iid, expr.attr)
+  if ('chosenStat' in expr) {
+    const chosen = b.battleChoices[seat]
+    return chosen ? currentStat(ctx, state, iid, chosen) + expr.plus : null
+  }
+  if ('sum' in expr) {
+    let total = 0
+    for (const x of expr.sum) {
+      const v = evalBattleExpr(ctx, state, iid, seat, b, x)
+      if (v === null) return null
+      total += v
+    }
+    return total
+  }
+  if ('sub' in expr) {
+    const a = evalBattleExpr(ctx, state, iid, seat, b, expr.sub[0])
+    const c = evalBattleExpr(ctx, state, iid, seat, b, expr.sub[1])
+    return a === null || c === null ? null : a - c
+  }
+  if ('statPick' in expr) {
+    // FAQ:3840-3841: 同値が複数あれば使用者が決める（タイブレークは manual に倒す。R4b-2 以降のカードで要る）
+    const vals = ATTRS.map((a) => currentStat(ctx, state, iid, a))
+    return expr.statPick === 'max' ? Math.max(...vals) : Math.min(...vals)
+  }
+  if ('kiryoku' in expr) return state.cards[iid]?.kiryoku ?? 0
+  if ('count' in expr) {
+    const env: Env = { self: iid, you: seat, slots: {}, trigger: null, declId: null, declared: {} }
+    return select(ctx, state, env, expr.count).length
+  }
+  if ('itemCost' in expr) {
+    return Object.values(state.cards)
+      .filter((c) => c.attachedTo === iid)
+      .reduce((s, c) => s + [...(ctx.cards[c.cardId]?.cost ?? '')].filter((ch) => 'WRGLT'.includes(ch)).length, 0)
+  }
+  if ('const' in expr) return expr.const
+  // none・manual: 書けない（攻防が無いカード・記述の途中）
+  return null
+}
+
+/**
+ * 20-4[18] 2.3.・[23]: 攻撃能力値・防御能力値。バトルカードの攻撃属性・防御属性（[16] で決まる。場を離れても有効 20-9）の
+ * 今の能力値＋攻防修正。K9（統括16）: 参加キャラごとに評価する（複数参加は参加キャラごとに値が要る。全員ぶん出せなければ
+ * その席は人が入れる）。K13: カードの記述（defs[].battle）があれば BattleExpr として評価。無ければ基本バトルカード
+ * （属性のみ・テキストなし）を {attr} として評価する
+ */
+export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, Record<string, { atk: number; def: number }> | null> {
   const b = frame.battle!
-  const out: Record<Seat, { atk: number; def: number } | null> = { A: null, B: null }
+  const out: Record<Seat, Record<string, { atk: number; def: number }> | null> = { A: null, B: null }
   const info = b.battleCard ? ctx.cards[state.cards[b.battleCard]?.cardId ?? ''] : undefined
-  const one = (x: string | undefined) => (x && x.length === 1 && '力早賢根感'.includes(x) ? x : null)
+  const cardDef = b.battleCard ? ctx.defs[state.cards[b.battleCard]?.cardId ?? ''] : undefined
+  const one = (x: string | undefined): Attr | null => (x && x.length === 1 && '力早賢根感'.includes(x) ? (x as Attr) : null)
   const atkAttr = one(info?.battleAtk)
   const defAttr = one(info?.battleDef)
-  if (!atkAttr || !defAttr) {
+  const atkExpr: BattleExpr | null = cardDef?.battle?.atk ?? (atkAttr ? { attr: atkAttr } : null)
+  const defExpr: BattleExpr | null = cardDef?.battle?.def ?? (defAttr ? { attr: defAttr } : null)
+  if (!atkExpr || !defExpr) {
     warnings.push(`manual: バトルの攻防の値（${info?.name ?? 'バトル種目なし'}: 攻 ${info?.battleAtk ?? '?'}・防 ${info?.battleDef ?? '?'}）を人が入れる`)
     return out
   }
-  // 基本バトルカード＝能力値アイコン1つずつで特殊なテキストを持たない（oldrule.txt:1042-1046・DESIGN §5.2）。
   // テキストのあるバトルカードは、カードの記述（defs）が無ければ効果が値に効きうるので人が入れる（統括11）
-  if (info && info.abilities.length > 0 && !ctx.defs[info.id]) {
+  if (info && info.abilities.length > 0 && !cardDef) {
     warnings.push(`manual: バトルの攻防の値（${info.name} はテキストのあるバトルカードで記述が無い）を人が入れる`)
     return out
   }
   for (const seat of ['A', 'B'] as Seat[]) {
-    const ps = b.participants[seat]
-    if (ps.length !== 1) {
-      if (ps.length > 1) warnings.push('manual: 複数参加のバトルの攻防の値（K9 は R4）')
-      continue
+    const ps = b.participants[seat].filter((x) => isCharOnField(state.cards[x]))
+    if (ps.length === 0) continue
+    const values: Record<string, { atk: number; def: number }> = {}
+    let ok = true
+    for (const p of ps) {
+      const atk = evalBattleExpr(ctx, state, p, seat, b, atkExpr)
+      const def = evalBattleExpr(ctx, state, p, seat, b, defExpr)
+      if (atk === null || def === null) {
+        ok = false
+        break
+      }
+      values[p] = { atk: atk + battleModOf(ctx, state, p, 'atk'), def: def + battleModOf(ctx, state, p, 'def') }
     }
-    const p = ps[0]
-    out[seat] = { atk: currentStat(ctx, state, p, atkAttr) + battleModOf(ctx, state, p, 'atk'), def: currentStat(ctx, state, p, defAttr) + battleModOf(ctx, state, p, 'def') }
+    if (ok) out[seat] = values
+    else warnings.push(`manual: 複数参加のバトルの攻防の値（${seat} 席・K9）を人が入れる`)
   }
   return out
 }
@@ -1234,6 +1291,22 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'down':
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procDown', iid }) as BoardAction) }
+    // ── K9・K13（R4b で足した）
+    case 'setParticipants': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const seat: Seat = op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
+      const to = 'zone' in op.to ? select(ctx, state, env, op.to) : refs(op.to)
+      return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to, exhaust: op.exhaust, previous: op.previous }] }
+    }
+    case 'setBattleChoice': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const seat: Seat = op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
+      const value = typeof op.value === 'string' ? op.value : 'slot' in op.value ? env.slots[op.value.slot]?.[0] : refs(op.value as CardRef)[0]
+      if (!value) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, battleChoice: { seat, key: op.key, value } }] }
+    }
     default:
       return manual(`R2a の範囲外の操作 ${op.op}`)
   }

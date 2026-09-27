@@ -45,11 +45,13 @@ export function triggerMatches(ctx: EngineCtx, state: BoardState, env: Env, trig
   return true
 }
 
-/** 常時効果の発生元がフィールドにあるか（12-2）: キャラ・付いているアイテム・フィールドカード */
+/** 常時効果の発生元がフィールドにあるか（12-2）: キャラ・付いているアイテム・フィールドカード・バトルカード（19-1。
+ *  R4b で足した: 鬼ごっこ系「バトル種目としてこのバトルを選択したとき」等はバトルカードの conditional。「自分が選ばれた
+ *  種目のときだけ」はカード側の trigger.when（{same:[self,{ref:'battle',role:'battleCard'}]}）で絞る） */
 export function sourceActive(state: BoardState, iid: string): boolean {
   const c = state.cards[iid]
   if (!c) return false
-  if (c.zone === 'field') return true
+  if (c.zone === 'field' || c.zone === 'battle') return true
   // 付いているアイテム: キャラに・バトルカードに（《能力禁止》R3）
   if (c.attachedTo) {
     const h = state.cards[c.attachedTo]

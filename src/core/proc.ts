@@ -114,13 +114,26 @@ export interface DamageSeed {
   battle?: string | null
 }
 
-/** バトルの結果ダメージの増減（20-10: 0以下は増減の効果を受けない。evenIfZero はカードの表記が優先 21） */
+/** バトルの結果ダメージの増減（20-10: 0以下は増減の効果を受けない。evenIfZero はカードの表記が優先 21）。
+ *  複数参加（K9）では、同じ席に複数の結果ダメージ（BattleDamageEntry）がありうる。増減はその席の全件に当てる
+ *  （PHASE-R4b §2(A)「複数参加で意味が割れる増減は manual」に該当するカードがプールに無いので、まず広報で決めた既定） */
 export interface BattleEdit {
   /** ダメージを受ける側の席 */
   seat: Seat
   delta?: number
   set?: number
   evenIfZero?: boolean
+}
+
+/** [24] バトルの結果ダメージ1件（組ごと。複数参加 K9 では同じ席に複数件になりうる。FAQ oldfaq.txt:3878-3879） */
+export interface BattleDamageEntry {
+  /** ダメージを受ける側の席 */
+  seat: Seat
+  /** 受け手（参加キャラ） */
+  recipient: string
+  /** 与えた相手（対戦キャラ）。組が無ければ null */
+  dealer: string | null
+  value: number
 }
 
 /** バトル 20-4 の状態（参加キャラは陣営ごとの配列＝複数参加 K9） */
@@ -135,12 +148,18 @@ export interface BattleState {
   joinedReady: string[]
   battleCard: string | null
   cardDecided: boolean
-  /** [23] 攻撃能力値・防御能力値（null＝人が入れる） */
-  values: Record<Seat, { atk: number; def: number } | null> | null
-  /** [24] その席の参加キャラが受けるバトルの結果ダメージ（null＝計算していない） */
-  damage: Record<Seat, number> | null
-  /** [24] より前に使われた結果ダメージの増減（計算の後に当てる） */
+  /**
+   * [23] 攻撃能力値・防御能力値（参加キャラ・iid ごと。K9・統括16で複数参加に広げた。その席の値が丸ごと null＝人が入れる。
+   * 単数参加なら参加キャラ1体ぶんの1エントリ）
+   */
+  values: Record<Seat, Record<string, { atk: number; def: number }> | null> | null
+  /** [24] バトルの結果ダメージ（組ごと。null＝計算していない。K9: 挑んだ側1体×挑まれた側N体なら挑んだ側はN件受ける FAQ:3878-3879） */
+  damage: BattleDamageEntry[] | null
+  /** [24] より前に使われた結果ダメージの増減（計算の後に当てる。同じ席の全件に当てる＝K9 の広報） */
   pendingEdits: BattleEdit[]
+  /** [17]〜 隠し芸などの「各陣営が能力値を1つ選ぶ」の答え（K13・BattleExpr の chosenStat）。席ごとに選んだ能力値の名前（力/早/賢/根/感）。
+   *  core はカードの知識を持たないので、値の意味（能力値の名前）は文字列のまま持つ（engine が dsl.ts の Attr として解釈する） */
+  battleChoices: Record<Seat, string | null>
   /** 《先手必勝》など: 先にダメージを与える側（key＝効果の宣言） */
   firstStrike: { seat: Seat; key: string }[]
   firstChosen: Seat | null
@@ -636,6 +655,7 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
     values: null,
     damage: null,
     pendingEdits: [],
+    battleChoices: { A: null, B: null },
     firstStrike: [],
     firstChosen: null,
     dmgPhase: 0,
@@ -792,12 +812,17 @@ function advance(frame: ProcFrame): ProcFrame {
   return { ...frame, step, status: 'enter', battle }
 }
 
-/** 20-6: [19]〜[28] の間に参加キャラが失われたら中断（バトルの結果でダウンした場合を除く） */
+/**
+ * 20-6: [19]〜[28] の間に参加キャラが失われたら中断（バトルの結果でダウンした場合を除く）。
+ * NH-8（決定 2026-09-27・holes.ts・既定 continue）: 複数参加（K9）で参加キャラが1体だけ失われても中断しない。
+ * 残りの参加キャラで続け、失われたキャラとの組は計算しない（[23]〜[26] は onField なものだけで組む）。
+ * その陣営の参加キャラが（resultDowned を除いて）1体も残っていなければ中断する
+ */
 function battleLost(state: BoardState, b: BattleState): string | null {
   for (const seat of ['A', 'B'] as Seat[]) {
-    for (const iid of b.participants[seat]) {
-      if (b.resultDowned.includes(iid)) continue
-      if (!onField(state.cards[iid])) return 'バトル参加キャラが失われた（20-6）'
+    const remaining = b.participants[seat].filter((iid) => !b.resultDowned.includes(iid))
+    if (remaining.length > 0 && remaining.every((iid) => !onField(state.cards[iid]))) {
+      return 'バトル参加キャラが失われた（20-6・NH-8: その陣営の参加キャラが全員失われた）'
     }
   }
   return null
@@ -1100,14 +1125,29 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 23:
       return setFrame(state, { ...frame, status: 'engine', engineWhat: 'battleValues' })
     case 24: {
-      // [24] バトルの結果ダメージ＝相手キャラの攻撃能力値－自分キャラの防御能力値（20-10）
+      // [24] バトルの結果ダメージ＝対戦キャラの攻撃能力値－自分キャラの防御能力値（20-10）。
+      // K9（統括16）: 組ごとに計算（挑んだ側1体×挑まれた側N体のNペア。両方>1はプールに無い＝一般化した全組合せで対応）。
+      // FAQ:3878-3879: 全組を計算したのち、ダメージの適用は [26] で同時に行う
       if (!b.values || !b.values.A || !b.values.B) {
         trace.push({ kind: 'manual', text: '人が処理: バトルの結果の計算（攻防の値が決まっていない）' })
         return setFrame(state, advance(frame))
       }
-      let damage: Record<Seat, number> = { A: b.values.B.atk - b.values.A.def, B: b.values.A.atk - b.values.B.def }
+      const aliveA = b.participants.A.filter((x) => onField(state.cards[x]))
+      const aliveB = b.participants.B.filter((x) => onField(state.cards[x]))
+      const entries: BattleDamageEntry[] = []
+      for (const a of aliveA) {
+        const va = b.values.A[a]
+        if (!va) continue
+        for (const bb of aliveB) {
+          const vb = b.values.B[bb]
+          if (!vb) continue
+          entries.push({ seat: 'A', recipient: a, dealer: bb, value: vb.atk - va.def })
+          entries.push({ seat: 'B', recipient: bb, dealer: a, value: va.atk - vb.def })
+        }
+      }
+      let damage = entries
       for (const e of b.pendingEdits) damage = applyBattleEdit(damage, e)
-      trace.push({ kind: 'name', text: `バトルの結果:A←${damage.A}:B←${damage.B}` })
+      trace.push({ kind: 'name', text: `バトルの結果:${damage.map((d) => `${d.seat}←${d.recipient}:${d.value}`).join(',') || '無し'}` })
       return setFrame(state, { ...advance(frame), battle: { ...b, damage, pendingEdits: [] } })
     }
     case 26:
@@ -1117,16 +1157,21 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
   }
 }
 
-export function applyBattleEdit(damage: Record<Seat, number>, e: BattleEdit): Record<Seat, number> {
-  const cur = damage[e.seat]
-  if (e.set !== undefined) return { ...damage, [e.seat]: e.set }
-  if (e.delta === undefined) return damage
-  // 20-10: 0以下はダメージが発生しなかったと見なされ、増減の効果を受けない（カードに「０でも」とあれば別 21）
-  if (cur <= 0 && !e.evenIfZero) return damage
-  return { ...damage, [e.seat]: Math.max(cur, 0) + e.delta }
+/** [24] より前に使われた結果ダメージの増減。K9: 同じ席の全件に当てる（複数参加で意味が割れる増減はプールに無い＝統括16の広報） */
+export function applyBattleEdit(damage: BattleDamageEntry[], e: BattleEdit): BattleDamageEntry[] {
+  return damage.map((entry) => {
+    if (entry.seat !== e.seat) return entry
+    if (e.set !== undefined) return { ...entry, value: e.set }
+    if (e.delta === undefined) return entry
+    // 20-10: 0以下はダメージが発生しなかったと見なされ、増減の効果を受けない（カードに「０でも」とあれば別 21）
+    if (entry.value <= 0 && !e.evenIfZero) return entry
+    return { ...entry, value: Math.max(entry.value, 0) + e.delta }
+  })
 }
 
-/** [26] ダメージ処理・ダウン処理。両者の結果ダメージは同時に発生・発生元は別（FAQ:3461）。《先手必勝》は先に与えた側から（FAQ:1450） */
+/** [26] ダメージ処理・ダウン処理。両者の結果ダメージは同時に発生・発生元は別（FAQ:3461）。《先手必勝》は先に与えた側から（FAQ:1450）。
+ *  K9: 複数参加で《先手必勝》が絡む（席ごとに複数件のダメージがあり「先に与えた側の参加キャラが受ける」対戦キャラが一意でない）場合は
+ *  manual に倒す（PHASE-R4b §2(A)「先手必勝と複数参加が重なったら manual」） */
 function battleDamageStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
   const b = frame.battle!
   const done = (s: BoardState) => {
@@ -1135,17 +1180,15 @@ function battleDamageStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[
     return setFrame(s, { ...advance(f), battle: { ...f.battle!, dmgPhase: 2, resultDowned: [...f.battle!.resultDowned, ...lostNow] } })
   }
   if (!b.damage || b.dmgPhase >= 2) return done(state)
-  const multi = b.participants.A.length !== 1 || b.participants.B.length !== 1
-  if (multi) {
-    trace.push({ kind: 'manual', text: '人が処理: 複数参加のバトルの結果ダメージ（K9 は R4）' })
+  const multi = b.participants.A.length > 1 || b.participants.B.length > 1
+  if (multi && b.firstStrike.length > 0) {
+    trace.push({ kind: 'manual', text: '人が処理: 複数参加と先手必勝が重なったバトルの結果ダメージ' })
     return done(state)
   }
   const seed = (recv: Seat): DamageSeed | null => {
-    const value = b.damage![recv]
-    const recipient = b.participants[recv][0]
-    const dealer = b.participants[otherSeat(recv)][0]
-    if (value <= 0 || !onField(state.cards[recipient])) return null
-    return { value, recipient, dealerIid: dealer ?? null, dealerSeat: otherSeat(recv), battle: frame.id }
+    const entry = b.damage!.find((e) => e.seat === recv)
+    if (!entry || entry.value <= 0 || !onField(state.cards[entry.recipient])) return null
+    return { value: entry.value, recipient: entry.recipient, dealerIid: entry.dealer, dealerSeat: otherSeat(recv), battle: frame.id }
   }
   const claims = [...new Set(b.firstStrike.map((x) => x.seat))]
   if (b.dmgPhase === 0 && claims.length === 2 && b.firstChosen === null) {
@@ -1156,16 +1199,19 @@ function battleDamageStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[
   const resume = (s: BoardState, phase: number) => setFrame(s, { ...findFrame(s, frame.id)!, status: 'resume', resume: 'reenter', battle: { ...findFrame(s, frame.id)!.battle!, dmgPhase: phase } })
   if (b.dmgPhase === 0) {
     if (first) {
-      // 先に与える側のダメージ（対戦キャラが受ける）だけ
+      // 先に与える側のダメージ（対戦キャラが受ける）だけ（multi はここに来ない＝先手必勝と複数参加は上で manual）
       const sd = seed(otherSeat(first))
       if (!sd) return resume(state, 1)
       return pushDamages(resume(state, 1), [sd])
     }
-    const seeds = [seed(otherSeat(b.challenger)), seed(b.challenger)].filter((x): x is DamageSeed => x !== null)
+    // K9: 全件を同時に発生させる（単数参加なら旧来どおり両陣営2件・複数参加ならN件。FAQ:3878-3879「計算を全てしたのちに同時に適用」）
+    const seeds = b.damage!
+      .filter((e) => e.value > 0 && onField(state.cards[e.recipient]))
+      .map((e): DamageSeed => ({ value: e.value, recipient: e.recipient, dealerIid: e.dealer, dealerSeat: otherSeat(e.seat), battle: frame.id }))
     if (seeds.length === 0) return done(state)
     return pushDamages(resume(state, 2), seeds)
   }
-  // dmgPhase 1: 先に与えた側の参加キャラが受ける。対戦キャラがダウンしていれば受けない（《先手必勝》）
+  // dmgPhase 1: 先に与えた側の参加キャラが受ける。対戦キャラがダウンしていれば受けない（《先手必勝》。multi はここに来ない）
   const opp = b.participants[otherSeat(first!)][0]
   if (!onField(state.cards[opp])) return done(state)
   const sd = seed(first!)
@@ -1863,18 +1909,22 @@ export type ProcAction =
   // ── R2b
   /** エンジン: 15-10-1[13]・15-10-2[13] フィールドに出すときの気力（呼び出し＝印刷値・タッグ＝ダメージを引き継いだ値） */
   | { type: 'procPlace'; frameId: string; kiryoku: number | null }
-  /** エンジン: バトルの状態を変える（[23] 攻防の値・結果ダメージの増減・先に与える・結果をすぐ出す・中断・種目・終了時にゴミ箱送り） */
+  /** エンジン: バトルの状態を変える（[23] 攻防の値・結果ダメージの増減・先に与える・結果をすぐ出す・中断・種目・終了時にゴミ箱送り・K13 の選んだ能力値） */
   | {
       type: 'procBattle'
       frameId: string
-      values?: Record<Seat, { atk: number; def: number } | null>
+      values?: Record<Seat, Record<string, { atk: number; def: number }> | null>
       edit?: BattleEdit
       firstStrike?: { seat: Seat; key: string }
       skipActions?: boolean
       abort?: string
       battleCard?: string
       endTrash?: string
+      /** K13: 隠し芸などの「各陣営が能力値を1つ選ぶ」の答え（chosenStat）。key は今は使っていない（1つだけの枠） */
+      battleChoice?: { seat: Seat; key: string; value: string }
     }
+  /** K9: 参加キャラを差し替える（鬼ごっこ系「待機状態の味方キャラ全てに変更」）。previous: 'readyIfWasReady' は未実装（人が処理・報告） */
+  | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
   /** 効果でバトルを始める（《抜き打ち》「相手にバトルを挑む」）。[3] から */
   | { type: 'procStartBattle'; by: Seat; id: string }
   /** 効果でアイテムを移し替える（「アイテムの装備と同じ扱い」FAQ:804・2874）。17-3[11] から */
@@ -2135,12 +2185,32 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
         trace.push({ kind: 'name', text: `バトル種目を決めた:${action.battleCard}` })
       }
       if (action.endTrash) b = { ...b, endTrash: [...b.endTrash, action.endTrash] }
+      if (action.battleChoice) {
+        b = { ...b, battleChoices: { ...b.battleChoices, [action.battleChoice.seat]: action.battleChoice.value } }
+        trace.push({ kind: 'name', text: `選んだ能力値:${action.battleChoice.seat}:${action.battleChoice.value}` })
+      }
       if (action.abort && !b.aborted) {
         b = { ...b, aborted: action.abort }
         trace.push({ kind: 'abort', text: `バトル中断: ${action.abort}`, id: f.decl?.id })
       }
       s = setFrame(s, { ...next, battle: b })
       return { state: s, log: '' }
+    }
+    case 'procSetParticipants': {
+      // K9: 鬼ごっこ系「バトル参加キャラを待機状態の味方キャラ全てに変更して消耗させる」。変更前のキャラは待機状態には
+      // 戻らない（previous 'keepState'。何もしない＝そのまま）。'readyIfWasReady' は根拠になるカードがプールに無く未実装
+      const f = findFrame(state, action.frameId)
+      if (!f || f.kind !== 'battle' || !f.battle) return null
+      const b = f.battle
+      if (action.previous === 'readyIfWasReady') trace.push({ kind: 'manual', text: '人が処理: previous:readyIfWasReady は未実装（K9・報告）' })
+      let cards = state.cards
+      if (action.exhaust) {
+        cards = { ...cards }
+        for (const iid of action.to) if (cards[iid]) cards[iid] = { ...cards[iid], orientation: 'rested' }
+      }
+      trace.push({ kind: 'name', text: `参加キャラを変更:${action.seat}→${action.to.join(',') || '無し'}` })
+      const s = { ...state, cards }
+      return { state: setFrame(s, { ...f, battle: { ...b, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 } } }), log: '' }
     }
     case 'procStartBattle': {
       const decl = battleDecl(action.id, action.by)
