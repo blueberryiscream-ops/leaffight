@@ -36,7 +36,10 @@ export type CardUseKind = 'call' | 'tag' | 'equip' | 'field' | 'battleCard'
 /** ターンの進行の段（10-4・10-6・10-7・10-8） */
 export type PhaseKind = 'entry' | 'mainPhase' | 'endPhase' | 'handAdjust' | 'turnEnd'
 
-export type ProcKind = 'costGen' | 'ability' | 'event' | 'damage' | 'down' | 'simul' | CardUseKind | 'battle' | PhaseKind
+/** 効果で「呼び出す」（D17・R4a-2）。宣言[1]〜[5]を経ない軽い手順（down と同じ形）: [1]窓→[2]場に出す→[3]窓 */
+export type SummonKind = 'summon'
+
+export type ProcKind = 'costGen' | 'ability' | 'event' | 'damage' | 'down' | 'simul' | CardUseKind | 'battle' | PhaseKind | SummonKind
 
 /**
  * 窓（11-2 の2枠: AP・NAP）。[3] 同時アクションの AP の機会
@@ -213,6 +216,8 @@ export interface ProcFrame {
   paid?: boolean
   /** ability/event: 効果が打ち消された（H-8: 範囲は「その効果」だけ） */
   countered?: boolean
+  /** ability/event: 部分的な打ち消し（D23・おあずけ）。'draw'＝ドローの操作（op:'draw'）だけ実行しない。他は今までどおり処理する */
+  counterPart?: 'draw'
   cgIndex?: number
   /** costGen: 種類が有効なアクションのフレーム（7-3） */
   bindTo?: string | null
@@ -257,6 +262,9 @@ export interface ProcFrame {
     /** タイミングの処理として積んだとき、そのフレーム */
     forFrame: string | null
   }
+  /** 効果で「呼び出す」（D17・R4a-2。kind summon）。fromZone＝宣言時点（Op 実行時点）でカードがあった場所。
+   *  [2] にそこにまだあれば場に出す。動いていれば（他の効果で失われた等）canceled のまま何もしない */
+  summon?: { iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId; canceled?: boolean }
   aborted?: string
   /** ダメージ[6] で起きたダウン（ダメージの手順が終わってから積む） */
   pendingDowns?: string[]
@@ -419,6 +427,11 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
   turnEnd: {
     1: { names: ['ターン終了時'], window: false },
   },
+  // 効果で「呼び出す」（D17・R4a-2）。宣言を経ない軽い手順（15-10-1[11]・[14] に揃える）
+  summon: {
+    1: { names: ['キャラクターカードが呼び出されるとき'], window: true },
+    3: { names: ['キャラクターカードが呼び出されたとき'], window: true }, // NH-18
+  },
 }
 
 const LAST_STEP: Record<ProcKind, number> = {
@@ -439,6 +452,7 @@ const LAST_STEP: Record<ProcKind, number> = {
   endPhase: 3,
   handAdjust: 4,
   turnEnd: 2,
+  summon: 3,
 }
 
 /** 手札の上限枚数（4-2-1 oldrule.txt:169-170） */
@@ -847,6 +861,8 @@ function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
       return enterDamage(state, frame, trace)
     case 'down':
       return enterDown(state, frame, trace)
+    case 'summon':
+      return enterSummon(state, frame, trace)
     case 'simul':
       return setFrame(state, { ...frame, status: 'items' })
     case 'call':
@@ -992,17 +1008,23 @@ function enterCardUse(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): 
   }
 }
 
-/** 15-10-1[13]・15-10-2[13] フィールドに出す（気力はエンジンが決める: 呼び出しは印刷値、タッグはダメージを引き継ぐ） */
+/** 15-10-1[13]・15-10-2[13] フィールドに出す（気力はエンジンが決める: 呼び出しは印刷値、タッグはダメージを引き継ぐ）。
+ *  kind summon（D17・効果で呼び出す）も同じ手順を流用する: fromZone に残っているかを確かめ、frame.summon の向きで出す */
 function placeChar(state: BoardState, frame: ProcFrame, kiryoku: number | null, trace: ProcTrace[]): BoardState {
-  const decl = frame.decl!
-  const iid = decl.sourceIid!
+  const isSummon = frame.kind === 'summon'
+  const iid = isSummon ? frame.summon!.iid : frame.decl!.sourceIid!
+  const by = isSummon ? frame.summon!.seat : frame.decl!.by
+  const fromZone = isSummon ? frame.summon!.fromZone : 'pending'
   const c = state.cards[iid]
-  if (!c || c.zone !== 'pending') return abortFrame(state, frame, '再提示できない', trace)
-  let s = moveCard(state, { iid, toOwner: decl.by, toZone: 'char', cardName: c.cardId }).state
-  // 呼び出しは消耗状態で、タッグ化は待機状態で出す
-  const orientation = frame.kind === 'call' ? 'rested' : 'ready'
+  if (!c || c.zone !== fromZone) {
+    if (isSummon) return setFrame(state, { ...frame, summon: { ...frame.summon!, canceled: true }, status: 'done' })
+    return abortFrame(state, frame, '再提示できない', trace)
+  }
+  let s = moveCard(state, { iid, toOwner: by, toZone: 'char', cardName: c.cardId }).state
+  // 呼び出しは消耗状態で、タッグ化は待機状態で出す。summon は frame.summon.orientation の指定どおり（D18「待機状態で」等）
+  const orientation = isSummon ? frame.summon!.orientation : frame.kind === 'call' ? 'rested' : 'ready'
   s = { ...s, cards: { ...s.cards, [iid]: { ...s.cards[iid], orientation, kiryoku: kiryoku ?? s.cards[iid].kiryoku, attachedTo: null } } }
-  trace.push({ kind: 'name', text: frame.label, id: decl.id })
+  trace.push({ kind: 'name', text: frame.label, id: frame.decl?.id })
   // 【決めたこと】気力0以下で出たキャラはその瞬間にダウンする（FAQ:3266「タッグ化した瞬間に、ダウンした」）
   if ((s.cards[iid].kiryoku ?? 1) <= 0) s = pushDown(setFrame(s, advance(frame)), iid, null)
   else s = setFrame(s, advance(frame))
@@ -1383,6 +1405,23 @@ function enterDamage(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       const s: BoardState = { ...state, cards: { ...state.cards, [card.iid]: { ...card, kiryoku: after } } }
       const pendingDowns = before >= 1 && after <= 0 ? [card.iid] : []
       return setFrame(s, { ...frame, status: 'done', pendingDowns })
+    }
+    default:
+      return setFrame(state, advance(frame))
+  }
+}
+
+/** 効果で「呼び出す」（D17・R4a-2）。[2] 場に出す（気力はエンジンが決める＝ engineWhat 'place'・placeChar を流用） */
+function enterSummon(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): BoardState {
+  const d = frame.summon!
+  switch (frame.step) {
+    case 2: {
+      // カードが宣言時点の場所からまだ動いていなければ場に出す。動いていれば（他の効果で失われた等）何もしない
+      if (state.cards[d.iid]?.zone !== d.fromZone) {
+        trace.push({ kind: 'name', text: `呼び出せない（場所を失った）:${d.iid}` })
+        return setFrame(state, { ...frame, summon: { ...d, canceled: true }, status: 'done' })
+      }
+      return setFrame(state, { ...frame, status: 'engine', engineWhat: 'place' })
     }
     default:
       return setFrame(state, advance(frame))
@@ -1798,7 +1837,8 @@ export type ProcAction =
   | { type: 'procDraw'; seat: Seat; n: number }
   | { type: 'procAddDowns'; seat: Seat; n: number }
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
-  | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[] }
+  // useAsSeat（D20・R4a-2）＝発生させたのは seat だが、発生済みのコストは useAsSeat のものになる（《借金取り》）
+  | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[]; useAsSeat?: Seat }
   | { type: 'procCancelDown'; frameId: string }
   /**
    * 効果の乗っ取り（hijack・D11）が「適切な対象が無い」等で失敗したとき、乗っ取りの効果自身（いただきます等）を
@@ -1816,6 +1856,7 @@ export type ProcAction =
       prevent?: string
     }
   | { type: 'procCounter'; frameId: string }
+  | { type: 'procCounterPart'; frameId: string; part: 'draw' }
   | { type: 'procTrace'; entry: ProcTrace }
   /** 状況を作る（FAQ テストの force・画面の手動）: 同時処理の効果を1つ積む */
   | { type: 'procStart'; item: Omit<SimulItem, 'status' | 'type'> }
@@ -1859,6 +1900,8 @@ export type ProcAction =
   | { type: 'procAttach'; moves: { item: string; to: string }[] }
   /** 効果でキャラをダウンさせる（15-5 のダウン処理を起こす。《サクリファイス》） */
   | { type: 'procDown'; iid: string }
+  /** 効果で「呼び出す」（D17・R4a-2）: kind summon のフレームを積む。fromZone＝実行時点でカードがあった場所 */
+  | { type: 'procSummon'; iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId }
   /** そのフェイズの段を始める（エントリー 10-4・手札調整 10-7）。エンジンの drive が出す */
   | { type: 'procPhaseStart' }
   /** フェイズを進める（10-2-2 のフェイズ終了の合意の後。ターン全体の進行は R2u） */
@@ -2128,6 +2171,15 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!onField(state.cards[action.iid])) return { state, log: '' }
       return { state: pushDown(state, action.iid, null, null, false), log: 'ダウンさせた' }
     }
+    case 'procSummon': {
+      // D17: 効果で「呼び出す」。kind summon のフレームを積む（宣言[1]〜[5]は経ない・down と同じ軽い形）
+      const s = pushFrame(
+        state,
+        { kind: 'summon', step: 1, status: 'enter', window: null, by: action.seat, label: `呼び出し（効果）:${action.iid}`, summon: { iid: action.iid, seat: action.seat, orientation: action.orientation, fromZone: action.fromZone }, eng: {} },
+        'summon',
+      )[0]
+      return { state: s, log: `${action.iid} を呼び出す（効果）` }
+    }
     case 'procRun':
       return state.proc.length ? { state, log: '' } : null
     case 'procAbandon':
@@ -2217,15 +2269,17 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       return { state: checkEnd(s, '勝利条件（9-2）'), log: `${action.seat} のダウン数 +${action.n}` }
     }
     case 'procGenCost': {
-      // D21: 効果でコストを発生させる。得たコストは frameId 無し＝すぐ「その他の代償」として使える（7-3）
+      // D21: 効果でコストを発生させる。得たコストは frameId 無し＝すぐ「その他の代償」として使える（7-3）。
+      // D20: useAsSeat があれば、発生させた席（action.seat）ではなく useAsSeat の発生済みのコストになる（《借金取り》）
       let s = state
-      const tokens = [...s.costs[action.seat]]
+      const bucket = action.useAsSeat ?? action.seat
+      const tokens = [...s.costs[bucket]]
       for (const t of action.tokens) {
         const [s2, id] = nextId(s, 'cost')
         s = s2
         tokens.push({ id, icon: t.icon, attrs: t.attrs, frameId: null })
       }
-      s = { ...s, costs: { ...s.costs, [action.seat]: tokens } }
+      s = { ...s, costs: { ...s.costs, [bucket]: tokens } }
       trace.push({ kind: 'name', text: `コスト発生（効果）:${action.tokens.map((x) => x.icon + x.attrs.join('')).join('')}` })
       return { state: s, log: `${action.seat} に発生したコスト +${action.tokens.map((x) => x.icon).join('')}` }
     }
@@ -2286,6 +2340,14 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!found) return null
       trace.push({ kind: 'name', text: `打ち消す:${found}` })
       return { state: { ...state, proc }, log: `「${found}」の効果を打ち消した` }
+    }
+    case 'procCounterPart': {
+      // D23: 部分的な打ち消し（おあずけ）。frame 全体は countered にせず、counterPart を控える。
+      // 対象のフレームは（割り込み側の窓を開いている）今の proc スタックに既にあるはず
+      const f = findFrame(state, action.frameId)
+      if (!f || (f.kind !== 'ability' && f.kind !== 'event')) return null
+      trace.push({ kind: 'name', text: `部分的に打ち消す（${action.part}）:${f.label}` })
+      return { state: setFrame(state, { ...f, counterPart: action.part }), log: `「${f.label}」の一部（${action.part}）を打ち消した` }
     }
     case 'procTrace':
       trace.push(action.entry)

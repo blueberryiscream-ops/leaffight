@@ -59,6 +59,7 @@ export type PlayerRef =
   | 'equipper'                    // このアイテムを装備させたプレイヤー（性格反転キノコ）
   | { controllerOf: CardRef }
   | { ownerOf: CardRef }          // 3-3 持ち主（ゲーム中不変）
+  | { slot: string }              // §3 の選択で選んだプレイヤー（Pick { player } の答え。D20・R4a-2）
 
 export type CardRef =
   | { ref: 'self' }               // この能力を「今持っている」カード。コピー（模写）されたらコピー先に再束縛される
@@ -74,7 +75,7 @@ export type CardRef =
   | { ref: 'opponentChar'; of: CardRef }      // 対戦キャラ（相手側のバトル参加キャラ）。参加していないキャラが身代わりで結果ダメージを受けたら元の受け手の対戦キャラ（H-13）
 
 /** 進行中の処理オブジェクトの役。ダメージ・ダウン・宣言・バトル種目選択など */
-export type EventRole = 'damageRecipient' | 'damageDealer' | 'downedChar' | 'declaredAction' | 'selectedBattleCard'
+export type EventRole = 'damageRecipient' | 'damageDealer' | 'downedChar' | 'declaredAction' | 'selectedBattleCard' | 'summonedChar'
 
 /** カードの集合を選ぶ条件 */
 export interface Selector {
@@ -130,7 +131,12 @@ export type Cond =
   // ── R3 で足した
   | { hasAttr: [CardRef, Attr] }               // キャラの属性にその属性が含まれる（「[力]属性のキャラ」。複数の属性なら含めば当たる FAQ:1709）
   | { charType: [CardRef, string] }            // キャラタイプを持つか（「[ロボ]の」等。D24・R4a-2）
+  | { isKind: [CardRef, CardKind] }            // カードの種別（c・t・b・i・e・f）が一致するか（《パーティ》の分岐・D19・R4a-2）
   | { downed: CardRef }                        // そのカードが今ゴミ箱にある＝ダウン処理が打ち消されずに終わった近似（D22・D16・R4a-2）
+  | { sameName: [CardRef, CardRef] }           // 2枚の名前が一致する（動的な相手。D18「同名キャラがいる」・R4a-2）
+  /** 今の窓を開いた宣言（env.trigger）の元の能力・イベントの効果が、その op を含むか（再帰。forEach・if・simul・offer の中も見る）。
+   *  「ドローする効果をもつ」（D23・おあずけ）の宣言時の制限に使う。カード構造の検査なので board 状態ではない */
+  | { declaredHasOp: string }
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -146,6 +152,7 @@ export type Pick =
   | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase' }
   | { option: string[] }
   | { number: { min: number } }  // 数を選ぶ（可変の使用代償・D16「世話焼き」。答えは数の文字列。1以上・上限は無いが候補は実装で有限に区切る）
+  | { player: true }             // プレイヤーを選ぶ（候補は chooser の相手だけ。D20「借金取り」・NH-20。答えは席の文字）
 
 export interface Choice {
   slot: string
@@ -200,11 +207,16 @@ export type Op =
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
   | { op: 'trash'; what: CardRef }
-  | { op: 'draw'; player: PlayerRef; n: number }
+  | { op: 'draw'; player: PlayerRef; n: number | Expr }        // n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）
   // ── 進行中の処理を書き換える（MTG の置換効果の代わり。原典には置換効果という概念が無い）
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
   | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous' }
-  | { op: 'counter'; what: 'thisEffect' | { declared: CardRef } } // 打ち消し（原典に定義が無い ❓）
+  /**
+   * 打ち消し（原典に定義が無い ❓）。part が無ければ全体（H-8: 範囲は「その効果」だけ）。
+   * part: 'draw'（D23・おあずけ・R4a-2）＝その効果のうち「ドロー」の操作（op:'draw'）だけを打ち消す（他は処理する）。
+   * 'thisEffect' はこの効果自身（env.declId のフレーム）を指す。残りの Op（rest）は実行しない
+   */
+  | { op: 'counter'; what: 'thisEffect' | { declared: CardRef }; part?: 'draw' }
   /**
    * 効果の乗っ取り（D11〜D15・R4a-2）。what.declared が指す宣言（いただきます＝相手のイベント／幸せ泥棒＝
    * 処理条件がある常時効果の《効果が発生したとき》の機会 NH-17）の効果を、乗っ取った側（you）が使う。
@@ -217,7 +229,19 @@ export type Op =
   | { op: 'hijack'; what: { declared: CardRef }; part?: 'recover' }
   // 効果でコストを発生させる（D21・R4a-2）。得たコストは「その他の代償」（7-3）としてすぐ使える（frameId 無し）。
   // icons が配列＝固定の並び（臨時収入の[WWW]等）／{ callCostOf }＝そのカードの印刷された呼び出しコスト＋extra（サクリファイス）
-  | { op: 'generateCost'; who?: PlayerRef; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] } }
+  // useAs（D20・R4a-2）＝発生させたコストは who ではなく useAs の発生済みのコストになる（《借金取り》「支払ったコストは相手プレイヤーが使用する」）
+  | { op: 'generateCost'; who?: PlayerRef; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] }; useAs?: PlayerRef }
+  /**
+   * 宣言時に選んだ数など、処理の途中で計算した値を後で参照できるように控える（D23「記憶喪失」の『同じ枚数』・R4a-2）。
+   * { chosen: slot } で読む（Pick { number } の答えと同じしくみを流用）
+   */
+  | { op: 'remember'; slot: string; value: Expr }
+  /**
+   * 効果で「呼び出す」（D17・R4a-2）。1枚ごとに ①《キャラクターカードが呼び出されるとき》の機会
+   * （このときキャラはまだ場に出ていない）→ ②元の場所に残っていれば指定の向きで場に出す → ③《呼び出されたとき》の機会（NH-18）。
+   * what が元の場所（宣言時のゾーン）から動いていなければ実行し、動いていれば（他の効果で失われた等）何もしない
+   */
+  | { op: 'callByEffect'; what: CardRef; orientation: 'ready' | 'rested' }
   // ── バトル
   | { op: 'setParticipants'; side: 'challenger' | 'challenged'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }
@@ -232,6 +256,7 @@ export type Op =
   | { op: 'if'; cond: Cond; then: Op[]; else?: Op[] }
   | { op: 'forEach'; in: Selector; as: string; do: Op[] }
   | { op: 'manual'; note: string }                                 // エンジンは扱わない。人が処理し、ログだけ残す
+  | { op: 'trace'; text: string }                                  // 処理の記録に名前を残すだけ（盤面は変えない。順の確認用・R4a-2）
   /** ルールの穴の切り替え（holes.ts）で分岐する。未決で既定の無い穴なら manual に倒れる */
   | { op: 'hole'; id: HoleId; branches: Partial<Record<string, Op[]>> }
   // ── R2a で足した（HANDOFF-R2a「決めたこと」。どれも原典の用語の一回きりの操作）

@@ -322,6 +322,11 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
   }
   // 能力値を1つ選ぶ（「このキャラの能力値１つを＋２」）。rule any だけ（maxBase・minBase は R4）
   if ('stat' in p && p.rule === 'any') return ['力', '早', '賢', '根', '感'].map((a) => ({ key: a, label: a }))
+  // プレイヤーを選ぶ（D20・借金取り）。候補は chooser の相手だけ（NH-20：自分は選べない）
+  if ('player' in p) {
+    const seat = other(resolvePlayer(state, env, ch.chooser))
+    return [{ key: seat, label: `プレイヤー${seat}` }]
+  }
   return [] // 能力を選ぶ（模写など）は R4
 }
 
@@ -495,7 +500,10 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play' && ab.kind !== 'conditional')) return [{ type: 'procEffect', frameId: top.id, items: [] }]
       const env: Env = { self: d.sourceIid, you: d.by, slots: (d.eng.slots as Record<string, string[]>) ?? {}, trigger: d.trigger, declId: d.id, declared: (d.eng.declared as Env['declared']) ?? {} }
       const resolveChoices: Task[] = ab.kind === 'conditional' ? [] : ab.choices.filter((c) => c.when !== 'declare').map((choice) => ({ op: { op: 'choose', choice } as Op }))
-      const eng: ItemEng = { tasks: [...resolveChoices, ...ab.effect.map((op) => ({ op }))], env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
+      // D23: 部分的な打ち消し（おあずけ）。counterPart:'draw' なら、この効果の中の op:'draw' だけ実行しない（他は今までどおり）
+      const dropDraw = (ops: Op[]): Op[] => ops.filter((o) => o.op !== 'draw')
+      const effectOps = top.counterPart === 'draw' ? dropDraw(ab.effect) : ab.effect
+      const eng: ItemEng = { tasks: [...resolveChoices, ...effectOps.map((op) => ({ op }))], env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
       return [{ type: 'procEffect', frameId: top.id, items: [{ key: d.id, label: d.label, by: d.by, sourceIid: d.sourceIid, eng: eng as unknown as Record<string, unknown> }] }]
     }
     case 'item':
@@ -542,8 +550,13 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
   return out
 }
 
-/** 15-10-1[13]: 呼び出しは印刷された気力。15-10-2[13]: タッグは構成要素のダメージ（気力の上限－気力）を引き継ぐ（oldrule.txt:715・FAQ:3266） */
+/** 15-10-1[13]: 呼び出しは印刷された気力。15-10-2[13]: タッグは構成要素のダメージ（気力の上限－気力）を引き継ぐ（oldrule.txt:715・FAQ:3266）。
+ *  kind summon（D17・効果で呼び出す）も呼び出しと同じ＝印刷された気力 */
 function placeKiryoku(ctx: EngineCtx, state: BoardState, frame: ProcFrame): number | null {
+  if (frame.kind === 'summon') {
+    const info = ctx.cards[state.cards[frame.summon!.iid]?.cardId ?? '']
+    return info?.kiryoku ?? null
+  }
   const d = frame.decl!
   const info = ctx.cards[state.cards[d.sourceIid ?? '']?.cardId ?? '']
   if (!info || info.kiryoku === null) return null
@@ -875,7 +888,15 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'moveTo':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
     case 'draw':
-      return { tasks: rest, actions: [{ type: 'procDraw', seat: resolvePlayer(state, env, op.player), n: op.n }] }
+      return { tasks: rest, actions: [{ type: 'procDraw', seat: resolvePlayer(state, env, op.player), n: evalExpr(ctx, state, env, op.n) }] }
+    case 'remember':
+      return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.slot]: [String(evalExpr(ctx, state, env, op.value))] } } }, actions: [] }
+    case 'callByEffect': {
+      // D17: 効果で「呼び出す」。カードが宣言時（今）の場所から動いていなければ実行する
+      const iid = refs(op.what)[0]
+      if (!iid || !(iid in state.cards)) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procSummon', iid, seat: env.you, orientation: op.orientation, fromZone: state.cards[iid].zone }] }
+    }
     case 'redirectDamage': {
       const to = refs(op.to)[0]
       if (!trigger?.damage || !to) return manual('受け渡すダメージが無い')
@@ -894,11 +915,16 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         ? op.icons
         : [...parseCost(refs(op.icons.callCostOf).map((iid) => infoOf(ctx, state, iid)?.cost ?? '').join('')), ...(op.icons.extra ?? [])]
       if (icons.length === 0) return { tasks: rest, actions: [] }
-      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: icons.map((icon) => ({ icon, attrs: [] })) }] }
+      // D20: useAs があれば、発生させたコストは useAs（借金取りの使用者）の発生済みのコストになる
+      const useAsSeat = op.useAs ? resolvePlayer(state, env, op.useAs) : undefined
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: icons.map((icon) => ({ icon, attrs: [] })), useAsSeat }] }
     }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない
-      if (op.what === 'thisEffect') return manual('「この効果」の打ち消し')
+      if (op.what === 'thisEffect') {
+        // このフレーム自身（env.declId）を打ち消す。残りの Op（rest）は実行しない（H-8「その効果」の内側からの自己打ち消し）
+        return { tasks: [], actions: env.declId ? [{ type: 'procCounter', frameId: env.declId }] : [] }
+      }
       const r = op.what.declared
       let targetId: string | null = null
       if (r.ref === 'event' && r.role === 'declaredAction') targetId = trigger && (trigger.kind === 'ability' || trigger.kind === 'event') ? trigger.id : null
@@ -907,6 +933,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         targetId = iid ? findActionOf(state, iid) : null
       }
       if (!targetId) return manual('打ち消す宣言が見つからない')
+      // D23: part があれば全体ではなく、その部分（draw の操作）だけを打ち消す
+      if (op.part) return { tasks: rest, actions: [{ type: 'procCounterPart', frameId: targetId, part: op.part }] }
       return { tasks: rest, actions: [{ type: 'procCounter', frameId: targetId }] }
     }
     case 'hijack': {
@@ -1047,6 +1075,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'manual':
       return manual(op.note)
+    case 'trace':
+      return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: op.text } }] }
     case 'putOntoField': {
       const what = refs(op.what)[0]
       if (!what) return { tasks: rest, actions: [] }
@@ -1066,7 +1096,9 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         // ダメージを引き継ぐ（15-4-1: ダメージ＝気力の上限－気力）
         if (old && old.kiryoku !== null && oldMax !== null && newMax !== null) kiryoku = newMax - (oldMax - old.kiryoku)
       }
-      return { tasks: rest, actions: [{ type: 'procMove', iid: what, to: 'field', orientation, kiryoku, attachItemsFrom: from }] }
+      // バトルカードは 'battle' ゾーンへ（《虎の子バトル》と同じ「出す」。19-2 の配置アクションではない）。それ以外は 'field'（フィールドカード等）
+      const to = ctx.cards[state.cards[what]?.cardId ?? '']?.kind === 'b' ? 'battle' : 'field'
+      return { tasks: rest, actions: [{ type: 'procMove', iid: what, to, orientation, kiryoku, attachItemsFrom: from }] }
     }
     case 'cancelDown':
       if (!trigger?.down) return manual('ダウンしていない')

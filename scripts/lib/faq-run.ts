@@ -43,6 +43,9 @@ export interface CaseResult {
 
 const FILLER = '_filler'
 const seatOf = (side: Side): Seat => (side === 'you' ? 'A' : 'B')
+/** D20（借金取り・R4a-2）: プレイヤーを対象にとる Pick { player } の答えは席の文字（'A'/'B'）。
+ *  targets に 'you'/'opponent' と書けば、この盤面の固定の対応（you=A・opponent=B）でそのまま席に変換する */
+const SEAT_ALIAS: Record<string, Seat> = { you: 'A', opponent: 'B' }
 
 export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState; refs: Record<string, string> } {
   const cards: Record<string, CardInstance> = {}
@@ -232,7 +235,7 @@ function tryDeclare(run: Run, req: DeclReq): { ok: true; declId: string } | { ok
     by: seatOf(req.by),
     source: run.refs[req.source] ?? req.source,
     ability: req.ability,
-    targets: req.targets?.map((t) => run.refs[t] ?? t),
+    targets: req.targets?.map((t) => run.refs[t] ?? SEAT_ALIAS[t] ?? t),
     payWith: req.payWith?.map((t) => run.refs[t] ?? t),
     option: req.option,
     costGen: req.costGen,

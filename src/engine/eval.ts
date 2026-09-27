@@ -5,7 +5,7 @@
 
 import type { BoardState, CardInstance, Seat } from '../core/board'
 import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
-import type { CardRef, Cond, Expr, PlayerRef, Selector } from './dsl'
+import type { Ability, CardRef, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { battleMod, currentStat } from './layers'
 
@@ -34,6 +34,7 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
     }
   }
   if ('controllerOf' in p) return controllerOf(state, resolveRef(state, env, p.controllerOf)[0] ?? '') ?? env.you
+  if ('slot' in p) return (env.slots[p.slot]?.[0] as Seat | undefined) ?? env.you
   return state.cards[resolveRef(state, env, p.ownerOf)[0] ?? '']?.owner ?? env.you
 }
 
@@ -65,6 +66,9 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
           return f.decl?.sourceIid ? [f.decl.sourceIid] : []
         case 'selectedBattleCard':
           return f.battle?.battleCard ? [f.battle.battleCard] : []
+        case 'summonedChar':
+          // D17: 効果で「呼び出す」ときの《キャラクターカードが呼び出されるとき》の窓（このときキャラはまだ場に出ていない）
+          return f.summon ? [f.summon.iid] : []
         default:
           return []
       }
@@ -252,6 +256,10 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.hasAttr[0])
     return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.attr ?? '').includes(c.hasAttr[1]))
   }
+  if ('isKind' in c) {
+    const xs = resolveRef(state, env, c.isKind[0])
+    return xs.length > 0 && xs.every((x) => ctx.cards[state.cards[x]?.cardId ?? '']?.kind === c.isKind[1])
+  }
   if ('charType' in c) {
     const xs = resolveRef(state, env, c.charType[0])
     return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.charTypes ?? []).includes(c.charType[1]))
@@ -261,8 +269,41 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.downed)
     return xs.length > 0 && xs.every((x) => state.cards[x]?.zone === 'trash')
   }
+  if ('sameName' in c) {
+    const a = resolveRef(state, env, c.sameName[0])[0]
+    const b = resolveRef(state, env, c.sameName[1])[0]
+    if (!a || !b) return false
+    const na = ctx.cards[state.cards[a]?.cardId ?? '']?.name
+    const nb = ctx.cards[state.cards[b]?.cardId ?? '']?.name
+    return !!na && na === nb
+  }
+  if ('declaredHasOp' in c) {
+    const f = triggerFrame(state, env)
+    const d = f?.decl
+    const cardId = d?.eng.cardId as string | undefined
+    const idx = d?.eng.index as number | undefined
+    const ab = cardId !== undefined && idx !== undefined ? ctx.defs[cardId]?.abilities[idx] : undefined
+    if (!ab) return false
+    return hasOpDeep(opsOf(ab), c.declaredHasOp)
+  }
   // pureAttrs は R4 以降
   return false
+}
+
+/** その能力・イベントの効果の Op の列（choices を持たない conditional もそのまま） */
+function opsOf(ab: Ability): Op[] {
+  return ab.kind === 'activated' || ab.kind === 'play' || ab.kind === 'conditional' ? ab.effect : []
+}
+
+/** Op の列に、name の op が（forEach・if・simul・offer の中も含めて）含まれるか（D23「ドローする効果をもつ」の判定） */
+function hasOpDeep(ops: Op[], name: string): boolean {
+  return ops.some((o) => {
+    if (o.op === name) return true
+    if (o.op === 'forEach' || o.op === 'simul') return hasOpDeep(o.do, name)
+    if (o.op === 'if') return hasOpDeep(o.then, name) || (o.else ? hasOpDeep(o.else, name) : false)
+    if (o.op === 'offer') return hasOpDeep(o.pay, name) || hasOpDeep(o.ifPaid, name) || hasOpDeep(o.ifDeclined, name)
+    return false
+  })
 }
 
 export function evalExpr(ctx: EngineCtx, state: BoardState, env: Env, e: Expr): number {

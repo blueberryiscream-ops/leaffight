@@ -31,7 +31,8 @@ export function triggerMatches(ctx: EngineCtx, state: BoardState, env: Env, trig
   if (!names.includes(trig.timing)) return false
   const e: Env = { ...env, trigger: frame.id }
   if (trig.actor && trig.actor !== 'any') {
-    const actor = frame.decl?.by ?? frame.damage?.dealerSeat ?? null
+    // summon（D17・R4a-2）は decl を持たない軽い手順なので、行為者は frame.by（呼び出す側）で見る
+    const actor = frame.decl?.by ?? frame.damage?.dealerSeat ?? (frame.kind === 'summon' ? frame.by : null) ?? null
     if (actor === null) return false
     if (trig.actor === 'opponent' ? actor === env.you : actor !== env.you) return false
   }
