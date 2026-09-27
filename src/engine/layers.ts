@@ -15,7 +15,7 @@
 import type { BoardAction } from '../core/actions'
 import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
 import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
-import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, Selector } from './dsl'
+import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 
@@ -772,6 +772,25 @@ export function limitFix(ctx: EngineCtx, state: BoardState): BoardAction | null 
 // 効果で層を足す（statMod・addContinuous の Op）
 // ───────────────────────────────────────────────────────────────
 
+/**
+ * バトルに依存する PlayerRef（'battleUser'・'challenger'・'challenged'）は、層を毎回導き出すたびに（layerEnv・resolvePlayer で）
+ * nearestBattle を探す形だと、バトルが終わった後は env.you（このカードの使用権者＝置いた側）にフォールバックしてしまい、
+ * 挑んだ側と置いた側が違うときに誤った側に効いてしまう（統括16 の検証・HANDOFF-R4b.md §7）。
+ * 層を作る時点（＝バトル進行中）で席を確定し、以後は resolvePlayer を経由せずその席のまま使う（{ seat }・R4b-1 続き）。
+ */
+function freezeBattleRef(state: BoardState, env: Env, p: (PlayerRef | 'any') | undefined): (PlayerRef | 'any') | undefined {
+  if (typeof p !== 'string') return p
+  if (p !== 'battleUser' && p !== 'challenger' && p !== 'challenged') return p
+  return { seat: resolvePlayer(state, env, p) }
+}
+
+/** addContinuous の効果の中の ActionPattern.by を、層を作る時点で解決して固定する（freezeBattleRef 参照） */
+function freezeBattleRefsIn(state: BoardState, env: Env, effect: Continuous): Continuous {
+  if (effect.ce === 'prohibit') return { ...effect, action: { ...effect.action, by: freezeBattleRef(state, env, effect.action.by) } }
+  if (effect.ce === 'costMod') return { ...effect, applies: { ...effect.applies, by: freezeBattleRef(state, env, effect.applies.by) } }
+  return effect
+}
+
 /** addContinuous の Op の層（対象は足したときに決まる 12-1。期限は Duration から） */
 export function continuousSeed(ctx: EngineCtx, state: BoardState, env: Env, effect: Continuous, duration: 'turn' | 'battle' | 'whileSource', label: string, origin: LayerBody['origin']): LayerSeed {
   const who = (effect as { who?: CardRef | Selector }).who
@@ -785,7 +804,7 @@ export function continuousSeed(ctx: EngineCtx, state: BoardState, env: Env, effe
     until: duration,
     targets,
     host: null,
-    body: { effect, env: { self: env.self, you: env.you, slots: env.slots }, origin },
+    body: { effect: freezeBattleRefsIn(state, env, effect), env: { self: env.self, you: env.you, slots: env.slots }, origin },
   }
 }
 

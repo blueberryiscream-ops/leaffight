@@ -12,8 +12,9 @@ import { emptyHistory, undo, type History } from '../src/core/history'
 import { MAIN_ACTIONS, PHASE_ACTIONS, activeSeat, awaitingSeat, currentWindow, phaseEndPending, startBattleAt, topFrame } from '../src/core/proc'
 import type { CardInfo } from '../src/engine/ctx'
 import { applyAction } from '../src/core/actions'
+import type { ProcDecl } from '../src/core/proc'
 import { currentStat, declare, drive } from '../src/engine/drive'
-import { applyCostMod, staticSourceActive } from '../src/engine/layers'
+import { applyCostMod, continuousSeed, staticSourceActive, violations } from '../src/engine/layers'
 import { select } from '../src/engine/eval'
 import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
@@ -738,6 +739,21 @@ function battleStart(battleCard: string): History {
   eq([useCh?.kind, useCh?.by], ['use', 'A'], 'R4b0: サークレットを装備していなければ今までどおり「使うか」を問う（回帰なし）')
   const mo2 = drive(act3(mo2pre, { type: 'procChoose', id: useCh!.id, pick: ['use'] }), ctx3).state
   eq(mo2.cards.WeakOpt.kiryoku, 4, 'R4b0: 使うを選べば気力+1（回帰なし）')
+}
+
+// H-9c battleUser: 層を作る時点（バトル進行中）で席を確定する。統括16「battleUser の解決は不具合」（HANDOFF-R4b.md §7・R4b-1 続き）
+// B が置いた鬼ごっこ系のバトルカードを A が挑んだバトルの種目に選ぶ（addContinuous の env.you = B・nearestBattle().challenger = A）。
+// バトル終了後（nearestBattle が無くなった後）も、ターン終了時まで宣言できないのは「挑んだ側」A（本文「このバトルを使用したプレイヤー」H-9c 仮の既定）。
+// 置いた側 B はバトルを使用していないので禁止されない。
+{
+  let s = startBattleAt(board([]), { challenger: 'A', at: 19, battleCard: 'Oni' })
+  const env = { self: 'Oni', you: 'B' as Seat, slots: {}, trigger: null, declId: null, declared: {} }
+  const seed = continuousSeed(ctxAll, s, env, { ce: 'prohibit', action: { kinds: ['バトル'], by: 'battleUser' } }, 'turn', '鬼ごっこ効果', 'ability')
+  let after = applyAction(s, { type: 'procLayers', add: [seed] }).state
+  after = { ...after, proc: after.proc.map((f) => (f.kind === 'battle' ? { ...f, status: 'done' } : f)) } // バトル終了＝nearestBattle が無くなる
+  const declBy = (by: Seat): ProcDecl => ({ id: 'x', by, kind: 'battle', actionType: '通常型', label: '', sourceIid: null, targets: [], costGens: [], sources: [], trigger: null, usageKey: null, eng: {} })
+  eq(violations(ctxAll, after, declBy('A')).map((v) => v.kind), ['prohibit'], 'battleUser①: 挑んだ側（A）はバトル終了後もターン終了時まで宣言できない（層を作った時点で席を確定・H-9c）')
+  eq(violations(ctxAll, after, declBy('B')).map((v) => v.kind), [], 'battleUser②: 置いた側（B）は禁止されない（このバトルを使用したのは挑んだ側 A）')
 }
 
 if (failures) {

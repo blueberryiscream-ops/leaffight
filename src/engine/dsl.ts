@@ -60,6 +60,8 @@ export type PlayerRef =
   | { controllerOf: CardRef }
   | { ownerOf: CardRef }          // 3-3 持ち主（ゲーム中不変）
   | { slot: string }              // §3 の選択で選んだプレイヤー（Pick { player } の答え。D20・R4a-2）
+  /** 既に決めた席（'A'|'B'）。battleUser 等バトルに依存する PlayerRef を層を作る時点で解決して固定するときに使う（R4b-1 続き・統括16） */
+  | { seat: 'A' | 'B' }
 
 export type CardRef =
   | { ref: 'self' }               // この能力を「今持っている」カード。コピー（模写）されたらコピー先に再束縛される

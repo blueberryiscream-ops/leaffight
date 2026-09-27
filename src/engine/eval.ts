@@ -33,6 +33,7 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
         return env.you
     }
   }
+  if ('seat' in p) return p.seat
   if ('controllerOf' in p) return controllerOf(state, resolveRef(state, env, p.controllerOf)[0] ?? '') ?? env.you
   if ('slot' in p) return (env.slots[p.slot]?.[0] as Seat | undefined) ?? env.you
   return state.cards[resolveRef(state, env, p.ownerOf)[0] ?? '']?.owner ?? env.you
