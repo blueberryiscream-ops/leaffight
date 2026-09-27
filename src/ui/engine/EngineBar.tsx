@@ -226,27 +226,40 @@ export function EngineBar({
       {engineOn && ch && (
         <div className="flex flex-wrap items-center gap-1">
           {ch.by === actor ? (
-            <>
-              <span className="font-bold">{solo ? `${ch.by}: ` : ''}{ch.prompt}</span>
-              {ch.options.map((o) => {
-                const isCard = !!board.cards[o.key]
-                const n = ui.pick.filter((k) => k === o.key).length
-                return (
-                  <button key={o.key} type="button" className={`${btn} ${n ? 'ring-2 ring-warn' : ''}`} onClick={() => ui.togglePick(o.key)}>
-                    {isCard ? cardLabel(o.key) : o.label}
-                    {n > 1 ? ` ×${n}` : ''}
-                  </button>
-                )
-              })}
-              {ch.repeat && ui.pick.length > 0 && (
-                <button type="button" className={btn} onClick={ui.resetPick}>
-                  やり直し
+            ch.purpose === 'offer' ? (
+              // ⑦ offer（K5・D8）: 問いの文は見出しに1回だけ。「払う」「払わない」の2ボタンで押したら決まる
+              <>
+                <span className="font-bold">{solo ? `${ch.by}: ` : ''}{ch.prompt}</span>
+                <button type="button" className={btn} onClick={() => engineRequest({ kind: 'choose', by: ch.by, id: ch.id, pick: ['pay'] })}>
+                  払う
                 </button>
-              )}
-              <button type="button" className={btn} disabled={ui.pick.length < ch.min || ui.pick.length > ch.max} onClick={ui.submitPick}>
-                決定（{ui.pick.length}／{ch.min === ch.max ? ch.min : `${ch.min}〜${ch.max}`}）
-              </button>
-            </>
+                <button type="button" className={btn} onClick={() => engineRequest({ kind: 'choose', by: ch.by, id: ch.id, pick: [] })}>
+                  払わない
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="font-bold">{solo ? `${ch.by}: ` : ''}{ch.prompt}</span>
+                {ch.options.map((o) => {
+                  const isCard = !!board.cards[o.key]
+                  const n = ui.pick.filter((k) => k === o.key).length
+                  return (
+                    <button key={o.key} type="button" className={`${btn} ${n ? 'ring-2 ring-warn' : ''}`} onClick={() => ui.togglePick(o.key)}>
+                      {isCard ? cardLabel(o.key) : o.label}
+                      {n > 1 ? ` ×${n}` : ''}
+                    </button>
+                  )
+                })}
+                {ch.repeat && ui.pick.length > 0 && (
+                  <button type="button" className={btn} onClick={ui.resetPick}>
+                    やり直し
+                  </button>
+                )}
+                <button type="button" className={btn} disabled={ui.pick.length < ch.min || ui.pick.length > ch.max} onClick={ui.submitPick}>
+                  決定（{ui.pick.length}／{ch.min === ch.max ? ch.min : `${ch.min}〜${ch.max}`}）
+                </button>
+              </>
+            )
           ) : (
             <span className="text-ink-muted">相手が選んでいます</span>
           )}
@@ -262,12 +275,24 @@ export function EngineBar({
                 {solo ? `${actor}: ` : ''}
                 {pePending ? `相手が${turn?.phase}フェイズの終了を宣言（10-2-2）` : `宣言の機会${win.frame ? `（${win.frame.label ?? win.frame.kind}）` : `（${turn?.phase ?? 'メイン'}）`}`}
               </span>
-              {ui.legal.map((d, i) => (
-                <button key={i} type="button" className={btn} onClick={() => ui.start(d)} title={d.violations?.map((v) => `警告: ${v.text}`).join('\n')}>
-                  {d.violations?.length ? '⚠ ' : ''}
-                  {d.label}
-                </button>
-              ))}
+              {ui.legal.map((d, i) =>
+                d.blockedReason ? (
+                  <button
+                    key={i}
+                    type="button"
+                    className={`${btn} bg-[var(--color-surface-2)] text-[var(--color-ink-faint)] cursor-not-allowed`}
+                    title={`断られた: ${d.blockedReason}`}
+                    onClick={() => alert(`断られた: ${d.blockedReason}`)}
+                  >
+                    {d.label}
+                  </button>
+                ) : (
+                  <button key={i} type="button" className={btn} onClick={() => ui.start(d)} title={d.violations?.map((v) => `警告: ${v.text}`).join('\n')}>
+                    {d.violations?.length ? '⚠ ' : ''}
+                    {d.label}
+                  </button>
+                ),
+              )}
               {pePending ? (
                 <>
                   <button type="button" className={btn} onClick={() => engineRequest({ kind: 'phase', by: actor, answer: 'accept' })}>

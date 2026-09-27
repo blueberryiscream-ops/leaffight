@@ -241,6 +241,8 @@ export interface LegalDecl {
   label: string
   /** カードの効果による禁止・対象にならない等（K4・R3）。あれば警告して確認のうえ通す。自動見送りでは宣言できるものに数えない */
   violations?: Violation[]
+  /** tested のカードの効果で declare が ok:false・blocked を返した（K4・D9）。断りの理由の文。自動見送りでは宣言できるものに数えない */
+  blockedReason?: string
 }
 
 /**
@@ -264,10 +266,15 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat,
       return
     }
     let warned = r0.ok && !deferred ? r0.violations : null
+    // tested のカードの効果で断られた（D9・K4）。断りの理由の文を持たせる（画面⑥・灰色ボタン）
+    let blockedReason = !r0.ok && r0.blocked ? r0.reason : null
     // 宣言者が指定する対象（装備対象・構成要素など）があるなら、候補の組で試す（1つの枠は2枚までの組み合わせ・それ以外は先頭）
     const specs = declareTargets(state, ctx, req)
     if (specs.length === 0 || specs.some((s) => s.options.length < s.min)) {
-      if (warned && opts.withWarned) out.push({ req, label, violations: warned })
+      if (opts.withWarned) {
+        if (warned) out.push({ req, label, violations: warned })
+        else if (blockedReason) out.push({ req, label, blockedReason })
+      }
       return
     }
     const combos: string[][] = []
@@ -284,8 +291,12 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat,
         return
       }
       if (r.ok && !warned) warned = r.violations
+      if (!r.ok && r.blocked && !blockedReason) blockedReason = r.reason
     }
-    if (warned && opts.withWarned) out.push({ req, label, violations: warned })
+    if (opts.withWarned) {
+      if (warned) out.push({ req, label, violations: warned })
+      else if (blockedReason) out.push({ req, label, blockedReason })
+    }
   }
   for (const c of Object.values(state.cards)) {
     const info = ctx.cards[c.cardId]

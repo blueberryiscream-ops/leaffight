@@ -591,7 +591,7 @@ function battleStart(battleCard: string): History {
     ofDecl.actions.forEach((a) => (asked = act3(asked, a)))
     asked = passUntilChoice(drive(asked, ctx3).state)
     const offerCh = asked.procMeta.choice
-    eq([offerCh?.by, offerCh?.kind, offerCh?.options.map((o) => o.key)], ['B', 'use', ['pay']], 'offer: B（opponent）に払うかを問う（procChoice kind:use）')
+    eq([offerCh?.by, offerCh?.kind, offerCh?.options.map((o) => o.key), offerCh?.purpose], ['B', 'use', ['pay'], 'offer'], 'offer: B（opponent）に払うかを問う（procChoice kind:use・purpose:offer で画面⑦の2ボタンに出し分け）')
     const paid = drive(act3(asked, { type: 'procChoose', id: offerCh!.id, pick: ['pay'] }), ctx3).state
     eq([paid.costs.A.map((t) => t.icon), paid.costs.B.length], [['W'], 0], 'offer 払う: generateCost の useAs どおり、発生させたコストは you（A）のものになる（B には残らない）')
     const declined = drive(act3(asked, { type: 'procChoose', id: offerCh!.id, pick: [] }), ctx3).state
@@ -690,6 +690,10 @@ function battleStart(battleCard: string): History {
   const kT = drive(base3([card('Hit', 'A', 'hand'), card('Y', 'B', 'char'), card('NoEvT', 'B', 'field')]), ctx3).state
   const hitT = declare(kT, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
   eq([hitT.ok, !hitT.ok && !!hitT.blocked?.length], [false, true], '⑳a ENFORCE既定 tested: tested のカード（NoEvT）の禁止は declare を断る（ok:false・根拠つき）')
+  // 画面⑥（R2u・PHASE-R4b §2(C)）: tested で blocked になる宣言は、withWarned のときだけ理由つきで出る（灰色ボタン）。
+  // 自動見送りの「宣言できるもの」には数えない（withWarned なしでは出ない）
+  const legalHitT = legalDeclarations(kT, ctx3, 'A', { withWarned: true }).find((d) => d.req.source === 'Hit')
+  eq([(legalHitT?.blockedReason?.length ?? 0) > 0, legalDeclarations(kT, ctx3, 'A').some((d) => d.req.source === 'Hit')], [true, false], '⑥ tested で blocked になる宣言（例: 魔法のサークレットを付けた柏木千鶴の《鬼化》相当）は理由つきで灰色ボタンに出す・自動見送りの数には入らない')
   setEnforce('warn')
   const hitTWarn = declare(kT, ctx3, { by: 'A', source: 'Hit', targets: ['Y'] })
   eq([hitTWarn.ok, hitTWarn.ok && hitTWarn.violations.map((v) => v.kind)], [true, ['prohibit']], '⑳b ENFORCE=warn: tested のカードでも断らず警告だけ（人の手直し・フリーモード用）')

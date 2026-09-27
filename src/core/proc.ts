@@ -303,7 +303,7 @@ export interface ProcChoice {
   repeat?: boolean
   /** 割り振りの上限（選択肢ごとに選べる回数。《サバイバル》FAQ:4109「気力が０より小さくならないように」） */
   caps?: Record<string, number>
-  /** core が出した選択の種類（答えを core が当てる）: battleParticipant・battleCard・battleLoop・firstStrike・entryReady・handDiscard */
+  /** core/engine が出した選択の種類（答えを core が当てる／画面の出し分けにも使う）: battleParticipant・battleCard・battleLoop・firstStrike・entryReady・handDiscard・offer（K5・D8。R2u⑦） */
   purpose?: string
   frameId: string | null
 }

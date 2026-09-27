@@ -1210,7 +1210,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return {
         tasks: rest,
         patch: { awaiting: { id, kind: 'offer', payOps: op.pay, ifPaidOps: op.ifPaid, ifDeclinedOps: op.ifDeclined } },
-        actions: [{ type: 'procChoice', choice: { id, by: to, kind: 'use', prompt: op.prompt, options: [{ key: 'pay', label: op.prompt }], min: 0, max: 1, frameId: frame.id } }],
+        actions: [{ type: 'procChoice', choice: { id, by: to, kind: 'use', prompt: op.prompt, options: [{ key: 'pay', label: op.prompt }], min: 0, max: 1, purpose: 'offer', frameId: frame.id } }],
       }
     }
     // ── R2b
