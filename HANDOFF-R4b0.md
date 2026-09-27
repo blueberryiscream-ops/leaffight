@@ -2,11 +2,11 @@
 
 PHASE-R4b0（魔法のサークレットの穴を engine で直す）の報告。**完了**。
 
-- tested の数: 45 → 55（`node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts`）
-- `npm run verify`: 緑（engine-host: すべて成功）。`npm run test:faq`: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30（下がっていない）
+- tested の数: 45 → 55（`node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts`。追加分（conditional）でも変化なし）
+- `npm run verify`: 緑（engine-host: すべて成功。追加分の新テスト5件も含めて成功）。`npm run test:faq`: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30（下がっていない）
 - コミット
-  - 親リポジトリ（`C:\Claudecode作業スペース\leaffight`）: `35d3cb8` fix(engine): 魔法のサークレットの暗黙の対象を violations()・forEach で見る
-  - `_local/rules/`: `3c29826` test: T ケース（faq-694・faq-709・faq-700）／`bc29ef4` docs: 10件の faqReview 見直し
+  - 親リポジトリ（`C:\Claudecode作業スペース\leaffight`）: `35d3cb8` fix(engine): 魔法のサークレットの暗黙の対象を violations()・forEach で見る／`b1f95fb` docs: 本報告／`f749308` fix(engine): conditional 追加分
+  - `_local/rules/`: `3c29826` test: T ケース（faq-694・faq-709・faq-700）／`bc29ef4` docs: 10件の faqReview 見直し／`994f674` docs: 追加分の faqReview 訂正
 
 ## §6 報告前の自己点検
 
@@ -84,3 +84,30 @@ draw（プレイヤー）・adjustDamage（進行中のダメージへの操作�
 - **`grantAbility`・`battleDamage` は「及ぼす」に分類したが、今のプールに who/to が self 等の直接 CardRef で書かれた該当カードが無く、実地の T ケースでは検証していない**（分類の根拠は §2(A) の一般原則のみ）。
 - **`addContinuous` は `effect.who` が CardRef のときだけ暗黙の対象にした**（Selector なら (B) の forEach 相当として次に層を導出する時点で `effectOn` が既に見ている＝FAQ:697 の既存実装のまま。二重に塞ぐ必要はない）。
 - **新しい穴の候補**: `choose(mode:'target', when:'resolve')` で処理時に選ぶ対象（例えば模写の宣言のような「処理のときに選ぶ」タイプ）はサークレットの untargetable を経由しない設計のまま（i_魔法のサ-クレット.ts の「未対応（R4）」注記どおり・FAQ:1264 で「使える」ことが答えなので今回はこれ以上塞がない）。一般規則で答えが出るため、新規の穴としては報告しない。
+
+## 追加（conditional）
+
+統括の指摘で見つかった追加の穴: `implicitTargetsOf`（layers.ts）は `decl.kind`（宣言を経由した ProcDecl）を通じてしか呼ばれないため、**宣言を通らない conditional**（12-2-1・処理条件がある常時効果。光岡悟「短命」＝強制、佐藤雅史「消極的」＝できる）の暗黙の対象を見ていなかった。c_佐藤雅史 faq-694 を 'ok' にしたのは誤り（`violations()` はこの経路に届かない）。
+
+**直した箇所**: `src/engine/drive.ts` の `itemStep`（`!eng.started` の枝）。`eng.recheck` が立っている（＝conditional の項目。timingItems が付ける）とき、発生源（`eng.recheck.iid`）が `isCharSource`（キャラ）なら、`collectEffectTargets`（layers.ts。(A) と同じ拾い方。export して共有）で暗黙の対象を集め、`untargetableBy(...,'特殊能力')` で全部外れるか確かめる。全部外れれば「読み飛ばし:〇〇（魔法のサークレット）」の trace を残して項目ごと `done(true)`（optional の「使うか」の問いも出さない）。一部だけ外れる記述は今のプールに無いため、`blocked.length` が `0 < blocked.length < implicit.length` のときは manual 警告に倒すだけで実装していない。
+
+**注意（NH-17 との切り分け）**: `kiryoku` に `recover: true` が付く conditional の項目は、この素の item 経路ではなく別の合成 decl 経路（D15・NH-17。幸せ泥棒用に宣言化される）を通る。今回はその経路までは直していない（該当する具体カード・FAQ の指摘が無いため範囲外と判断。回復系 conditional にサークレットが効くかは別途要検討として報告に残す）。
+
+**テスト**（`scripts/test-engine-host.ts`。FAQ の索引に無い形なので engine テストに追加）: `Weak`（強制・自分のターン終了時に気力－1。短命と同じ形）・`WeakOpt`（できる・自分のターン終了時に気力+1。消極的と同じ形。`recover:true` は使わず NH-17 経路を避けた）を追加。
+- Weak+サークレット装備: 気力据え置き（5→5）。Weak 単体: 今までどおり気力－1（5→4）
+- WeakOpt+サークレット装備: 「使うか」の問いが出ず気力据え置き（3→3）。WeakOpt 単体: 今までどおり「使うか」を問い、使うを選べば気力+1（3→4）
+- 正直に書く: この5件は drive.ts の修正を先に入れてから書いた（本編の T ケースのように「直す前に❌を確認」の手順を踏んでいない）。FAQ の索引に無い自作の回帰テストのため §3 の「FAQ の裁定を先にテストにする」対象外と判断したが、順番としては望ましくない。気になる場合は itemStep の追加ブロックを一時的にコメントアウトして Weak・WeakOpt の2件が❌に戻ることを再確認できる（未実施）
+
+faqReview の見直し:
+| カード | id | 前 | 後 |
+|---|---|---|---|
+| c_佐藤雅史 | faq-694 | ok（誤り。layers.ts 経由と書いていた） | ok（根拠を drive.ts itemStep の conditional 対応に書き直し） |
+| c_光岡悟 | （faq-694 は既存のまま） | — | 読み合わせに「短命」も同じ形で直った旨を1行追加（短命単体の FAQ id は無いため faqReview は追加なし） |
+
+verify・tested: `npm run verify` 緑（追加テスト5件含む）。`npm run test:faq` の件数は変わらず（R2a 57・R2b 37・R3 18・R4a 30）。tested の数も 55 のまま変化なし（faqReview の値自体は変えていない・c_佐藤雅史/c_光岡悟の変更は why・コメントのみ）。
+
+コミット:
+- 親: `f749308` fix(engine): conditional でもサークレットの暗黙の対象を見る
+- `_local/rules/`: `994f674` docs: c_佐藤雅史・c_光岡悟の faq-694/読み合わせを conditional 修正に合わせて直す
+
+ツール呼び出し回数（この追加分）: 40回以内（実測で概ね35回程度）。
