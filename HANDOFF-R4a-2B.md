@@ -106,3 +106,56 @@ verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:f
    - 束B2の範囲で既存ケースの誤りは見つからなかった。
 
 7. **ツールの呼び出し回数**: 約71回（60回の節目は超えたが、全20枚完了・commit済み・tsc/test:faq/verify すべて確認・HANDOFF作成前まで到達したため、そのまま完了として報告する。内訳の概算: PHASE/HANDOFF/例カード読み込み ~3、束ファイル読み込み ~3、既存20枚一括読み込み ~2、engine grep（adjustDamage・layers・overrides・cancelDown・startBattle等）~10、カードごとの Edit ~40（20枚×2回）、コミット ~5、tsc/test:faq/verify ~3、tested.json 確認 ~3、HANDOFF 作成・コミット ~2）。
+
+## 束 B3
+
+カード 20枚（完了 20／未着手 0）。
+
+faqReview の内訳（関係 FAQ 111件・`grep -oh "v: '[a-z]*'" cards/*.ts | sort | uniq -c` で数え直し。対象20枚のファイル名を明示して数えた）:
+- case: 42
+- ok: 28
+- manual: 23
+- na: 18
+- 合計 111（関係FAQ件数と一致）
+
+tested の数（束B3・`node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts` の出力＋`_local/rules/faq/_tested.json` より20枚を確認）:
+- tested: c_エビル・e_力からの防御・e_嫌がらせ・e_応急手当・e_禊・f_サバイバル・i_応援団（7枚）
+- manual: c_立川郁美・c_江藤結花・c_御影すばる・e_アイテム持ち替え・c_リアン・c_芳賀玲子・e_借金取り・c_スフィー_300・e_おあずけ・c_九品仏大志・c_長谷部彩・e_バニッシュ・e_ダウジング（13枚。記述に manual の能力・効果、または faqReview に manual があるカード）
+- draft: 0枚
+- 全20枚とも `reviewMissing: []`（faqReview が関係FAQを全部含む）を `_tested.json` で確認済み
+
+verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:faq` の件数は変わらず: R2a ✅57／保留1、R2b ✅37、R3 ✅18、R4a ✅30（下がっていない）。`npx tsc -p _local/rules/tsconfig.json` はエラー無し。
+
+コミット（`_local/rules/`）:
+- `c1d53d5` c_エビル・c_立川郁美・c_江藤結花・c_御影すばる・e_アイテム持ち替え
+- `597fc80` c_リアン・c_芳賀玲子・e_借金取り・c_スフィー_300・e_おあずけ
+- `d8c0434` c_九品仏大志・e_応急手当・i_応援団・c_長谷部彩・e_力からの防御
+- `d9ca8b5` e_バニッシュ・e_禊・e_ダウジング・e_嫌がらせ・f_サバイバル
+
+### §5 報告前の自己点検
+
+1. **束のカードごとに faqReview の件数＝関係 FAQ の件数**: 全20枚で一致を確認（`_tested.json` の `reviewMissing: []` で裏取り）。
+   内訳（カード: 件数）: エビル19・立川郁美12・江藤結花9・御影すばる8・アイテム持ち替え8・リアン7・芳賀玲子7・借金取り6（既存）・スフィー_300 5・おあずけ5（既存）・九品仏大志4・応急手当4・応援団4・長谷部彩3・力からの防御3・バニッシュ2・禊2・ダウジング1・嫌がらせ1・サバイバル1。合計111件。
+
+2. **'ok'・'na'・'manual'・'case' の件数**（`grep -oh "v: '[a-z]*'" cards/*.ts | sort | uniq -c`、対象20ファイルだけを明示して数え直し）:
+   - case: 42件
+   - ok: 28件
+   - manual: 23件
+   - na: 18件
+   - 合計 111件（関係FAQ件数と一致）
+
+3. **本文の省いた部分を manual にしたカード**: 束B3の20枚はいずれも既存の記述（前フェーズ）がすでに本文の省いた部分を manual 化済みで、新たに manual な能力・効果を足したカードは無い（faqReview 側の 'manual' 判定は、既存の manual 能力・効果に関する FAQ に付けたもの）。
+
+4. **FAQ と食い違って記述を直したカード**: 無し（束B3の範囲では記述の食い違いは見つからなかった）。test:faq の件数は前後とも R2a ✅57／保留1、R2b ✅37、R3 ✅18、R4a ✅30 で変化なし。`npm run verify` も緑のまま。
+
+5. **判断に迷った FAQ**:
+   - `c_芳賀玲子` の faq-3074・3077（「マナー指導」）: pool.json・scratch の pool データのどちらにも「マナー指導」というカードが見当たらない。related-faq.mjs の索引でこの2件が芳賀玲子の関係FAQに含まれていた（本文に能力名が出るわけではない）ので、一瞬「芳賀玲子の未実装の第三能力では」と疑ったが、pool 側にデータが無い以上プール外カードの裁定として 'na' にした。統括側でマナー指導というカード自体がプールに実在するかどうか確認してほしい（もし実在するなら pool.json の芳賀玲子の項目が能力を1つ欠いている可能性がある）。
+   - `c_江藤結花` の faq-2993（美和子＆由紀×あやつり人形）: 束のファイルに「太田香奈子SP」という名で同じ「あやつり人形」を持つカードが登場するが、`_local/rules/cards/` には `c_太田香奈子SP.ts` は無く（`c_太田香奈子.ts` のみ、B1の faqReview で「太田香奈子SP（別カード）」として na 済み）、プールに実在しないと判断して 'na' にした。
+   - `e_アイテム持ち替え` の faq-1648（忘れ物との組み合わせ）: 忘れ物（e_忘れ物）を今回読んでおらず、移し替え後に効果が復活する、という結論をこちらの実装から追認できなかったため 'manual' にした（'na' にはしなかった＝プール内カードとの組み合わせなので）。
+   - `c_立川郁美` の faq-3175 等（パトロンの細部）: 「パトロン」は継続効果全体が既存の manual note で、note の文面が実は FAQ の答えをそのまま含んでいるものもあった（faq-3175 は note の「[WWW]（属性なし）」と一致）が、op として処理されないので 'ok' にはせず、全部 'manual' で統一した。
+
+6. **ケースが間違っていると思ったもの・新しいルールの穴の候補**:
+   - 5で書いた「マナー指導」の件（c_芳賀玲子）: pool.json に存在しないカードの裁定が related-faq.mjs の索引経由で芳賀玲子の関係FAQに入っている。カード自体が pool に無いのか、pool.json の芳賀玲子のデータが能力を1つ欠いているのかを統括側で確認してほしい。
+   - 束B3の範囲で既存ケースの誤りは見つからなかった。
+
+7. **ツールの呼び出し回数**: 約70回（内訳の概算: PHASE/HANDOFF/例カード読み込み ~3、束ファイル読み込み ~3、既存20枚一括読み込み(Bash+保存ファイルRead) ~3、engine grep（cancelDown・counter・setKiryoku・addContinuous・moveItem・CharClass等）~10、pool.json確認 ~2、カードごとの Edit ~23（20枚、一部2回）、tsc確認 ~4、コミット ~4、tested.ts実行・_tested.json確認 ~4、test:faq・verify ~2、HANDOFF 作成・コミット ~2）。60回の節目は超えたが、全20枚完了・commit済み・reviewMissing:[]・test:faq/verify とも確認できたため、そのまま完了として報告する。
