@@ -303,3 +303,155 @@ D25(c) tested判定の強化・D21 generateCost・D22 サクリファイス・D1
 - §3-7（呼び出し・変わり身）・§3-8（パーティ）・§3-9（借金取り）・§3-10（おあずけ）・§3-11（正式gate）・
   §3-12（残りの単体テスト＝costMod・offer の合成カード）は引き続き未着手
 - Part B（記述89枚＋今回書いた6枚の洗い直し）も未着手
+
+## 続き2（変わり身・パーティ・借金取り・おあずけ・記憶喪失・正式gate・単体テスト）— 実装担当・2026-09-27
+
+対象は指示書 `PHASE-R4a-2.md` §3-7〜3-12（Part A の残り全部）。Part B は対象外（担当していない）。
+
+### 冒頭の数
+- 対象30件: **✅30／保留0／❌0**（`_r4a-result.json` を `node -e` で数え直し）。今回の対象6件
+  （faq-1628・1010・1350・869）＋前セッションからの持ち越し分すべて含めて **R4a 全30件が✅**
+- tested の数: 前5→**5**（変化なし。今回書いた5枚のカードは本文の一部が manual のため、tested の
+  条件「manual が無い」を満たさない＝draft のまま。想定内・D25(c) どおり）
+- `npm run verify` **EXIT 0**
+- R2a **57✅・保留1・❌0**／R2b **37✅・❌0**／R3 **18✅・❌0**（`_r2a/_r2b/_r3-result.json` の
+  `summary.scope` を `node -e` で数え直し・不変）
+- コミット（親リポジトリ）:
+  - `9d205c7`: §3-6〜11（core: kind 'summon'・Op callByEffect/remember/trace・Cond sameName/isKind/
+    declaredHasOp・PlayerRef{slot}・Pick{player}・counter.part・generateCost.useAs・draw の Expr 化・
+    正式gate組み込み）
+  - `e30eff8`: §3-12（costMod・offer・効果で呼び出す の単体テスト）
+- コミット（`_local/rules/`）: `ae7197d`（変わり身・パーティ・借金取り・おあずけ・記憶喪失・妨害工作の
+  効果実装・faq-1010 の steps 書き直し）
+- **ツール呼び出しの目安**: 約150〜160回（探索・設計調査が重く、上限に迫った。§3-12 完了後に区切って報告）
+
+### §3-7・3-8 D17・D18: 効果で呼び出す（変わり身）
+
+新しい core の手順 **kind `'summon'`**（`src/core/proc.ts`）を足した。既存の「宣言[1]〜[5]を経る
+15-10-1（kind `'call'`）」とは別の軽い手順（`kind:'down'`と同じ形）:
+- `STEP_TIMINGS.summon`: `[1]`《キャラクターカードが呼び出されるとき》（window）→`[2]`場に出す（engine）
+  →`[3]`《キャラクターカードが呼び出されたとき》（window・NH-18）
+- `ProcFrame.summon: { iid, seat, orientation, fromZone, canceled? }`。`enterSummon`（`[2]`でカードが
+  `fromZone`にまだあるか確かめ、無ければ何もしない＝「動かすはずだったカードは元の場所」H-8 と同じ考え方）
+- `placeChar`・`placeKiryoku`（既存の 15-10-1[13] 用の関数）を `frame.kind==='summon'` でも使えるよう一般化
+  （呼び出しコストの支払いは経ないが、気力は印刷値・向きは `frame.summon.orientation` の指定どおり）
+- engine 側: 新しい Op `{ op:'callByEffect', what, orientation }`（`execOp`→`{type:'procSummon',...}`）
+- **`triggerMatches` の直し**（`src/engine/abilities.ts`）: summon フレームは `decl` を持たないため、
+  行為者の判定（`trig.actor`）が常に false になっていた（`frame.decl?.by` が undefined）。
+  `frame.kind==='summon'` なら `frame.by` を見るよう分岐を足した。**これが無いと妨害工作
+  （割込型・actor:'opponent'）が summon の窓で一切宣言できない**（単体テストで発覚・直した）
+- 新しい `EventRole 'summonedChar'`（`{ref:'event', role:'summonedChar'}` → `frame.summon.iid`）。
+  `e_妨害工作` の manual を解消し、`{op:'trash', what:role('summonedChar')}` で実装
+- `e_変わり身`: 手札からキャラを選び（対象にとらない）、同名キャラの存在（`sameName` Cond・新規）・
+  キャラ数制限（`count`+`cmp`。既存の Expr/Cond で足りた）を確かめて `counter thisEffect`
+  （**`'thisEffect'` を実装**: `env.declId` のフレームを打ち消し、`tasks:[]` で残りの Op を捨てる
+  ＝「この効果自身」の打ち消し。H-8 のとおり、まだ何も動いていない時点でこの check を先頭に置くのが前提）。
+  それ以外は `callByEffect`（orientation:'ready'＝待機状態のまま）
+- faq-1628（同名で打ち消されたら手札に残る）が✅。この T ケースは打ち消し分岐だけを通る
+  （成功分岐＝呼び出しコストの支払い判定・構成要素タッグの確認・バトル参加キャラへの追加は
+  **どの FAQ ケースにも要求されていない**ため、下記「未実装（manual・報告）」のとおり簡略化した
+
+### §3-8 D19: パーティ
+
+デッキから**種類を問わず1枚選び**（`{zone:'deck', kind:['c','b','i']}`）、選んだカードの種類（新しい
+Cond `{isKind:[CardRef, CardKind]}`）で分岐: c→`callByEffect`（消耗状態）／b→`putOntoField`
+（`putOntoField` の execOp を一般化し、対象がバトルカードなら `to:'battle'` へ出すよう分岐を足した。
+《虎の子バトル》と同じ「出す」＝19-2 の配置アクションではない）／i→未実装（manual）。
+AP→NAP の順（`chooser:'you'`→`'opponent'`。この事件は通常型で使用者=AP固定なので`'active'`/`'nonActive'`
+と同じ意味）。「デッキから選んだら結果に関わらずシャッフル」は `exists+fromSlot` で「選んだこと」だけを見る。
+
+新しい Op `{op:'trace', text}`（盤面を変えず procTrace に名前だけ残す）を足した。faq-1010 の
+`expect: ORD('you の選択','opponent の選択')` を満たすため（AP/NAP それぞれの選択の直前に置いた）。
+
+**faq-1010 の `steps` を書き直した**（**論点・expect は不変**）: 実装が「種類を問わず1枚選ぶ→分岐」に
+なったため、旧 steps の `choose(..., ['キャラクターを呼び出す', 'dc'])`（分岐名＋カードの2語）を
+`choose(..., ['dc'])`（カードだけ）に直した。差分は `_local/rules/faq/宣言と処理の段.ts` の
+`faq-1010` のみ。**この修正の過程で気づいた重要な事実**: `_local/rules/tools/authored/*.mjs` は
+test-faq.ts が実際に読む対象ではない（読むのは `_local/rules/faq/*.ts` の JSON 形式のケース）。
+`.mjs` 側は今回の担当までは並行して手で直していたが、**test には反映されない古い/別系統のファイル**
+（過去のセッションが作った参考物と思われる）。今回は `.mjs` 側も一応揃えたが、以後のセッションは
+`_local/rules/faq/*.ts` を正として読むこと（この誤認に気づくまでに探索を無駄にした・報告に明記）。
+
+### §3-9 D20: 借金取り
+
+`PlayerRef` に `{ slot: string }`（選んだプレイヤーを席で読む）・`Pick` に `{ player: true }`
+（候補は chooser の相手だけ・NH-20）を足した。宣言時に相手プレイヤーを対象にとる（`mode:'target'`）。
+`generateCost` に `useAs?: PlayerRef` を足し、発生させたコストを別の席（借金取りの使用者）の
+発生済みのコストにする（`procGenCost` の `useAsSeat`）。払わない場合は `chara` セレクタ＋
+`repeat:{capBy:'kiryoku'}`（既存の f_サバイバル と同じ形）で対象プレイヤーが気力を割り振る。
+
+**faq-1350 の `targets: ['you']`**（テストの側名を declare の targets に渡す慣習）が、プレイヤーを
+対象にとる宣言では素直に動かないことに気づいた。`scripts/lib/faq-run.ts` の `tryDeclare` に
+`SEAT_ALIAS`（`you`→`A`・`opponent`→`B`。この盤面ヘルパーの固定の対応）を足し、`targets`/`payWith` の
+マッピングで `run.refs` に無ければ `SEAT_ALIAS` にフォールバックするようにした（既存のカード参照の
+解決には影響しない。新しい振る舞いを1つ足しただけ）。
+
+### §3-10 D23: おあずけ・記憶喪失
+
+`counter` に `part?: 'draw'` を足した（`op:'counter', part:'draw'` → `procCounterPart` →
+`ProcFrame.counterPart` を立てる。既存の `countered`（全体打ち消し）とは別の軽いマーカー）。
+`engineStep` の `'effect'` 生成時に `counterPart==='draw'` なら `ab.effect` から `op:'draw'` だけを
+除いて実行する（**トップレベルの Op だけを見る**。forEach・if・simul の中の draw までは追わない・
+今のプールの2枚はどちらもトップレベルなので実害なし・報告に明記）。
+
+新しい Cond `{declaredHasOp: string}`（`env.trigger` のフレームの `decl.eng.cardId`/`decl.eng.index`
+から能力定義を直接引き、`ab.effect` に指定の op が（forEach・if・simul・offer の中も含めて）あるかを
+再帰的に見る。`abilityOf`（drive.ts）を呼ばず eval.ts 内に小さく複製した＝ eval.ts→abilities.ts の
+循環 import を避けるため）。「ドローする効果をもつ」宣言時の制限に使う。
+
+`e_おあずけ`: 2つの ability（イベント版・特殊能力版のタイミング違い）。`e_記憶喪失`: 新しい Op
+`{op:'remember', slot, value:Expr}`（計算した値を `{chosen:slot}` で後から読めるよう控える）で
+「捨てる前の手札の枚数」を記録し、同じ枚数ドロー。faq-869・faq-1202 が✅。
+
+### §3-11 正式gate
+
+`scripts/test-faq.ts` の `scope` に `scopeD`（`_r4a-scope.json`）を合流させ、集計ループの対象に
+`['R4a', scopeD]` を足した。診断専用だった別ブロックは削除（R2a/R2b/R3と同じ扱いに統合）。
+
+### §3-12 単体テスト（`scripts/test-engine-host.ts`）
+
+- **costMod**（K6）: `applyCostMod`（純関数）を直接呼ぶ3件（0コスト＋アイコン追加／アイコンは種類
+  ごとに0未満にならない／気力コストの最終値も0未満にならない）
+- **offer**（払う／払わない）: フィクスチャ `OF`。払う→ `generateCost` の `useAs` で発生させたコストが
+  使用者（you）のものになる／払わない→ `ifDeclined` の気力減少
+- **効果で呼び出す**（D17）: フィクスチャ `Caller`・`CallSrc`・`Sabo`（妨害工作の最小限）。
+  《呼び出されるとき》の窓ではまだ場に出ていない（手札のまま）→ 窓が閉じると指定の向きで場に出る／
+  妨害工作と同じ形の割込型でゴミ箱送りにできる（`triggerMatches` の直しがここで要ることが分かった）
+
+### 原典に書いていない細部（実装で決めたこと・まとめ）
+- **D17 summon の場の制限（15-2）**: カード自身の「元の場所に残っているか」（`fromZone`）しか
+  確かめていない。フィールドの5体制限などは既存の K12（`limitFix`）の是正に任せた（置いた後に
+  超過分をゴミ箱送りにする、事後の是正）。事前に候補から除外する厳密な形にはしていない
+- **D18 変わり身の未実装（manual・報告）**:
+  - 呼び出しコストの支払い判定（払えないときの打ち消し）は実装していない。常に払えた扱いで進む
+  - 構成要素タッグの確認（FAQ:1625）は、タッグの構成要素の名前を engine が持っていないため未実装
+  - 呼び出したキャラを「バトル参加キャラにする」（参加者リストへの追加）は、`setParticipants` が
+    置き換え専用（追加の仕組みが無い）ため未実装
+  - いずれも faq-1628 の T ケース（同名で打ち消される分岐）には影響しない
+- **D19 パーティの未実装（manual・報告）**: 「アイテムを選んで装備させる」分岐（装備対象の選択・
+  17-1 の条件確認）は未実装。デッキからアイテムを選んでも manual に落ちる
+- **D20 借金取りの簡略化（manual・報告）**: 発生させるコストの種類（自己消耗・他人消耗・属性の選択・
+  [R][G]を[W]として払う選択）は実装していない。常に `[W]` 固定で `generateCost` する
+  （「その他のコストとして使用する」という結論自体は `useAs` で満たす）。ブースト（costMod）との
+  組み合わせも未実装（D16 と同じ判断＝今のプールに実例が無い）
+- **D23 counterPart の範囲**: トップレベルの Op だけを見る（forEach・if・simul の中の draw は見ない）。
+  今のプール2枚には実害無し
+- **`_local/rules/tools/authored/*.mjs` は test-faq.ts が読まない古い/別系統のファイル**（上記
+  「faq-1010」の節に詳細）。手直しはしたが本質的には不要だった可能性が高い。次のセッションは
+  `_local/rules/faq/*.ts`（JSON形式）を正として読むこと
+
+### 新しいルールの穴の候補
+- 無し（今回の6ケースで、決めていない穴は見つからなかった。上記の「未実装」はすべて「ケースが
+  要求していないので簡略化した」という判断で、ルールの解釈が割れる穴ではない）
+
+### 保留・ケースが間違っていると思ったもの
+- 無し（保留0件。前セッションの保留4件はすべて✅にできた）
+
+### 続きのセッションへ
+- §3-6〜12 は全部完了。Part A（PHASE-R4a-2 §3 の1〜12）が完了し、対象30件が✅・`npm run verify` 緑
+- 次は **Part B**（記述89枚＋今回書いた6枚＋前セッションの6枚の洗い直し。§3-13・3-14）:
+  ①本文と記述を読み合わせ、省いた部分を `manual` で明示 ②`_index.json` の関係 FAQ を全部読み
+  `faqReview` を埋める（'ok'/'manual'/'na'）。D18・D19・D20 で今回 manual にした部分（呼び出しコスト
+  支払い・タッグ確認・参加者追加・アイテム装備分岐・コスト種類選択）は、Part B で `faqReview` を
+  埋めるときにそのまま使える下地になっている
+- tested の数が5のまま増えていない（Part B が本体）。faqReview を埋めれば大きく伸びるはず
