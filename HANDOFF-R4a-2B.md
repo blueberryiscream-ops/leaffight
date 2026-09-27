@@ -323,3 +323,13 @@ verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:f
 1. 特殊能力（キャラの能力）の効果が `who/to: self` のキャラを変えるなら、そのキャラが untargetable のとき宣言を断る（FAQ:694・2828。放棄のように自分を変えないものは断らない＝700）
 2. 特殊能力の forEach・select でキャラに効果を及ぼすとき untargetable を外す（FAQ:709・3573）。数える・比べるだけなら外さない（3642）
 3. 直したら上の8枚と c_柏木千鶴 faq-694・i_魔法のサ-クレット faq-709 を見直す
+
+### 2タブ確認（統括15・?testplay=host / guest・Claude のブラウザ）
+- 準備: `npm run data:bundle` の zip を fetch して `importBundle` で読ませた（carddefs の status は tested 45／manual 52／draft 4 で一致）。検証用デッキを IndexedDB に作って両席「デッキで始める」→リーダーを表→先攻 A→エンジン。デッキは後で消した
+- ✅ tested の《弓矢》を host で宣言→盤面で対象を選ぶ→guest に応答の窓→解決（柏木耕一に1ダメージ・段の表示あり）
+- 🚨 **見つけた不具合（直した `d6e99d8`）**: guest が何もしていないのに、guest のバーに「そのプレイヤーの番でない（11-2）」が出て、guest の宣言の番になっても残った
+  - 原因1: 断り文の置き場所が2つある。§3-3（統括13）で消すようにしたのは useEngineUI の notice だけで、ホストから来た断り（engineReject）を置く useBoard の engineNotice は盤面が進んでも消えなかった
+  - 原因2: 自動見送り（auto: true）が状態の行き違いでホストに断られ、その断りを guest に出していた
+  - 直し: 自動見送りの断りは出さない（engineReject に auto を載せる・ホスト自身の自動見送りも同じ）／guest は state が届いたら、host は guest の要求を適用したら engineNotice を消す
+  - 確認: 再読み込み後、host の「呼び出し:リアン」の宣言→guest の宣言の番のバーに前の断り文が無い。verify 緑
+- ⏭ **未確認**: tested のカードの違反（K4）が断られる画面・決闘の問い（offer）の画面。盤面の準備（サークレット／決闘のカードを場に出す等）が重く、操作の目安15回を超えたので止めた。次は「違反を起こせるカードだけのデッキ」を IndexedDB に作ってから入ると短い（例: 挑戦状・決闘系のカードと、対象にならない状態を作れるカード）
