@@ -290,3 +290,36 @@ verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:f
    - 🚨 **c_柏木千鶴 faq-694**: 「鬼化」（choices:[] の暗黙の自己効果）は decl.targets に入らないため、魔法のサークレット装備キャラでも本文どおりに使用不可にできない可能性がある。同型の「choices無しの自己バフ」は他の束のカードにも広く存在しうるため、系統的な確認と engine 側の対応（暗黙のselfをdecl.targetsに含めるか、untargetable判定を別ルートで足すか）をR4bの前に検討する必要がある。
    - 🚨 **t_詠美&由宇「とばっちり」**: forEach（zone:'field', side:'both', class:'キャラ'）で両陣営の全キャラにダメージを与える特殊能力で、魔法のサークレット（FAQ:709「全体に効果を及ぼす特殊能力の対象にもならない」）を見ない。既知の穴（i_魔法のサ-クレットのfaq-709manualと同根）に該当する新しい実例として追加報告。
 7. **ツールの呼び出し回数**: 約88回（内訳の概算: PHASE指示書・環境確認 3、束ファイル読み込み(offset分割) 4、既存20枚一括読み込み(Bash+保存ファイルRead) 2、engine grep/read（proc.ts STEP_TIMINGS・drive.ts counter/adjustDamage/generateCost・cost.ts kiryoku下限・layers.ts maxKiryokuOf/violations・ctx.ts isCharOnField・魔法のサークレット既存ファイル確認）~13、カードごとの Edit 36（18枚×概ね2）、コミット 8、tsc確認 1、tested.ts実行・_tested.json確認 2、faqReview件数の数え直し 1、test:faq・verify 1、HANDOFF追記・コミット 1）。90回以内で全20枚完了。
+
+## 統括15の検証（2026-09-27）— B5 合格・Part B 完了（faqReview 101枚そろった）
+
+### 数（統括が数え直した）
+- サブ（Sonnet）: **ツール 100回**（タスク通知の tool_uses。申告は約88回・上限90を超えた）・約21分・rules のコミット8個＋親 `58a845a`
+- B5 の faqReview 112組: case 38／ok 39／manual 9／na 26（サブの申告どおり）。全20枚で reviewMissing 0
+- tested.ts（統括15の修正後・`_local/rules` `74d9e23`）: **tested 45／draft 4／manual 52（101枚）・faqReview が足りなくて tested になれなかった枚数 0**
+  - tested 45: 関係 T ケースが全部 ✅（manual なし）かつ faqReview が関係 FAQ を全部含む
+  - manual 52: 記述に manual の能力・効果 29／faqReview に manual 23
+  - draft 4（**T ケース0件のものは無い。全部ケースが保留か ✅ でも manual を含む**）: c_ルミラ faq-1608（✅だが manual 入り）・c_姫川琴音 faq-2216（同）・e_身代わり faq-3967（保留）・i_不幸の呪い faq-641（保留）
+- test:faq: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30（下がっていない）。verify 緑
+
+### 検証のやり方
+- B5 で tested になった9枚＋もとから tested の f_サクリファイスの 'ok' 18件・'na' 9件を**全件** FAQ 本文と読んだ（`tools/_sample-ok.mjs`）。誤りなし
+- 「実装でそうなる」の根拠を grep で確かめた: ctx.ts isCharOnField（タッグも「キャラ」・FAQ:3514）・layers.ts の気力上限の clamp と maxKiryokuOf の層の順（FAQ:4203・4206）・エキサイトの trigger「バトルが終了したとき」
+  - 小さな不正確: c_澤田真紀子 faq-2731 の why が drive.ts の counter thisEffect の分岐を指している（結論＝手札に残るは正しい。呼び出しの Op が動かないため）。直していない
+- e_鬼の暴走 の forEach はサークレットの穴に**当たらない**（サークレットは「特殊能力の対象にならない」。鬼の暴走はイベント）
+
+### 🚨 サークレットの穴は forEach だけではなかった → tested 53→45
+統括14は「forEach・selector で複数に及ぼす記述」だけを洗ったが、B5 のサブが c_柏木千鶴 faq-694 で2つ目の形を見つけた:
+- **自分を対象とする特殊能力**（FAQ:694《鬼化》「使用できません」・2828《狂犬》）: 記述は `choices: []`＋`who: self` で、drive.ts の decl.targets に入らず layers.ts の violations が見ない → サークレットを付けても使えてしまう
+- 対になる FAQ: 700《放棄》・703《パトロン》は自分を対象にしていないので使える／3642 数えるだけなら含める／1264・3046 は選べる
+- tested のカードを洗って、当たる8枚に faqReview の manual（FAQ:694 か 709）を足した（**engine を直したら ok に戻す**）:
+  - FAQ:694 型（このキャラに＋・回復）: c_柏木耕一 獣のちから・c_柳川祐也 狩猟者・c_光岡悟 影花藤幻流・c_佐藤雅史 消極的・c_牧部なつみ ヒーリング
+  - 自分を対象とするか読みが要る: c_セバスチャン 肉のカーテン（かわりに受ける）・c_因幡ましろ 探し物（このキャラをゴミ箱送り）→ 穴を直すときに統括が 694/700 の線引きで決める
+  - FAQ:709 型（全体）: t_詠美&由宇 とばっちり
+- tested.ts は関係 FAQ の中の manual しか数えていなかった → faqReview のどこかに manual があれば manual に（`74d9e23`）
+- 当たらないと確かめたもの: c_保科智子 放棄（FAQ:700）・c_澤田真紀子 厳しい目（相手の特殊能力が対象）・c_太田香奈子 整理（手札）・e_/f_ のカード（特殊能力でない）
+
+### R4b の前にやること（engine のサークレットの穴）
+1. 特殊能力（キャラの能力）の効果が `who/to: self` のキャラを変えるなら、そのキャラが untargetable のとき宣言を断る（FAQ:694・2828。放棄のように自分を変えないものは断らない＝700）
+2. 特殊能力の forEach・select でキャラに効果を及ぼすとき untargetable を外す（FAQ:709・3573）。数える・比べるだけなら外さない（3642）
+3. 直したら上の8枚と c_柏木千鶴 faq-694・i_魔法のサ-クレット faq-709 を見直す
