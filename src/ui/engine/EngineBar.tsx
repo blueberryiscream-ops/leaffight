@@ -280,9 +280,9 @@ export function EngineBar({
                   <button
                     key={i}
                     type="button"
-                    className={`${btn} bg-[var(--color-surface-2)] text-[var(--color-ink-faint)] cursor-not-allowed`}
+                    className={`${btn} bg-surface-2 text-ink-faint cursor-not-allowed`}
                     title={`断られた: ${d.blockedReason}`}
-                    onClick={() => alert(`断られた: ${d.blockedReason}`)}
+                    onClick={() => ui.showNotice(`断られた: ${d.blockedReason}`)}
                   >
                     {d.label}
                   </button>

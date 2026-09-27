@@ -34,6 +34,8 @@ export interface EngineUI {
   draft: Draft | null
   pick: string[]
   notice: string | null
+  /** ⑥ 断られた宣言の理由をバーの通知に出す */
+  showNotice: (text: string) => void
   declsFor: (iid: string) => LegalDecl[]
   start: (d: LegalDecl) => void
   /** 手札ドラッグ: そのカードを使う宣言を始める */
@@ -219,6 +221,7 @@ export function useEngineUI({
     click,
     ring,
     clearNotice: () => setNotice(null),
+    showNotice: (text: string) => setNotice(text),
   }
 }
 
