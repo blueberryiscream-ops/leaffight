@@ -250,3 +250,43 @@ verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:f
 1. **B5**（20枚・112組）: e_封印,c_ルミラ,e_鬼の暴走,c_澤田真紀子,e_クリティカル,c_柏木千鶴,e_臨時収入,e_弓矢,c_姫川琴音,f_ベ-スライフ,c_高瀬瑞希,f_サクリファイス,c_シンディ宮内,c_杜若きよみ,f_エキサイト,c_河島はるか,e_遠隔操作,i_神様の帽子,e_長蛇の列,t_詠美&由宇（`_local/rules/tools/_review-B5.md`。無ければ review-packet.mjs で作り直す）
 2. 全101枚の faqReview が揃ったか（tested.ts の「faqReview が足りなくて」が 0）・tested の数と理由の内訳を HANDOFF に
 3. 2タブ確認（PHASE-R4a-2 の残り）
+
+## 束 B5
+
+カード 20枚（完了 20／未着手 0）: e_封印・c_ルミラ・e_鬼の暴走・c_澤田真紀子・e_クリティカル・c_柏木千鶴・e_臨時収入・e_弓矢・c_姫川琴音・f_ベ-スライフ・c_高瀬瑞希・f_サクリファイス・c_シンディ宮内・c_杜若きよみ・f_エキサイト・c_河島はるか・e_遠隔操作・i_神様の帽子・e_長蛇の列・t_詠美&由宇。（e_臨時収入・f_サクリファイスは着手時点で既に faqReview 完備だったため今回は無編集）
+
+faqReview の内訳（関係 FAQ 112件・カードファイルの `grep -oh "v: '[a-zA-Z]*'" <20ファイル>` で数え直し）:
+- case: 38
+- ok: 39
+- manual: 9
+- na: 26
+- 合計 112（関係FAQ件数と一致。`_tested.json` で全20枚 `reviewMissing: []` を確認済み）
+
+tested の数（`node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts`）: 前 tested 44／draft 15／manual 42 → 後 tested 53／draft 4／manual 44（対象カード101枚。faqReview が足りなくて tested になれなかった枚数: 0）。束B5のうち tested になったのは e_鬼の暴走・c_澤田真紀子・e_クリティカル・e_弓矢・f_ベ-スライフ・f_サクリファイス・f_エキサイト・e_遠隔操作・e_長蛇の列・t_詠美&由宇（10枚）。manual は e_封印・c_柏木千鶴・e_臨時収入・c_高瀬瑞希・c_シンディ宮内・c_杜若きよみ・c_河島はるか・i_神様の帽子（8枚、faqReviewかCardDefにmanualがあるため）。draft のまま残ったのは c_ルミラ・c_姫川琴音（2枚。関係T ケースはあるが `_tested.json` 上「manual あり」等の理由でtested条件を満たさない。faqReview自体は完備でreviewMissing:[]）。
+
+verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:faq` は R2a ✅57／保留1、R2b ✅37、R3 ✅18、R4a ✅30 で変化なし。`npx tsc -p _local/rules/tsconfig.json` はエラー無し。
+
+コミット（`_local/rules/`）:
+- `4d6625c` B5: faqReview for e_封印, c_ルミラ
+- `a209107` B5: faqReview for e_鬼の暴走, c_澤田真紀子, e_クリティカル
+- `a856815` B5: faqReview for c_柏木千鶴, e_弓矢, c_姫川琴音
+- `d82a344` B5: faqReview for f_ベ-スライフ, complete c_高瀬瑞希
+- `f0ac535` B5: faqReview for c_シンディ宮内, c_杜若きよみ
+- `b3b77a0` B5: faqReview for f_エキサイト, c_河島はるか
+- `6f387e4` B5: faqReview for e_遠隔操作, i_神様の帽子
+- `b3b81f2` B5: faqReview for e_長蛇の列, t_詠美&由宇
+
+### §5 報告前の自己点検
+
+1. 束のカードごとに: faqReview の件数＝関係 FAQ の件数 — 全20枚一致（`_tested.json` の `reviewMissing: []` で裏取り）。✅
+2. 'ok' 39・'na' 26・'manual' 9・'case' 38（上の内訳のとおり、スクリプトで数え直し）。✅
+3. **本文の省いた部分を manual にしたカード**: c_柏木千鶴（faq-694: 「鬼化」が choices:[] の暗黙の自己効果で、魔法のサークレットの untargetable チェックが検知できない可能性・穴の候補として明記）／c_シンディ宮内（潔癖症の「自分のゴミ箱から回収する効果をもつ」という条件を型で書けず既存の manual のまま）／c_杜若きよみ（faq-3184: 病弱の manual の範囲）／c_河島はるか（faq-2761: マイペースの manual の範囲）／e_封印（faq-2198・3323 の一部を manual に含めた・新規の manual op は足していない、既存注記の再確認）。CardDef の op/ce に新しい manual は追加していない（既存の manual 注記の範囲で faqReview を書いただけ）。
+4. **FAQ と食い違って記述を直したカード**: なし（今回は全カード既存の記述のままで説明がついた。test:faq の件数は前後とも R2a✅57/保留1・R2b✅37・R3✅18・R4a✅30で変化なし）。
+5. **判断に迷った FAQ**:
+   - c_柏木千鶴 faq-694（能力名で引いた・柏木楓の「鬼化」）: 一見「同じ能力名の別カードの話」で na にもできたが、柏木楓の「鬼化」と本カードの「鬼化」は本文・効果とも完全に同一（[力]+2[早]+2・1ターン1回・self）で、プール内の魔法のサークレット（i_魔法のサ-クレット）との組み合わせで本カードにもそのまま起こりうる話だったため na にせず manual にした。drive.ts:260 で decl.targets が choices の slots からしか作られないこと、layers.ts の violations() が decl.targets だけを見ることを grep で確認し、choices:[] の暗黙の自己効果ではこのチェックが働かないと判断。
+   - e_鬼の暴走 faq-1206・1209・1741・2327・2741・3060: いずれも須磨寺雪緒・保護者・梶原夕菜・片桐恵（すべてプール外）自身の効果についての裁定で、一見「鬼の暴走が複数キャラに効果を及ぼす」ことのFAQ活用に見えたが、対象カードがプール外のため現行プールでは再現しないと判断してna にした。
+   - c_ルミラ faq-2265・2268: ルミラ４．０という別バージョンの別能力（魅了の瞳・雀鬼の館）についての裁定で、名前は同じ「ルミラ」だが能力自体が別物のため na とした（faq-2178 の模写コピー同様）。
+6. **ケースが間違っていると思ったもの**: なし。**新しいルールの穴の候補**（決めていない・報告のみ）:
+   - 🚨 **c_柏木千鶴 faq-694**: 「鬼化」（choices:[] の暗黙の自己効果）は decl.targets に入らないため、魔法のサークレット装備キャラでも本文どおりに使用不可にできない可能性がある。同型の「choices無しの自己バフ」は他の束のカードにも広く存在しうるため、系統的な確認と engine 側の対応（暗黙のselfをdecl.targetsに含めるか、untargetable判定を別ルートで足すか）をR4bの前に検討する必要がある。
+   - 🚨 **t_詠美&由宇「とばっちり」**: forEach（zone:'field', side:'both', class:'キャラ'）で両陣営の全キャラにダメージを与える特殊能力で、魔法のサークレット（FAQ:709「全体に効果を及ぼす特殊能力の対象にもならない」）を見ない。既知の穴（i_魔法のサ-クレットのfaq-709manualと同根）に該当する新しい実例として追加報告。
+7. **ツールの呼び出し回数**: 約88回（内訳の概算: PHASE指示書・環境確認 3、束ファイル読み込み(offset分割) 4、既存20枚一括読み込み(Bash+保存ファイルRead) 2、engine grep/read（proc.ts STEP_TIMINGS・drive.ts counter/adjustDamage/generateCost・cost.ts kiryoku下限・layers.ts maxKiryokuOf/violations・ctx.ts isCharOnField・魔法のサークレット既存ファイル確認）~13、カードごとの Edit 36（18枚×概ね2）、コミット 8、tsc確認 1、tested.ts実行・_tested.json確認 2、faqReview件数の数え直し 1、test:faq・verify 1、HANDOFF追記・コミット 1）。90回以内で全20枚完了。
