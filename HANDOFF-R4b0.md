@@ -111,3 +111,15 @@ verify・tested: `npm run verify` 緑（追加テスト5件含む）。`npm run 
 - `_local/rules/`: `994f674` docs: c_佐藤雅史・c_光岡悟の faq-694/読み合わせを conditional 修正に合わせて直す
 
 ツール呼び出し回数（この追加分）: 40回以内（実測で概ね35回程度）。
+
+## 統括15の検証（2026-09-27）— 合格
+
+- サブ（Sonnet）: 本体 **ツール95回**（申告約60・90で止める約束を超え上限120以内）／追加（conditional）**57回**（申告約42・上限40超え）。**申告は今回も少ない**
+- 差分を読んだ: (A) layers.ts implicitTargetsOf/effectRefsOf/collectEffectTargets（decl.targets は変えず violations() の中で合成）／(B) drive.ts targetableSelect（isCharSource のときだけ・forEach と simul 内 forEach）。アイテム・フィールドに activated の記述は無い（grep）＝(A) は実質キャラの特殊能力だけ（イベントは kind 'イベント' で見るのでサークレットに当たらない）
+- 🚨 統括が見つけた漏れ → 追加で直させた: conditional（消極的・短命）は宣言を通らず violations() に届かない。仕様＝処理の時点で暗黙の対象が全部特殊能力の対象にならないなら読み飛ばし（FAQ:697・3573・oldrule 1178）。drive.ts itemStep `f749308`
+- T ケース3件（694 千鶴の鬼化で ILL・709 ティリアでサークレットのキャラだけ回復しない・700 放棄は LEG）の期待値を FAQ の答えと読み合わせた ✅
+- **修正前の drive.ts に戻して test-engine-host を回した** → 新テストのサークレット装備2件が ❌、戻すと ❌0（サブは「直す前に ❌」を踏んでいなかったので統括が確かめた）
+- verify 緑・test:faq R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30／参考 ✅5
+- **tested 45→55**（8枚＋c_柏木千鶴＋i_魔法のサ-クレット。c_ティリア は manual→draft＝faq-743 のケースが ✅ でない）。draft 5／manual 41
+- 新しく tested の2枚（千鶴・サークレット）の ok 9・na 6 を全件 FAQ 本文と読んだ → 統括が4件直した（`_local/rules` `217ffa7`・`c62a770`）: サークレット faq-694・700 の why が修正前の説明のまま／faq-3573・3642・2665 を na（他カードがプール外）→ ok（サークレット自身の裁定。3573＝(B) で外す・3642＝count は select のまま含める・2665＝対象の空打ち）
+- 残り: 一部の対象だけが外れる conditional は warnings（manual）。今のプールに該当なし。choose(when:'resolve') の選択は外さない（FAQ:1264 と整合）
