@@ -38,7 +38,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, CardRef, Choice, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { clearableMods, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { clearableMods, collectEffectTargets, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -778,6 +778,20 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       }
       // この手順（ダメージ1件など）で処理済みの効果として記録する（受け手の差し替えでやり直す段で同じ効果を二度処理しない）
       if (trig) acts.push({ type: 'procEngine', frameId: trig.id, patch: { applied: [...((trig.eng.applied as string[]) ?? []), item.key] } })
+    }
+    // PHASE-R4b0 追加: 処理条件がある常時効果（conditional。宣言を通らないので violations() に届かない）も、
+    // 発生源がキャラなら暗黙の対象（(A) と同じ拾い方）が特殊能力の対象にならないキャラなら効果を及ぼさない（FAQ:697・3573）。
+    // 暗黙の対象が全部外れるなら項目ごと読み飛ばす（optional の「使うか」の問いも出さない）。一部だけ外れる記述は今のプールに
+    // 無いので manual の警告に倒す（カード側の書き分けが要る）
+    if (eng.recheck && isCharSource(ctx, state, eng.recheck.iid)) {
+      const implicit = collectEffectTargets(ctx, state, eng.env, eng.tasks.map((t) => t.op))
+      if (implicit.length) {
+        const blocked = implicit.filter((iid) => untargetableBy(ctx, state, iid, '特殊能力'))
+        if (blocked.length === implicit.length) {
+          return [...acts, { type: 'procTrace', entry: { kind: 'name', text: `読み飛ばし:${item.label}（魔法のサークレット）` } }, done(true)]
+        }
+        if (blocked.length) warnings.push(`manual: ${item.label}: 暗黙の対象の一部だけが「特殊能力の対象にならない」で外れる（未実装・カード側の書き分けが要る）`)
+      }
     }
     // 処理条件がある常時効果は、処理を始めたところで名前を記録する（宣言した行動は [13] で core が記録する）
     if (eng.recheck) acts.push({ type: 'procTrace', entry: { kind: 'name', text: item.label } })

@@ -381,7 +381,8 @@ function effectRefsOf(op: Op): CardRef[] {
   }
 }
 
-function collectEffectTargets(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[]): string[] {
+/** (A) の暗黙の対象を op の列から拾い集める（宣言の violations() 用に加え、drive.ts の conditional の項目でも使う） */
+export function collectEffectTargets(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[]): string[] {
   const out: string[] = []
   for (const op of ops) {
     if (op.op === 'if') {

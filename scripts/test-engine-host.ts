@@ -415,6 +415,8 @@ function battleStart(battleCard: string): History {
     st('CallSrc', 'c', S(1, 1, 1, 1, 1), 3),
     st('Caller', 'c', S(1, 1, 1, 1, 1)),
     st('Sabo', 'e', null, null),
+    st('Weak', 'c', S(3, 3, 3, 3, 3)),
+    st('WeakOpt', 'c', S(3, 3, 3, 3, 3)),
   ]
   const self = { ref: 'self' as const }
   const equipped = { ref: 'equipped' as const }
@@ -447,6 +449,13 @@ function battleStart(battleCard: string): History {
     Caller: { id: 'Caller', name: 'Caller', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'DoCall', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'choose', choice: { slot: 'w', chooser: 'you', pick: { cards: { zone: 'hand', side: 'you', class: 'キャラクター' } }, count: [1, 1], mode: 'select', when: 'resolve' } }, { op: 'callByEffect', what: { ref: 'slot', slot: 'w' }, orientation: 'ready' }] }] },
     // 妨害工作の最小限（割込型「キャラクターカードが呼び出されるとき」でゴミ箱送り）
     Sabo: { id: 'Sabo', name: 'Sabo', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '割込型', trigger: { timing: 'キャラクターカードが呼び出されるとき', actor: 'opponent' }, choices: [], effect: [{ op: 'trash', what: { ref: 'event', role: 'summonedChar' } }] }] },
+    // PHASE-R4b0 追加: 光岡悟「短命」・佐藤雅史「消極的」と同じ形の conditional（処理条件がある常時効果。宣言を通らない）。
+    // Weak（強制・自分のターン終了時に気力－1）・WeakOpt（できる・自分のターン終了時に気力+1。どちらも kiryoku で
+    // 見る＝ duration:'endOfTurn' の statMod だと同じ《ターン終了時》の段2で即座に失われて検証しづらいため。
+    // recover:true は付けない＝付けると NH-17（D15）の「回復を宣言化する」別経路（幸せ泥棒用）に入ってしまい、
+    // 今回の追加（conditional の素の item 経路）の検証にならないため）
+    Weak: { id: 'Weak', name: 'Weak', kind: 'c', status: 'draft', abilities: [{ kind: 'conditional', trigger: { timing: 'ターン終了時', when: { activeIs: 'you' } }, optional: false, effect: [{ op: 'kiryoku', who: self, delta: -1 }] }] },
+    WeakOpt: { id: 'WeakOpt', name: 'WeakOpt', kind: 'c', status: 'draft', abilities: [{ kind: 'conditional', trigger: { timing: 'ターン終了時', when: { activeIs: 'you' } }, optional: true, effect: [{ op: 'kiryoku', who: self, delta: 1 }] }] },
   }
   const ctx3 = { cards: Object.fromEntries(R3I.map((c) => [c.id, c])), defs: R3D }
   const base3 = (cs: CardInstance[]) => ({ ...board([card('LA', 'A', 'leader', { kiryoku: 10 }), card('LB', 'B', 'leader', { kiryoku: 10 }), card('dA', 'A', 'deck'), card('dB', 'B', 'deck'), ...cs]), mode: 'engine' as const })
@@ -702,6 +711,33 @@ function battleStart(battleCard: string): History {
   w = drive(act3(w, { type: 'procAttach', moves: [{ item: 'Denpa', to: 'P' }, { item: 'Plain', to: 'Y' }] }), ctx3).state
   w = passUntil({ ...hist(w) }, (x) => x.proc.length === 0).present
   eq([w.cards.Y.zone, w.cards.Plain.zone, w.cards.Denpa.zone, w.cards.P.zone, w.downs.A], ['trash', 'trash', 'trash', 'char', 1], '⑲b 外れた瞬間に元の装備先はダウン（入れ替えたアイテムも一緒にゴミ箱）・移った先はアイテムだけゴミ箱送り')
+
+  // PHASE-R4b0 追加: conditional（宣言を通らない Auto。光岡悟「短命」・佐藤雅史「消極的」と同じ形）も、暗黙の対象が
+  // サークレットで外れたら効果を及ぼさない（oldrule 1178・FAQ:697・3573）。処理の時点で外す＝宣言を断るのではない
+  const finishTurnEnd = (s: BoardState): BoardState => {
+    let cur = drive(act3(s, { type: 'procPhase', to: 'ターン終了' }), ctx3).state
+    for (let i = 0; i < 100 && cur.proc.length && !cur.procMeta.choice; i++) {
+      const seat = awaitingSeat(cur)
+      if (!seat) break
+      cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+    }
+    return cur
+  }
+  // 強制（短命と同じ形）: サークレット装備なら気力－1が起きない
+  const mw = finishTurnEnd(drive(base3([card('Weak', 'A', 'char', { kiryoku: 5 }), card('Circ', 'A', 'char', { attachedTo: 'Weak', kiryoku: null, index: 100 })]), ctx3).state)
+  eq(mw.cards.Weak.kiryoku, 5, 'R4b0: conditional（強制・短命と同じ形）もサークレット装備なら暗黙の対象が外れ、気力－1が起きない')
+  // サークレットを装備していなければ今までどおり気力－1（回帰なし）
+  const mw2 = finishTurnEnd(drive(base3([card('Weak', 'A', 'char', { kiryoku: 5 })]), ctx3).state)
+  eq(mw2.cards.Weak.kiryoku, 4, 'R4b0: サークレットを装備していなければ今までどおり気力－1が起きる（回帰なし）')
+  // できる（消極的と同じ形）: サークレット装備なら暗黙の対象が外れて項目ごと読み飛ばし＝「使うか」の問いも出ない
+  const mo = finishTurnEnd(drive(base3([card('WeakOpt', 'A', 'char', { kiryoku: 3 }), card('Circ', 'A', 'char', { attachedTo: 'WeakOpt', kiryoku: null, index: 100 })]), ctx3).state)
+  eq([mo.procMeta.choice, mo.cards.WeakOpt.kiryoku], [null, 3], 'R4b0: conditional（できる・消極的と同じ形）もサークレット装備なら読み飛ばし・「使うか」を問わず気力は変わらない')
+  // サークレットを装備していなければ今までどおり「使うか」を問い、使うを選べば+1（回帰なし）
+  const mo2pre = finishTurnEnd(drive(base3([card('WeakOpt', 'A', 'char', { kiryoku: 3 })]), ctx3).state)
+  const useCh = mo2pre.procMeta.choice
+  eq([useCh?.kind, useCh?.by], ['use', 'A'], 'R4b0: サークレットを装備していなければ今までどおり「使うか」を問う（回帰なし）')
+  const mo2 = drive(act3(mo2pre, { type: 'procChoose', id: useCh!.id, pick: ['use'] }), ctx3).state
+  eq(mo2.cards.WeakOpt.kiryoku, 4, 'R4b0: 使うを選べば気力+1（回帰なし）')
 }
 
 if (failures) {
