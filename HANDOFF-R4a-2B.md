@@ -159,3 +159,47 @@ verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:f
    - 束B3の範囲で既存ケースの誤りは見つからなかった。
 
 7. **ツールの呼び出し回数**: 約70回（内訳の概算: PHASE/HANDOFF/例カード読み込み ~3、束ファイル読み込み ~3、既存20枚一括読み込み(Bash+保存ファイルRead) ~3、engine grep（cancelDown・counter・setKiryoku・addContinuous・moveItem・CharClass等）~10、pool.json確認 ~2、カードごとの Edit ~23（20枚、一部2回）、tsc確認 ~4、コミット ~4、tested.ts実行・_tested.json確認 ~4、test:faq・verify ~2、HANDOFF 作成・コミット ~2）。60回の節目は超えたが、全20枚完了・commit済み・reviewMissing:[]・test:faq/verify とも確認できたため、そのまま完了として報告する。
+
+## 束 B4
+
+カード 20枚（完了 20／未着手 0）: i_魔法のサ-クレット・c_マルチ・c_藤井冬弥・e_幸せ泥棒・e_いただきます・e_パ-ティ・c_猪名川由宇・i_尊い犠牲・c_ティリア・e_PHS・c_観月マナ・e_変わり身・t_姉妹うさぎ・c_澤倉美咲・e_輪廻・e_インスタントヴィジョン・e_解雇・c_セバスチャン・e_廃品回収・f_アンチアシスト。
+
+faqReview の内訳（関係 FAQ 111件・カードファイルの `grep -oh "v: '[a-z]*'" <20ファイル>` で数え直し）:
+- case: 37
+- ok: 30
+- manual: 23
+- na: 21
+- 合計 111（関係FAQ件数と一致。各カードの faqReview 件数もカードヘッダの「関係 FAQ（n件）」と1件ずつ一致を確認済み）
+
+tested の数（`node --import ./scripts/register-ts-loader.mjs _local/rules/tools/tested.ts`）: tested 44／draft 15／manual 42（対象カード101枚）。束B4のうち i_尊い犠牲・c_観月マナ・e_輪廻・e_インスタントヴィジョン・c_セバスチャン・e_廃品回収・f_アンチアシスト の7枚は tested。残り13枚（魔法のサークレット・マルチ・藤井冬弥・幸せ泥棒・いただきます・パーティ・猪名川由宇・ティリア・PHS・変わり身・姉妹うさぎ・澤倉美咲・解雇）は記述に manual の能力・効果があるか faqReview に manual があるため status: 'manual'（tested.ts の分類どおり。draft は0枚）。
+
+verify: `npm run verify` 緑（engine-host: すべて成功）。`npm run test:faq` は R2a ✅57／保留1、R2b ✅37、R3 ✅18、R4a ✅30 で変化なし。`npx tsc -p _local/rules/tsconfig.json` はエラー無し。
+
+コミット（`_local/rules/`）:
+- `893fe14` B4 Part B: faqReview 前半10枚（魔法のサークレット〜PHS）
+- `2e5ad21` B4 Part B: faqReview 後半10枚（観月マナ〜アンチアシスト）
+
+### §5 報告前の自己点検
+
+1. **束のカードごとに faqReview の件数＝関係 FAQ の件数**: 全20枚で一致を確認（`grep -o "'faq-[0-9]*'" <各ファイル> | sort -u | wc -l` を関係FAQ件数と突き合わせ）。内訳（カード: 件数）: 魔法のサークレット14・マルチ13・藤井冬弥10・幸せ泥棒9・いただきます8・パーティ8（既存のまま）・猪名川由宇7・尊い犠牲7・ティリア5・PHS5・観月マナ4・変わり身4（既存のまま）・姉妹うさぎ4・澤倉美咲3・輪廻3・インスタントヴィジョン2・解雇2・セバスチャン1・廃品回収1・アンチアシスト1。合計111件。
+
+2. **'ok'・'na'・'manual'・'case' の件数**: 上記の内訳のとおり（case 37・ok 30・manual 23・na 21・合計111）。
+
+3. **本文の省いた部分を manual にしたカード**: 束B4の20枚はいずれも既存の記述（前フェーズ）がすでに本文の省いた部分を manual 化済みで、今回新たに op・ce・abilities を manual に変えたカードは無い（faqReview の 'manual' は既存の manual 部分に関する FAQ に付けたもの、または今回新たに見つけた実装の穴——下記6）。
+
+4. **FAQ と食い違って記述を直したカード**: 無し。test:faq の件数は前後とも変化なし（3参照）。
+
+5. **判断に迷った FAQ（'ok' か 'na' か、'ok' か 'manual' か）**:
+   - `i_魔法のサ-クレット`・`c_ティリア` の faq-709（聖なる光は魔法のサークレット装備キャラを対象にしない）: 当初は前フェーズの読み合わせコメント（「常時効果の層は効かない＝effectOn で対応済み」）を信じて 'ok' にしかけたが、`src/engine/layers.ts` の `effectOn` は継続効果の「層」（addContinuous・static）にしか適用されず、`c_ティリア`「聖なる光」は forEach＋kiryoku の一括処理（`src/engine/drive.ts:1043-1047` が `select()` で候補を選ぶだけ）でこの層を経由しない。実装を grep して確かめ直し、'manual' にした（6で穴の候補として報告）。
+   - `i_魔法のサ-クレット` の faq-1264（幸せ泥棒の回復対象再選択でサークレット装備キャラを選べるか）: 一見 untargetable ce と矛盾しそうだが、`drive.ts` の hijack(part:'recover') は `choose(mode:'target', when:'resolve')` でその場に対象を選ぶだけで、宣言時の `violations()`/`untargetableBy` を経由しない（`layers.ts` の `violations()` は decl.targets しか見ない）ことを確かめ、'ok' にした（FAQ の「できます」と一致）。
+   - `c_マルチ` の faq-628・1153・1157・1731・2476・2867・3350・3514（「能力名で引いた」でイベント《応援》の話）: PHASE 指示書に明記された「マルチの応援とイベント応援は別物」の例そのものだったので、8件まとめて 'na' にした。365・3963（早食い中断タイミング）・525・3536（構成要素制限）もマルチ自身の能力の話でないため 'na' とし、結果 13件中12件が 'na'、本題の受け渡し（2153）だけ 'case' という偏った内訳になったが、指示書の判断基準（このカードの効果の読みに関係しない）に照らして妥当と判断した。
+   - `c_藤井冬弥` の「決断」関連8件（2091・2141・2625・2906・2909・2912・2915・2918）: 「決断」自体が既に `kind: 'manual'` の丸ごと manual な能力なので、個別の細部FAQをすべて 'manual' にする形で統一した（'ok' にできる要素がない）。
+   - `e_PHS` の faq-3314（手札のカードを相手に見せる手続き）: ゲーム状態を変えない「procedure」寄りの規定で、DSL の choose/target の仕組みに対応する概念が無いため 'na' でなく 'manual' にした（プールの内外に関わらずこのゲームの手続き一般の話で、記述側に何も足す余地がないという判断もあり得たが、"未検証を理由に na にしない" 指示に従い manual にした）。
+
+6. **ケースが間違っていると思ったもの・新しいルールの穴の候補**:
+   - **穴の候補（重要）**: `i_魔法のサ-クレット`・`c_ティリア` の faq-709 が指す「全体に効果を及ぼす特殊能力の対象にもならない」という規則が、forEach で一括処理する系のカード（聖なる光など）には実装されていない。`src/engine/eval.ts` の `select()`（142-163行）は untargetable を一切見ておらず、`src/engine/layers.ts` の `effectOn`（112-119行）は継続効果の層専用。今後 forEach＋kiryoku/statMod のような「対象を選ばず全員に及ぼす」系の記述を書く・レビューするときは、この穴（untargetable なキャラを除外できない）を意識する必要がある。エンジン側の対応（select にオプションで untargetable 除外を足す、等）は統括判断で。
+   - `e_幸せ泥棒` の faq-1261（幸せ泥棒を幸せ泥棒で二重に乗っ取れるか）: `drive.ts` の hijack が乗っ取った kiryoku を直接 enqueue するだけで、新しい「効果が発生したとき」の宣言サイクルを開くように見えない。二重乗っ取りが必要になった時に確認が要る（今回は 'manual' で留めた）。
+   - `e_いただきます` の faq-847（あえて使わない選択）: hijack の通常分岐（`drive.ts:999-1002`）が元の choices・effect をそのまま再実行するだけで、「対象があってもわざと使わない」という宣言者の裁量を挟む仕組みが見当たらない。同種の hijack カードすべてに関わる可能性がある。
+   - 既存ケースの誤りは見つからなかった。
+
+7. **ツールの呼び出し回数**: 約58回（内訳の概算: PHASE指示書 1、束ファイル読み込み 3、既存20枚一括読み込み(Bash+保存ファイルRead) 2、engine grep/read（untargetable・effectOn・select・forEach・hijack 系）~9、カードごとの Edit 34（20枚×概ね1〜2）、tsc確認 1、コミット 3、tested.ts実行・件数確認 3、faqReview件数の数え直し 2、test:faq・verify 1、HANDOFF追記・コミット 1）。60回以内で全20枚完了。
