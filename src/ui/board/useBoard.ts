@@ -156,7 +156,8 @@ export function useBoard() {
       setHistory((prev) => {
         const r = applyEngineReq(prev, ctx, req, null)
         if (!r.ok) {
-          setEngineNotice({ reason: r.reason, missingDef: r.missingDef })
+          // 自動見送りの断りは状態の行き違い（利用者は何もしていない）なので出さない（統括15）
+          if (!(req.kind === 'pass' && req.auto)) setEngineNotice({ reason: r.reason, missingDef: r.missingDef })
           return prev
         }
         const steps = toPublicSteps(r.trace, r.history.present)
@@ -198,9 +199,11 @@ export function useBoard() {
             const r = ctx ? applyEngineReq(prev, ctx, msg.req, 'B') : ({ ok: false, reason: 'ホストのエンジンの材料が無い' } as const)
             if (!r.ok) {
               hostMetaRef.current = { ...hostMetaRef.current, lastSeq: msg.seq }
-              t.send({ kind: 'engineReject', seq: msg.seq, reason: r.reason, ...('missingDef' in r && r.missingDef ? { missingDef: true } : {}) } satisfies NetMessage)
+              t.send({ kind: 'engineReject', seq: msg.seq, reason: r.reason, ...('missingDef' in r && r.missingDef ? { missingDef: true } : {}), ...(msg.req.kind === 'pass' && msg.req.auto ? { auto: true } : {}) } satisfies NetMessage)
               return prev
             }
+            // 盤面が進んだので前の断り文を残さない（統括15・§3-3 の useBoard 側）
+            setEngineNotice(null)
             const steps = toPublicSteps(r.trace, r.history.present)
             setEngineSteps((x) => ({ n: x.n + 1, steps }))
             const { meta, message } = bumpForBroadcast(hostMetaRef.current, r.history.present, msg.seq, visibleLog(r.history))
@@ -227,9 +230,11 @@ export function useBoard() {
       }
       // guest
       if (msg.kind === 'engineReject') {
-        setEngineNotice({ reason: msg.reason, missingDef: msg.missingDef })
+        if (!msg.auto) setEngineNotice({ reason: msg.reason, missingDef: msg.missingDef })
         return
       }
+      // 盤面が進んだので前の断り文を残さない（統括15・§3-3 の useBoard 側）
+      if (msg.kind === 'state') setEngineNotice(null)
       if (msg.kind === 'state' && msg.steps) {
         const steps = msg.steps
         setEngineSteps((x) => ({ n: x.n + 1, steps }))

@@ -47,7 +47,8 @@ export type NetMessage =
   | { kind: 'state'; version: number; lastSeq: number | null; state: BoardState; log?: LogEntry[]; steps?: PublicStep[] }
   // R2u: ゲスト→ホストのエンジンの要求。ホストは合法でない・その席の番でない要求を捨て、engineReject をそのゲストにだけ返す
   | { kind: 'engineReq'; seq: number; req: EngineReq }
-  | { kind: 'engineReject'; seq: number; reason: string; missingDef?: boolean }
+  // auto: 自動見送りが断られた（状態の行き違い）。ゲストは断り文を出さない（統括15）
+  | { kind: 'engineReject'; seq: number; reason: string; missingDef?: boolean; auto?: boolean }
 
 /** ホストが持つ、履歴とは別の配信用の付随情報 */
 export interface HostMeta {
