@@ -283,7 +283,9 @@ export function EngineBar({
                   <button
                     key={i}
                     type="button"
-                    className={`${btn} bg-surface-2 text-ink-faint cursor-not-allowed`}
+                    // lf-btn-primary の background（linear-gradient）が bg-surface-2 に勝って透明に見える（R4b-2c 🔸3）ので
+                    // btn（lf-btn-primary 込み）は使わず、背景を持つクラスだけで組む
+                    className="shrink-0 cursor-not-allowed rounded border border-line-strong bg-surface-2 px-2 py-0.5 text-xs text-ink-faint"
                     title={`断られた: ${d.blockedReason}`}
                     onClick={() => ui.showNotice(`断られた: ${d.blockedReason}`)}
                   >
