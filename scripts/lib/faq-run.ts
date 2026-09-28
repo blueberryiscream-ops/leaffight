@@ -87,7 +87,7 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
       cards[iid] = { iid, cardId: FILLER, owner: seat, zone: 'deck', index: top.length + i, orientation: 'ready', faceUp: false, kiryoku: null, attachedTo: null }
     }
     downs[seat] = s.downs ?? 0
-    costs[seat] = (s.costs ?? []).map((c, i) => ({ id: `init${seat}${i}`, icon: c.icon, attrs: c.attr ? [c.attr] : [], frameId: null }))
+    costs[seat] = (s.costs ?? []).map((c, i) => ({ id: c.ref ?? `init${seat}${i}`, icon: c.icon, attrs: c.attr ? [c.attr] : [], frameId: null }))
   }
   let state: BoardState = {
     ...EMPTY_BOARD,

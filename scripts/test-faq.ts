@@ -76,6 +76,8 @@ function setupRefs(b: BoardSpec): Set<string> {
   for (const side of [b.you, b.opponent]) {
     add(side.leader); side.field?.forEach(add); add(side.fieldCard); side.battleCards?.forEach(add)
     side.hand?.forEach(add); side.trash?.forEach(add); side.deckTop?.forEach(add)
+    // R4b-3a-2: costs に ref を振ったコストトークンも choose で名指しできる（交渉売買・amount chosen）
+    for (const c of side.costs ?? []) if (c.ref) refs.add(c.ref)
   }
   return refs
 }

@@ -178,6 +178,12 @@ export interface BattleState {
   aborted: string | null
   /** [28] でゴミ箱送りにするバトルカード（《虎の子バトル》） */
   endTrash: string[]
+  /** 払ったコストの合計（席ごと。交渉売買 R4b-3a-2。payByPlayer の addToBattlePaid が積む。BattleExpr { paid: true } が読む） */
+  paid: Record<Seat, number>
+  /** [23] の交渉（交渉売買）を1回済ませたか（二重に積まないため） */
+  negotiated: boolean
+  /** 結果ダメージの上限（NH-21・交渉売買）。null＝上限なし。pendingEdits・[24]以降の増減にも当てる（FAQ:3921） */
+  dmgCap: number | null
 }
 
 /** 層を足すときの形（id・seq・battleId は core が決める。battleId は until battle か攻防修正のとき最も近いバトル）。R3 で R2b の ProcMod を置き換えた */
@@ -669,6 +675,9 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
     resultDowned: [],
     aborted: null,
     endTrash: [],
+    paid: { A: 0, B: 0 },
+    negotiated: false,
+    dmgCap: null,
     ...extra,
   }
 }
@@ -1150,6 +1159,8 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       }
       let damage = entries
       for (const e of b.pendingEdits) damage = applyBattleEdit(damage, e)
+      // NH-21（交渉売買）: 結果ダメージの上限。0以下（ダメージ不発生）はそのまま・上限を超える分だけ切り下げる
+      if (b.dmgCap !== null) damage = damage.map((e) => (e.value > b.dmgCap! ? { ...e, value: b.dmgCap! } : e))
       // 段ごとに1件（複数参加 K9 で組が複数あっても iid が1段1個になるように。理由は procSetParticipants と同じ）
       if (damage.length === 0) trace.push({ kind: 'name', text: 'バトルの結果:無し' })
       else for (const d of damage) trace.push({ kind: 'name', text: `バトルの結果:${d.seat}:${d.recipient}:${d.value}` })
@@ -1937,6 +1948,12 @@ export type ProcAction =
       endTrash?: string
       /** K13: 隠し芸などの「各陣営が能力値を1つ選ぶ」の答え（chosenStat）。key は今は使っていない（1つだけの枠） */
       battleChoice?: { seat: Seat; key: string; value: string }
+      /** 交渉売買 R4b-3a-2: [23] の交渉を1回済ませた印（二重に積まない） */
+      negotiated?: boolean
+      /** 交渉売買 R4b-3a-2: payByPlayer の addToBattlePaid が積む、払った数（席ごとに加算） */
+      paidAdd?: { seat: Seat; amount: number }
+      /** 交渉売買 R4b-3a-2（NH-21）: 結果ダメージの上限。カードの記述（battle.dmgCap）を engine が渡す */
+      dmgCap?: number
     }
   /** K9: 参加キャラを差し替える（鬼ごっこ系「待機状態の味方キャラ全てに変更」）。previous: 'readyIfWasReady' は未実装（人が処理・報告） */
   | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
@@ -2189,7 +2206,10 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       if (action.edit) {
         if (b.damage) {
-          b = { ...b, damage: applyBattleEdit(b.damage, action.edit) }
+          // NH-21（交渉売買・FAQ:3921）: 《ダメージ返し》などで [24] の後に結果ダメージを増やしても、上限はそのまま当てる
+          let dmg = applyBattleEdit(b.damage, action.edit)
+          if (b.dmgCap !== null) dmg = dmg.map((e) => (e.value > b.dmgCap! ? { ...e, value: b.dmgCap! } : e))
+          b = { ...b, damage: dmg }
           trace.push({ kind: 'name', text: `結果ダメージの増減:${action.edit.seat}:${action.edit.set !== undefined ? `=${action.edit.set}` : action.edit.delta}` })
         } else b = { ...b, pendingEdits: [...b.pendingEdits, action.edit] }
       }
@@ -2204,6 +2224,12 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
         b = { ...b, battleChoices: { ...b.battleChoices, [action.battleChoice.seat]: action.battleChoice.value } }
         trace.push({ kind: 'name', text: `選んだ能力値:${action.battleChoice.seat}:${action.battleChoice.value}` })
       }
+      if (action.negotiated) b = { ...b, negotiated: true }
+      if (action.paidAdd) {
+        b = { ...b, paid: { ...b.paid, [action.paidAdd.seat]: b.paid[action.paidAdd.seat] + action.paidAdd.amount } }
+        trace.push({ kind: 'name', text: `払った合計:${action.paidAdd.seat}:${b.paid[action.paidAdd.seat]}` })
+      }
+      if (action.dmgCap !== undefined) b = { ...b, dmgCap: action.dmgCap }
       if (action.abort && !b.aborted) {
         b = { ...b, aborted: action.abort }
         trace.push({ kind: 'abort', text: `バトル中断: ${action.abort}`, id: f.decl?.id })

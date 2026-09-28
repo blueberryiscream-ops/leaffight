@@ -258,7 +258,9 @@ export type Op =
    * 無ければ消費（7-4）。recordAs は払った数を後で参照するための記録（交渉売買 R4b-3 続きで使う）。
    * amount が { chosen: true } なら払う数も who が選ぶ（0 可。R4b-3a では型のみ・実装は次の束）
    */
-  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; ifPaid: Op[]; ifNot: Op[] }
+  // addToBattlePaid（R4b-3a-2・交渉売買）: amount { chosen:true } のとき、払った数を今のバトルの battle.paid[who] に積む（BattleExpr { paid:true } が読む）。
+  // amount { chosen:true } では ifPaid/ifNot は「1枚以上払った／0枚だった（＝どちらかが支払わなくなった）」の分岐になる
+  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; addToBattlePaid?: boolean; ifPaid: Op[]; ifNot: Op[] }
   // ── 能力と実体
   | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
   | { op: 'createToken'; token: TokenSpec; side: PlayerRef; orientation: 'ready' | 'rested' }
@@ -431,6 +433,8 @@ export type BattleExpr =
   | { itemCost: true }
   | { none: true }
   | { const: number }
+  /** 支払ったコストの合計（その陣営。交渉売買 R4b-3a-2）。payByPlayer の addToBattlePaid が積む battle.paid[seat] を読む */
+  | { paid: true }
   | { manual: string }
 
 /** 記述の段階（DESIGN §5.4「段階」）。tested＝関係する FAQ ケースが全部通った */
@@ -458,6 +462,8 @@ export interface CardDef {
     def: BattleExpr
     /** 【○を含む～】の判定に使うアイコン（oldrule.txt:1256-1262。隠し芸は「？」なので空） */
     icons: { atk: Attr[]; def: Attr[] }
+    /** 結果ダメージの上限（NH-21・交渉売買「５点以上にはならない」＝4）。pendingEdits（ダメージ返し等）の後にも当てる FAQ:3921 */
+    dmgCap?: number
   }
   abilities: Ability[]
   /**

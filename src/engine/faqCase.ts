@@ -37,7 +37,7 @@ export interface SideSpec {
   trash?: CardSpec[]
   deckTop?: CardSpec[]    // 上から順。残りは問わない
   downs?: number
-  costs?: { icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr }[] // 発生済みのコスト（attr 省略＝属性なし）
+  costs?: { icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr; ref?: string }[] // 発生済みのコスト（attr 省略＝属性なし。ref 省略＝init${seat}${i}。R4b-3a-2: choose で名指しするトークンに ref を振れる）
 }
 
 export interface BoardSpec {

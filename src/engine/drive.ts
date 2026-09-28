@@ -78,7 +78,19 @@ interface ItemEng {
      * ask（発生させるか）→source（発生源。0件でもよい）→genPending（procStartCostGen で積んだ 7-2 の宣言が終わるのを待つ）→
      * tokens（発生済みのコストから払うトークンを選ぶ。プールがちょうど amount 分ならここへは来ず自動で払う）
      */
-    pay?: { stage: 'ask' | 'source' | 'genPending' | 'tokens'; who: Seat; giveTo: Seat | null; amount: CostIcon[]; recordAs?: string; ifPaid: Op[]; ifNot: Op[]; genDeclId?: string }
+    pay?: {
+      stage: 'ask' | 'source' | 'genPending' | 'tokens'
+      who: Seat
+      giveTo: Seat | null
+      /** amount { chosen:true }（R4b-3a-2・交渉売買）: 'chosen'＝払う数も who が選ぶ（0可） */
+      amount: CostIcon[] | 'chosen'
+      recordAs?: string
+      /** 交渉売買 R4b-3a-2: 払った数を今のバトルの battle.paid[who] に積む */
+      addToBattlePaid?: boolean
+      ifPaid: Op[]
+      ifNot: Op[]
+      genDeclId?: string
+    }
   } | null
   seq: number
   /** 処理条件がある常時効果が受け手を差し替えた（H-2: 受け渡しは1件につき1回） */
@@ -526,8 +538,17 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
     }
     case 'item':
       return itemStep(ctx, state, top, warnings)
-    case 'battleValues':
-      return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings) }]
+    case 'battleValues': {
+      // R4b-3a-2（交渉売買・NH-21）: [23] の値を求める前に、BattleExpr が { paid: true } を使うカードなら
+      // 挑んだプレイヤーから交互に payByPlayer（amount { chosen:true }）を行う（FAQ:3912）。二重に積まないよう negotiated で控える
+      const b = top.battle!
+      const cardDef = b.battleCard ? ctx.defs[state.cards[b.battleCard]?.cardId ?? ''] : undefined
+      const usesPaid = (e?: BattleExpr) => !!e && 'paid' in e
+      if (cardDef?.battle && (usesPaid(cardDef.battle.atk) || usesPaid(cardDef.battle.def)) && !b.negotiated) {
+        return [{ type: 'procBattle', frameId: top.id, negotiated: true }, forceOp(state, negotiateChain('challenger', 60))]
+      }
+      return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings), dmgCap: cardDef?.battle?.dmgCap }]
+    }
     case 'place':
       return [{ type: 'procPlace', frameId: top.id, kiryoku: placeKiryoku(ctx, state, top) }]
     default:
@@ -575,6 +596,7 @@ export function evalBattleExpr(ctx: EngineCtx, state: BoardState, iid: string, s
       .reduce((s, c) => s + [...(ctx.cards[c.cardId]?.cost ?? '')].filter((ch) => 'WRGLT'.includes(ch)).length, 0)
   }
   if ('const' in expr) return expr.const
+  if ('paid' in expr) return b.paid[seat]
   // none・manual: 書けない（攻防が無いカード・記述の途中）
   return null
 }
@@ -858,11 +880,32 @@ function finishPayFromPool(
   pay: PayState,
 ): BoardAction[] {
   const pool = state.costs[pay.who] ?? []
+  if (pay.amount === 'chosen') {
+    // R4b-3a-2（交渉売買）: 払う数も who が選ぶ（0可・FAQ:3918「まだ払える状態でも払わないことができる」）
+    if (pool.length === 0) return finishPay(state, item, eng, save, pay, [])
+    const id3 = `${a.id}:tok`
+    return [
+      save({ awaiting: { ...a, id: id3, pay: { ...pay, stage: 'tokens' } } }),
+      {
+        type: 'procChoice',
+        choice: {
+          id: id3,
+          by: pay.who,
+          kind: 'select',
+          prompt: '払うＷの数（0でもよい。どのアイコンも W として払える。7-1-1）',
+          options: pool.map((t) => ({ key: t.id, label: `${t.icon}${t.attrs.join('')}` })),
+          min: 0,
+          max: pool.length,
+          frameId: frame.id,
+        },
+      },
+    ]
+  }
   if (pool.length < pay.amount.length) {
     const tasks: Task[] = [...pay.ifNot.map((op) => ({ op })), ...eng.tasks]
     return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `払えない:${item.label}` } }]
   }
-  if (pool.length === pay.amount.length) return finishPay(item, eng, save, pay, pool.map((t) => t.id))
+  if (pool.length === pay.amount.length) return finishPay(state, item, eng, save, pay, pool.map((t) => t.id))
   const id3 = `${a.id}:tok`
   return [
     save({ awaiting: { ...a, id: id3, pay: { ...pay, stage: 'tokens' } } }),
@@ -873,12 +916,20 @@ function finishPayFromPool(
   ]
 }
 
-/** payByPlayer: 選んだトークンを実際に払う（procPayCost）。ifPaid へ進む */
-function finishPay(item: SimulItem, eng: ItemEng, save: (patch: Partial<ItemEng>) => BoardAction, pay: PayState, tokenIds: string[]): BoardAction[] {
+/** payByPlayer: 選んだトークンを実際に払う（procPayCost）。ifPaid/ifNot へ進む
+ *  amount { chosen:true }: 1枚以上払った→ifPaid／0枚（どちらかが支払わなくなった＝交渉売買）→ifNot。
+ *  amount が固定配列のときは（finishPayFromPool が pool 不足を先に ifNot へ倒すので）常に ifPaid */
+function finishPay(state: BoardState, item: SimulItem, eng: ItemEng, save: (patch: Partial<ItemEng>) => BoardAction, pay: PayState, tokenIds: string[]): BoardAction[] {
   const acts: BoardAction[] = tokenIds.length ? [{ type: 'procPayCost', seat: pay.who, tokenIds, giveTo: pay.giveTo }] : []
+  if (pay.addToBattlePaid) {
+    const bf = nearestBattle(state)
+    if (bf) acts.push({ type: 'procBattle', frameId: bf.id, paidAdd: { seat: pay.who, amount: tokenIds.length } })
+  }
   const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: [String(tokenIds.length)] } } } : {}
-  const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
-  return [save({ awaiting: null, tasks, ...envPatch }), ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
+  const paidSome = tokenIds.length > 0
+  const branch = pay.amount === 'chosen' && !paidSome ? pay.ifNot : pay.ifPaid
+  const tasks: Task[] = [...branch.map((op) => ({ op })), ...eng.tasks]
+  return [save({ awaiting: null, tasks, ...envPatch }), ...acts, { type: 'procTrace', entry: { kind: 'name', text: `${paidSome ? '払う' : '払わない'}:${item.label}` } }]
 }
 
 function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): BoardAction[] {
@@ -992,7 +1043,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
         return [save({ awaiting: { ...a, pay: { ...pay, stage: 'genPending', genDeclId: declId } } }), { type: 'procStartCostGen', by: seat, sources, declId }]
       }
       // pay.stage === 'tokens'
-      return finishPay(item, eng, save, pay, ans)
+      return finishPay(state, item, eng, save, pay, ans)
     }
     // choose（「〜できる」の最初の選択で何も選ばなければ、その効果は使わない）
     const slots = { ...eng.env.slots, [a.slot!]: ans }
@@ -1322,12 +1373,11 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // PHASE-R4b §2(D): who にコストを発生させるアクションを行うか問う（7-2）。段階は itemStep の eng.awaiting.pay.stage で進める
       const who = resolvePlayer(state, env, op.who)
       const giveTo = op.giveTo ? resolvePlayer(state, env, op.giveTo) : null
-      const amount = Array.isArray(op.amount) ? op.amount : []
-      if (!Array.isArray(op.amount)) warnings.push(`manual: ${item.label}: payByPlayer の amount { chosen: true }（払う数を選ぶ）は R4b-3a では未実装（次の束・交渉売買）`)
+      const amount: CostIcon[] | 'chosen' = Array.isArray(op.amount) ? op.amount : 'chosen'
       const id = `${frame.id}:${item.key}:payByPlayer${eng.seq}`
       return {
         tasks: rest,
-        patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'ask', who, giveTo, amount, recordAs: op.recordAs, ifPaid: op.ifPaid, ifNot: op.ifNot } } },
+        patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'ask', who, giveTo, amount, recordAs: op.recordAs, addToBattlePaid: op.addToBattlePaid, ifPaid: op.ifPaid, ifNot: op.ifNot } } },
         actions: [
           {
             type: 'procChoice',
@@ -1457,6 +1507,14 @@ function findActionOf(state: BoardState, iid: string): string | null {
 // ───────────────────────────────────────────────────────────────
 // 状況を作る（FAQ テストの force・画面の手動操作）
 // ───────────────────────────────────────────────────────────────
+
+/** 交渉売買（R4b-3a-2・FAQ:3912・3918）: 挑んだプレイヤーから交互に payByPlayer(amount:{chosen:true}) を行い、
+ *  どちらかが0を払ったら終わる（ifNot＝空）。depth は保険の上限（現実のＷトークン数はこれよりずっと少ない） */
+function negotiateChain(first: 'challenger' | 'challenged', depth: number): Op {
+  const other: 'challenger' | 'challenged' = first === 'challenger' ? 'challenged' : 'challenger'
+  const next: Op[] = depth > 0 ? [negotiateChain(other, depth - 1)] : []
+  return { op: 'payByPlayer', who: first, amount: { chosen: true }, addToBattlePaid: true, ifPaid: next, ifNot: [] }
+}
 
 /** Op を1つ、どの宣言にも属さない効果として積む（AP が起こしたものとして扱う） */
 export function forceOp(state: BoardState, op: Op, bind: Record<string, string[]> = {}): BoardAction {
