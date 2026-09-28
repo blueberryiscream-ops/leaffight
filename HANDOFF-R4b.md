@@ -266,3 +266,10 @@ authored/バトル.mjs に Tケースを足す → gen-cases → test:faq → te
 詳細は PHASE-R4b.md §2(B)・§3・§5 と HANDOFF-R4b.md「## R4b-2a」を読んで。
 ```
 - 束: **R4b-2a**＝前の4枚／**R4b-2b**＝後の4枚／**R4b-2c**＝画面🔸1〜4
+
+## 統括17の検証（R4b-2a）— 合格
+- サブのツール: **記録96回**（申告約85・上限60）
+- 4枚の記述を pool.json の本文（battleAtk/battleDef・abilities）と突き合わせ ✅。応援合戦の count は select の zone 'field'（リーダー込み・eval.ts zoneCards）・you=参加キャラの席（evalBattleExpr）で本文・FAQ:3861 どおり
+- moveTo の直し（バトルカードがゴミ箱送りで装備アイテムも道連れ）: FAQ:3992 の答えどおり。**直す前 ❌**: 統括が proc.ts を 6eae0fd に戻して test:faq → 参考 ✅9／保留10・tested 60（戻すと ✅10／保留9・tested 61）
+- verify 緑・test:faq R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30。tested.ts を回しても `_tested.json` に差分なし（最新）。**tested 61／draft 8／manual 41**
+- ライバル対決・応援合戦は faqReview が全部 ok でケース0件のため draft → R4b-2b で T ケースを足す（FAQ:3837・3843・3861 から）
