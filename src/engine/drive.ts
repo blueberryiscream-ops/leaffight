@@ -587,9 +587,18 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
     warnings.push(`manual: バトルの攻防の値（${info.name} はテキストのあるバトルカードで記述が無い）を人が入れる`)
     return out
   }
+  // リラクゼーション「-/-」＝攻防が存在しない（FAQ:1446-1447「結果には影響しない」）。evalBattleExpr の none は
+  // 「計算できない（manual・人が入れる）」と区別できないため、ここで先に弾く。値そのものが無い＝そのバトルの
+  // 結果ダメージは0件（値を求めず参加キャラごと空のまま。修正前は none も evalBattleExpr が null を返す他の
+  // ケースと同列に扱われ「複数参加のバトルの攻防の値を人が入れる」に落ちていた＝R4b-2b で修正）
+  const isNone = (e: BattleExpr) => 'none' in e
   for (const seat of ['A', 'B'] as Seat[]) {
     const ps = b.participants[seat].filter((x) => isCharOnField(state.cards[x]))
     if (ps.length === 0) continue
+    if (isNone(atkExpr) && isNone(defExpr)) {
+      out[seat] = {}
+      continue
+    }
     const values: Record<string, { atk: number; def: number }> = {}
     let ok = true
     for (const p of ps) {

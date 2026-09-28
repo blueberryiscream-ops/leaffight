@@ -20,6 +20,7 @@ import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 import { def as kusuguriDef } from '../_local/rules/cards/b_くすぐりマシ-ン'
+import { def as misterDef } from '../_local/rules/cards/b_ミスタ-コンテスト'
 
 let failures = 0
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -785,6 +786,36 @@ function battleStart(battleCard: string): History {
   }
   // KA: 攻=根(8)・防=残り気力(5)／KB: 攻=根(2)・防=残り気力(5)。結果ダメージ（20-10）: KB←KAの攻8-KBの防5=3（気力5→2）／KA←KBの攻2-KAの防5=負→0（気力5のまま）
   eq([ks.cards.KA.kiryoku, ks.cards.KB.kiryoku], [5, 2], 'くすぐりマシーン: 攻=根・防=残り気力（本文どおり。FAQ無し）。KAの攻8-KBの防(残り気力)5=3ダメージ・KBの攻2-KAの防(残り気力)5は負でダメージ無し')
+}
+
+// ミスター・コンテスト（b_ミスタ-コンテスト・R4b-2b）: 本文「攻:全能力合計値 防:全能力合計値」・関係 FAQ 0件のため、
+// 本文どおりの1件のみ（FAQ 由来ではない。実カードの記述 _local/rules/cards/b_ミスタ-コンテスト.ts を実際にインポートし、
+// drive() を通して実際の evalBattleExpr（sum:[attr,attr,attr,attr,attr]）で全能力合計値どおりの結果ダメージが出ることを確かめる）
+{
+  const mInfo = (id: string, kiryoku: number, stats: Record<string, number>): CardInfo => ({ id, name: id, kind: 'c', kiryoku, stats: stats as CardInfo['stats'], cost: '', attr: '', abilities: [] })
+  const mInfos: CardInfo[] = [
+    mInfo('MA', 6, { 力: 1, 早: 1, 賢: 1, 根: 1, 感: 1 }),
+    mInfo('MB', 6, { 力: 0, 早: 1, 賢: 1, 根: 1, 感: 1 }),
+    { id: 'MC', name: 'MC', kind: 'b', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] },
+  ]
+  const mCtx = { cards: Object.fromEntries(mInfos.map((c) => [c.id, c])), defs: { MC: misterDef } }
+  const mBoard: BoardState = { ...EMPTY_BOARD, cards: { MA: card('MA', 'A', 'char', { kiryoku: 6 }), MB: card('MB', 'B', 'char', { kiryoku: 6 }), MC: card('MC', 'A', 'battle') }, turn: { active: 'A', phase: 'メイン' } }
+  let ms = startBattleAt(mBoard, { challenger: 'A', at: 19, participants: { A: ['MA'], B: ['MB'] }, battleCard: 'MC' })
+  ms = drive(ms, mCtx).state
+  for (let i = 0; i < 30 && !ms.result && ms.proc.length; i++) {
+    if (ms.procMeta.choice) {
+      const ch = ms.procMeta.choice
+      const pick = ch.options.some((o) => o.key === 'next') ? ['next'] : [ch.options[0].key]
+      ms = drive(applyAction(ms, { type: 'procChoose', id: ch.id, pick }).state, mCtx).state
+      continue
+    }
+    const seat = awaitingSeat(ms)
+    if (!seat) break
+    ms = drive(applyAction(ms, { type: 'procPass', by: seat }).state, mCtx).state
+  }
+  // MA: 攻防=全能力合計値=5（力1+早1+賢1+根1+感1）／MB: 攻防=全能力合計値=4（力0+早1+賢1+根1+感1）。
+  // 結果ダメージ（20-10）: MB←MAの攻5-MBの防4=1（気力6→5）／MA←MBの攻4-MAの防5=負→0（気力6のまま）
+  eq([ms.cards.MA.kiryoku, ms.cards.MB.kiryoku], [6, 5], 'ミスター・コンテスト: 攻防=全能力合計値（本文どおり。FAQ無し）。MAの攻5-MBの防4=1ダメージ・MBの攻4-MAの防5は負でダメージ無し')
 }
 
 if (failures) {
