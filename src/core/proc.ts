@@ -1892,6 +1892,14 @@ export type ProcAction =
   | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[]; useAsSeat?: Seat }
   /** PHASE-R4b §2(D): who の発生済みのコスト（tokenIds）を払う（7-4）。giveTo があればアイコン W・属性そのままで移す。無ければ消費 */
   | { type: 'procPayCost'; seat: Seat; tokenIds: string[]; giveTo: Seat | null }
+  /**
+   * PHASE-R4b §2(D)・統括17の直し: payByPlayer の「発生させる」を、単独の 7-2 のコスト発生の宣言と同じ経路
+   * （applyDeclare の tail・windowEnd の frame=null 分岐と同じ pushSimul→declItem→pushDeclFrame、
+   * その上に [3]《コストを発生するとき》の declPhaseFrame）で積む。sources は who が選んだ発生源（0件でもよい。
+   * 臨時収入などを [3] の窓で使うだけでも良いため）。declId は drive 側が発行し、genPending 段の「まだ処理中か」の
+   * 判定（findFrame）に使う
+   */
+  | { type: 'procStartCostGen'; by: Seat; sources: CostSource[]; declId: string }
   | { type: 'procCancelDown'; frameId: string }
   /**
    * 効果の乗っ取り（hijack・D11）が「適切な対象が無い」等で失敗したとき、乗っ取りの効果自身（いただきます等）を
@@ -2379,6 +2387,28 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       trace.push({ kind: 'name', text: `コストを払う:${action.seat}${action.giveTo ? `→${action.giveTo}` : '（消費）'}` })
       return { state: s, log: `${action.seat} が発生済みのコストを払う` }
+    }
+    case 'procStartCostGen': {
+      // 統括17の直し: 単独の 7-2 のコスト発生の宣言と同じ経路（applyDeclare の tail・windowEnd の frame=null
+      // 分岐と同じ pushSimul→declItem→pushDeclFrame、その上に [3] の declPhaseFrame）で積む
+      const decl: ProcDecl = {
+        id: action.declId,
+        by: action.by,
+        kind: 'costGen',
+        actionType: '割込型',
+        label: 'コスト発生（払うために who が発生させる）',
+        sourceIid: null,
+        targets: [],
+        costGens: [],
+        sources: action.sources,
+        trigger: nearestActionFrame(state),
+        usageKey: null,
+        eng: {},
+      }
+      let s = pushSimul(state, [declItem(decl)], 'コスト発生（払うために発生させる。7-2）', null, false)[0]
+      s = { ...s, proc: [...s.proc, declPhaseFrame(decl, null)] }
+      trace.push({ kind: 'name', text: `コスト発生の宣言:${action.by}` })
+      return { state: s, log: `${action.by} がコストを発生させる（7-2）` }
     }
     case 'procCancelDown': {
       const f = findFrame(state, action.frameId)

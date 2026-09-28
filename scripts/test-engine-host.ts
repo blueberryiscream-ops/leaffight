@@ -420,6 +420,8 @@ function battleStart(battleCard: string): History {
     st('Sabo', 'e', null, null),
     st('Weak', 'c', S(3, 3, 3, 3, 3)),
     st('WeakOpt', 'c', S(3, 3, 3, 3, 3)),
+    st('PBP', 'c', S(1, 1, 1, 1, 1), 5),
+    st('RC', 'e', null, null),
   ]
   const self = { ref: 'self' as const }
   const equipped = { ref: 'equipped' as const }
@@ -459,6 +461,10 @@ function battleStart(battleCard: string): History {
     // 今回の追加（conditional の素の item 経路）の検証にならないため）
     Weak: { id: 'Weak', name: 'Weak', kind: 'c', status: 'draft', abilities: [{ kind: 'conditional', trigger: { timing: 'ターン終了時', when: { activeIs: 'you' } }, optional: false, effect: [{ op: 'kiryoku', who: self, delta: -1 }] }] },
     WeakOpt: { id: 'WeakOpt', name: 'WeakOpt', kind: 'c', status: 'draft', abilities: [{ kind: 'conditional', trigger: { timing: 'ターン終了時', when: { activeIs: 'you' } }, optional: true, effect: [{ op: 'kiryoku', who: self, delta: 1 }] }] },
+    // PHASE-R4b §2(D)・統括17の直し 単体テスト用: payByPlayer が実際に 7-2[3]《コストを発生するとき》の窓を開くことを
+    // 確かめる。RC は臨時収入と同じ本文「[WWW]を発生する。コストを発生するときに使うこともできる」の最小限（割込型のみ）
+    PBP: { id: 'PBP', name: 'PBP', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Ask', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'payByPlayer', who: 'opponent', amount: ['W'], giveTo: 'you', ifPaid: [], ifNot: [] }] }] },
+    RC: { id: 'RC', name: 'RC', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '割込型', trigger: { timing: 'コストを発生するとき', actor: 'you' }, choices: [], effect: [{ op: 'generateCost', icons: ['W', 'W', 'W'] }] }] },
   }
   const ctx3 = { cards: Object.fromEntries(R3I.map((c) => [c.id, c])), defs: R3D }
   const base3 = (cs: CardInstance[]) => ({ ...board([card('LA', 'A', 'leader', { kiryoku: 10 }), card('LB', 'B', 'leader', { kiryoku: 10 }), card('dA', 'A', 'deck'), card('dB', 'B', 'deck'), ...cs]), mode: 'engine' as const })
@@ -598,6 +604,44 @@ function battleStart(battleCard: string): History {
     eq([paid.costs.A.map((t) => t.icon), paid.costs.B.length], [['W'], 0], 'offer 払う: generateCost の useAs どおり、発生させたコストは you（A）のものになる（B には残らない）')
     const declined = drive(act3(asked, { type: 'procChoose', id: offerCh!.id, pick: [] }), ctx3).state
     eq(declined.cards.OF.kiryoku, 3, 'offer 払わない: ifDeclined の気力－２が働く（5→3）')
+  }
+
+  // PHASE-R4b §2(D)・統括17の直し 単体テスト: payByPlayer の「発生させる」が実際に 7-2[3] の窓を開き、
+  // 割込型のコスト発生アクション（RC＝臨時収入と同じ本文の最小限）を使える。生成された [WWW] のうち1枚を
+  // 選んで払う（払った1枚は you（A）へ・残り2枚は発生させた B の手元に残る＝7-3・FAQ:1353 と同じ理屈）
+  {
+    const passUntilChoice2 = (s: BoardState): BoardState => {
+      let cur = s
+      for (let i = 0; i < 50 && !cur.procMeta.choice && !cur.result; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+      }
+      return cur
+    }
+    const p0 = drive(base3([card('PBP', 'A', 'char', { kiryoku: 5 }), card('RC', 'B', 'hand')]), ctx3).state
+    const askDecl = declare(p0, ctx3, { by: 'A', source: 'PBP', ability: 'Ask' })
+    if (!askDecl.ok) throw new Error(`payByPlayer Ask declare failed: ${askDecl.reason}`)
+    let s = p0
+    askDecl.actions.forEach((a) => (s = act3(s, a)))
+    s = passUntilChoice2(drive(s, ctx3).state)
+    const askCh = s.procMeta.choice
+    eq([askCh?.by, askCh?.purpose], ['B', 'offer'], 'payByPlayer: B に発生させるかを問う（ask 段。offer の帯を流用）')
+    s = drive(act3(s, { type: 'procChoose', id: askCh!.id, pick: ['pay'] }), ctx3).state
+    const srcCh = s.procMeta.choice
+    eq([srcCh?.by, srcCh?.min, srcCh?.options?.map((o) => o.key)], ['B', 0, ['LB']], 'payByPlayer: 発生源の選択（候補はリーダー LB のみ。0件でも進められる＝7-2）')
+    s = drive(act3(s, { type: 'procChoose', id: srcCh!.id, pick: [] }), ctx3).state
+    // [3] の窓（7-2）: B だけが宣言できる。ここで RC（臨時収入相当）を使う
+    const rcDecl = declare(s, ctx3, { by: 'B', source: 'RC' })
+    if (!rcDecl.ok) throw new Error(`RC declare failed: ${rcDecl.reason}`)
+    rcDecl.actions.forEach((a) => (s = act3(s, a)))
+    s = passUntilChoice2(drive(s, ctx3).state)
+    eq(s.costs.B.map((t) => t.icon).sort(), ['W', 'W', 'W'], '7-2[3] の窓で RC（臨時収入相当）を使い、[WWW] が B に発生した')
+    const tokCh = s.procMeta.choice
+    eq([tokCh?.by, tokCh?.min, tokCh?.max], ['B', 1, 1], '払うトークンの選択（3枚中1枚。amount ["W"]）')
+    const pick = [tokCh!.options[0].key]
+    s = drive(act3(s, { type: 'procChoose', id: tokCh!.id, pick }), ctx3).state
+    eq([s.costs.A.map((t) => t.icon), s.costs.B.length], [['W'], 2], 'payByPlayer: 払った1枚が you（A）へ・残り2枚は B の手元（7-3・FAQ:1353 と同じ理屈）')
   }
 
   // D17・R4a-2 単体テスト: 効果で呼び出す（callByEffect）。《キャラクターカードが呼び出されるとき》の窓では、

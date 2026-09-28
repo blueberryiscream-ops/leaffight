@@ -78,6 +78,8 @@ export type Expect = (
   | { fizzled: { step: number } }
   /** 発生済みのコストの数（その側） */
   | { costs: [side: Side, count: number] }
+  /** 発生済みのコストに、そのアイコン・属性（省略可）を持つものがあるか（PHASE-R4b §2(D)・payByPlayer が W・属性そのままで移すことの確認。FAQ:1341・1344） */
+  | { costToken: [side: Side, icon: 'W' | 'R' | 'G' | 'L' | 'T', attr?: Attr] }
   /** バトル種目になったバトルカード */
   | { battleCard: string }
   | { ready: [ref: string, ready: boolean] }

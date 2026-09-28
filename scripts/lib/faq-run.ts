@@ -490,6 +490,13 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const v = s.costs[seatOf(e.costs[0])].length
     return { ok: v === e.costs[1], msg: `発生済みのコスト ${e.costs[0]} = ${v}（期待 ${e.costs[1]}）` }
   }
+  // PHASE-R4b §2(D)・統括17の直し: payByPlayer で払ったコストが W・属性そのままか（FAQ:1341・1344）
+  if ('costToken' in e) {
+    const [side, icon, attr] = e.costToken
+    const toks = s.costs[seatOf(side)]
+    const hit = toks.some((t) => t.icon === icon && (!attr || t.attrs.includes(attr)))
+    return { ok: hit, msg: `発生済みのコスト ${side} に ${icon}${attr ?? ''} が無い（今: ${toks.map((t) => `${t.icon}${t.attrs.join('')}`).join('・') || '無し'}）` }
+  }
   if ('result' in e) {
     const r = s.result
     const got = !r ? 'continues' : r.winner === null ? 'draw' : r.winner === 'A' ? 'youWin' : 'opponentWins'

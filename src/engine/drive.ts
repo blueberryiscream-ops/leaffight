@@ -26,6 +26,7 @@ import {
   nearestBattle,
   topFrame,
   type BattleState,
+  type CostSource,
   type ProcChoice,
   type ProcDecl,
   type ProcFrame,
@@ -72,8 +73,12 @@ interface ItemEng {
     payOps?: Op[]
     ifPaidOps?: Op[]
     ifDeclinedOps?: Op[]
-    /** payByPlayer（PHASE-R4b §2(D)・R4b-3a）: 段階を追って進める。ask（発生させるか）→source（発生源）→tokens（払うトークン） */
-    pay?: { stage: 'ask' | 'source' | 'tokens'; who: Seat; giveTo: Seat | null; amount: CostIcon[]; recordAs?: string; ifPaid: Op[]; ifNot: Op[] }
+    /**
+     * payByPlayer（PHASE-R4b §2(D)・R4b-3a）: 段階を追って進める。
+     * ask（発生させるか）→source（発生源。0件でもよい）→genPending（procStartCostGen で積んだ 7-2 の宣言が終わるのを待つ）→
+     * tokens（発生済みのコストから払うトークンを選ぶ。プールがちょうど amount 分ならここへは来ず自動で払う）
+     */
+    pay?: { stage: 'ask' | 'source' | 'genPending' | 'tokens'; who: Seat; giveTo: Seat | null; amount: CostIcon[]; recordAs?: string; ifPaid: Op[]; ifNot: Op[]; genDeclId?: string }
   } | null
   seq: number
   /** 処理条件がある常時効果が受け手を差し替えた（H-2: 受け渡しは1件につき1回） */
@@ -838,6 +843,44 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
 // 効果の Op の実行（同時処理の項目1つ）
 // ───────────────────────────────────────────────────────────────
 
+type ItemAwaiting = NonNullable<ItemEng['awaiting']>
+type PayState = NonNullable<ItemAwaiting['pay']>
+
+/** payByPlayer: 発生済みのコスト（board.costs[seat]）から amount 分を払う手筈を整える（'tokens' 段の入口）。
+ *  プールが足りなければ ifNot、ちょうどなら自動で払う、余りがあれば「どれを払うか」を問う */
+function finishPayFromPool(
+  state: BoardState,
+  frame: ProcFrame,
+  item: SimulItem,
+  eng: ItemEng,
+  save: (patch: Partial<ItemEng>) => BoardAction,
+  a: ItemAwaiting,
+  pay: PayState,
+): BoardAction[] {
+  const pool = state.costs[pay.who] ?? []
+  if (pool.length < pay.amount.length) {
+    const tasks: Task[] = [...pay.ifNot.map((op) => ({ op })), ...eng.tasks]
+    return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `払えない:${item.label}` } }]
+  }
+  if (pool.length === pay.amount.length) return finishPay(item, eng, save, pay, pool.map((t) => t.id))
+  const id3 = `${a.id}:tok`
+  return [
+    save({ awaiting: { ...a, id: id3, pay: { ...pay, stage: 'tokens' } } }),
+    {
+      type: 'procChoice',
+      choice: { id: id3, by: pay.who, kind: 'select', prompt: '払うトークン（どのアイコンも W として払える。7-1-1）', options: pool.map((t) => ({ key: t.id, label: `${t.icon}${t.attrs.join('')}` })), min: pay.amount.length, max: pay.amount.length, frameId: frame.id },
+    },
+  ]
+}
+
+/** payByPlayer: 選んだトークンを実際に払う（procPayCost）。ifPaid へ進む */
+function finishPay(item: SimulItem, eng: ItemEng, save: (patch: Partial<ItemEng>) => BoardAction, pay: PayState, tokenIds: string[]): BoardAction[] {
+  const acts: BoardAction[] = tokenIds.length ? [{ type: 'procPayCost', seat: pay.who, tokenIds, giveTo: pay.giveTo }] : []
+  const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: [String(tokenIds.length)] } } } : {}
+  const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
+  return [save({ awaiting: null, tasks, ...envPatch }), ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
+}
+
 function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): BoardAction[] {
   const item = frame.simul!.items.find((it) => it.status === 'running')
   if (!item) return []
@@ -890,6 +933,13 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
 
   if (eng.awaiting) {
     const a = eng.awaiting
+    // payByPlayer の 'genPending' 段（PHASE-R4b §2(D)・統括17の直し）: procStartCostGen で積んだ 7-2 のコスト発生の
+    // 宣言（declPhaseFrame の [3] の窓〜declFrame の [4]〜[9]）が終わる（フレームが proc スタックから無くなる）のを待つ。
+    // procMeta.answers を使わない（procChoice を出していないので答えが来ない）ので、ans のゲートより前で見る
+    if (a.kind === 'payByPlayer' && a.pay!.stage === 'genPending') {
+      if (findFrame(state, a.pay!.genDeclId!)) return []
+      return finishPayFromPool(state, frame, item, eng, save, a, a.pay!)
+    }
     const ans = state.procMeta.answers[a.id]
     if (!ans) return []
     if (a.kind === 'use') {
@@ -913,62 +963,36 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
     if (a.kind === 'payByPlayer') {
       const pay = a.pay!
       const seat = pay.who
-      // すでに発生済みのコスト（board.costs[seat]）から amount 分を払う手筈を整える（'tokens' 段の入口）
-      const finishFromPool = (): BoardAction[] => {
-        const pool = state.costs[seat] ?? []
-        if (pool.length < pay.amount.length) {
-          const tasks: Task[] = [...pay.ifNot.map((op) => ({ op })), ...eng.tasks]
-          return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `払えない:${item.label}` } }]
-        }
-        if (pool.length === pay.amount.length) return finishPay(pool.map((t) => t.id))
-        const id3 = `${a.id}:tok`
-        return [
-          save({ awaiting: { ...a, id: id3, pay: { ...pay, stage: 'tokens' } } }),
-          {
-            type: 'procChoice',
-            choice: { id: id3, by: seat, kind: 'select', prompt: '払うトークン（どのアイコンも W として払える）', options: pool.map((t) => ({ key: t.id, label: `${t.icon}${t.attrs.join('')}` })), min: pay.amount.length, max: pay.amount.length, frameId: frame.id },
-          },
-        ]
-      }
-      const finishPay = (tokenIds: string[]): BoardAction[] => {
-        const acts: BoardAction[] = tokenIds.length ? [{ type: 'procPayCost', seat, tokenIds, giveTo: pay.giveTo }] : []
-        const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: [String(tokenIds.length)] } } } : {}
-        const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
-        return [save({ awaiting: null, tasks, ...envPatch }), ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
-      }
       if (pay.stage === 'ask') {
-        if (ans.length === 0) return finishFromPool()
-        // 発生源の候補: 自分の待機状態のキャラ（フィールド）∪ 手札のキャラ・タッグ（7-1-1・7-1-2）
+        if (ans.length === 0) return finishPayFromPool(state, frame, item, eng, save, a, pay)
+        // 発生源の候補（0件選んでもよい。7-2[3] の窓で臨時収入・助太刀などを使うだけでも発生させられる＝FAQ:1347）
         const fieldCands = Object.values(state.cards).filter((c) => c.owner === seat && isCharOnField(c) && c.orientation === 'ready')
         const handCands = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'hand' && ['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? ''))
         const cands = [...fieldCands, ...handCands]
-        if (cands.length === 0) return finishFromPool()
         const id2 = `${a.id}:src`
         return [
           save({ awaiting: { ...a, id: id2, pay: { ...pay, stage: 'source' } } }),
-          { type: 'procChoice', choice: { id: id2, by: seat, kind: 'select', prompt: 'コストの発生源（自分の待機状態のキャラ、または手札のキャラクターカード・タッグキャラクターカード。7-2）', options: cands.map((c) => ({ key: c.iid, label: c.cardId })), min: 1, max: 1, frameId: frame.id } },
+          {
+            type: 'procChoice',
+            choice: { id: id2, by: seat, kind: 'select', prompt: '発生源に指定するキャラ・手札のカード（0枚でもよい。7-2[3] の窓で臨時収入などを使うだけでもよい）', options: cands.map((c) => ({ key: c.iid, label: c.cardId })), min: 0, max: cands.length, frameId: frame.id },
+          },
         ]
       }
       if (pay.stage === 'source') {
-        const iid = ans[0]
-        const c = iid ? state.cards[iid] : undefined
-        if (!c) return finishFromPool()
-        const info = ctx.cards[c.cardId]
-        const fromHand = c.zone === 'hand'
-        const attrs = fromHand ? [] : attrsOf(info)
-        const restOrTrash: BoardAction = fromHand ? { type: 'procMove', iid: c.iid, to: 'trash' } : { type: 'procOrient', iid: c.iid, to: 'rested' }
-        if (pay.amount.length !== 1) {
-          warnings.push(`manual: ${item.label}: payByPlayer の amount が1件でない発生（R4b-3a では単一の発生源しか対応しない）`)
-          return [save({ awaiting: null, tasks: eng.tasks }), restOrTrash]
-        }
-        // giveTo があればその席へ、無ければ消費（発生させてそのまま払った扱い＝改めてトークンを起こさない）
-        const acts: BoardAction[] = pay.giveTo ? [{ type: 'procGenCost', seat: pay.giveTo, tokens: [{ icon: 'W', attrs }] }] : []
-        const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: ['1'] } } } : {}
-        const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
-        return [save({ awaiting: null, tasks, ...envPatch }), restOrTrash, ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
+        // PHASE-R4b §2(D)・統括17の直し: 単独の 7-2 のコスト発生の宣言と同じ経路で積む（procStartCostGen）。
+        // 7-2「１回で複数の発生源を指定できる」＝ ans は複数可。発生源の消耗・ゴミ箱送り・トークン化は enterCostGen（proc.ts）が行う
+        const sources: CostSource[] = ans.map((iid) => {
+          const c = state.cards[iid]
+          const info = ctx.cards[c.cardId]
+          const fromHand = c.zone === 'hand'
+          const icon: CostIcon = fromHand ? 'W' : c.zone === 'leader' ? 'L' : info?.kind === 't' ? 'T' : 'G'
+          return { iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }
+        })
+        const declId = `${a.id}:cg`
+        return [save({ awaiting: { ...a, pay: { ...pay, stage: 'genPending', genDeclId: declId } } }), { type: 'procStartCostGen', by: seat, sources, declId }]
       }
       // pay.stage === 'tokens'
-      return finishPay(ans)
+      return finishPay(item, eng, save, pay, ans)
     }
     // choose（「〜できる」の最初の選択で何も選ばなければ、その効果は使わない）
     const slots = { ...eng.env.slots, [a.slot!]: ans }
