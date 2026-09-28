@@ -19,6 +19,7 @@ import { select } from '../src/engine/eval'
 import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
+import { def as kusuguriDef } from '../_local/rules/cards/b_くすぐりマシ-ン'
 
 let failures = 0
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -758,6 +759,32 @@ function battleStart(battleCard: string): History {
   const declBy = (by: Seat): ProcDecl => ({ id: 'x', by, kind: 'battle', actionType: '通常型', label: '', sourceIid: null, targets: [], costGens: [], sources: [], trigger: null, usageKey: null, eng: {} })
   eq(violations(ctxAll, after, declBy('A')).map((v) => v.kind), ['prohibit'], 'battleUser①: 挑んだ側（A）はバトル終了後もターン終了時まで宣言できない（層を作った時点で席を確定・H-9c）')
   eq(violations(ctxAll, after, declBy('B')).map((v) => v.kind), [], 'battleUser②: 置いた側（B）は禁止されない（このバトルを使用したのは挑んだ側 A）')
+}
+
+// くすぐりマシーン（b_くすぐりマシ-ン・R4b-2a）: 本文「攻:根 防:残り気力」・関係 FAQ 0件のため、本文どおりの1件のみ
+// （FAQ 由来ではない。実カードの記述 _local/rules/cards/b_くすぐりマシ-ン.ts を実際にインポートし、drive() を通して
+// 実際の evalBattleExpr（{attr:'根'}・{kiryoku:true}）で結果ダメージが出ることを確かめる）
+{
+  const kInfo = (id: string, kiryoku: number, kon: number): CardInfo => ({ id, name: id, kind: 'c', kiryoku, stats: { 根: kon }, cost: '', attr: '根', abilities: [] })
+  const kInfos: CardInfo[] = [kInfo('KA', 5, 8), kInfo('KB', 5, 2), { id: 'KC', name: 'KC', kind: 'b', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] }]
+  const kCtx = { cards: Object.fromEntries(kInfos.map((c) => [c.id, c])), defs: { KC: kusuguriDef } }
+  const kBoard: BoardState = { ...EMPTY_BOARD, cards: { KA: card('KA', 'A', 'char', { kiryoku: 5 }), KB: card('KB', 'B', 'char', { kiryoku: 5 }), KC: card('KC', 'A', 'battle') }, turn: { active: 'A', phase: 'メイン' } }
+  let ks = startBattleAt(kBoard, { challenger: 'A', at: 19, participants: { A: ['KA'], B: ['KB'] }, battleCard: 'KC' })
+  ks = drive(ks, kCtx).state
+  for (let i = 0; i < 30 && !ks.result && ks.proc.length; i++) {
+    if (ks.procMeta.choice) {
+      // 20-4[21]「手順[19]に戻るか」の問い。次に進む
+      const ch = ks.procMeta.choice
+      const pick = ch.options.some((o) => o.key === 'next') ? ['next'] : [ch.options[0].key]
+      ks = drive(applyAction(ks, { type: 'procChoose', id: ch.id, pick }).state, kCtx).state
+      continue
+    }
+    const seat = awaitingSeat(ks)
+    if (!seat) break
+    ks = drive(applyAction(ks, { type: 'procPass', by: seat }).state, kCtx).state
+  }
+  // KA: 攻=根(8)・防=残り気力(5)／KB: 攻=根(2)・防=残り気力(5)。結果ダメージ（20-10）: KB←KAの攻8-KBの防5=3（気力5→2）／KA←KBの攻2-KAの防5=負→0（気力5のまま）
+  eq([ks.cards.KA.kiryoku, ks.cards.KB.kiryoku], [5, 2], 'くすぐりマシーン: 攻=根・防=残り気力（本文どおり。FAQ無し）。KAの攻8-KBの防(残り気力)5=3ダメージ・KBの攻2-KAの防(残り気力)5は負でダメージ無し')
 }
 
 if (failures) {

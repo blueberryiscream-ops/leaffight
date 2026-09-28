@@ -558,7 +558,8 @@ export function awaitingSeat(state: BoardState): Seat | null {
 // 盤面の操作（手順の中から使う）
 // ───────────────────────────────────────────────────────────────
 
-/** カードを動かす。場を離れるキャラに付いていたアイテムはゴミ箱へ。リーダーが場を離れたら即座に負け（9-1）。
+/** カードを動かす。場を離れるキャラ・ゴミ箱送りになったバトルカードに付いていたアイテムはゴミ箱へ（FAQ:3992・野球拳）。
+ *  リーダーが場を離れたら即座に負け（9-1）。
  *  🚨 ダウン[6]のゴミ箱送りだけは [7] で判定する（15-5-2 の同時ダウン＝引き分けの判定をまとめるため）ので leaderNow=false で呼ぶ */
 function moveTo(
   state: BoardState,
@@ -570,8 +571,9 @@ function moveTo(
   if (!card) return state
   const wasLeader = card.zone === 'leader'
   const leavingField = (card.zone === 'char' || card.zone === 'leader') && to !== 'char' && to !== 'leader'
+  const leavingBattleZone = card.zone === 'battle' && to !== 'battle'
   let next = state
-  if (leavingField) {
+  if (leavingField || leavingBattleZone) {
     for (const item of Object.values(next.cards)) {
       if (item.attachedTo === iid) {
         next = moveCard(next, { iid: item.iid, toZone: 'trash', cardName: item.cardId }).state
