@@ -1149,7 +1149,9 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       }
       let damage = entries
       for (const e of b.pendingEdits) damage = applyBattleEdit(damage, e)
-      trace.push({ kind: 'name', text: `バトルの結果:${damage.map((d) => `${d.seat}←${d.recipient}:${d.value}`).join(',') || '無し'}` })
+      // 段ごとに1件（複数参加 K9 で組が複数あっても iid が1段1個になるように。理由は procSetParticipants と同じ）
+      if (damage.length === 0) trace.push({ kind: 'name', text: 'バトルの結果:無し' })
+      else for (const d of damage) trace.push({ kind: 'name', text: `バトルの結果:${d.seat}:${d.recipient}:${d.value}` })
       return setFrame(state, { ...advance(frame), battle: { ...b, damage, pendingEdits: [] } })
     }
     case 26:
@@ -2210,7 +2212,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
         cards = { ...cards }
         for (const iid of action.to) if (cards[iid]) cards[iid] = { ...cards[iid], orientation: 'rested' }
       }
-      trace.push({ kind: 'name', text: `参加キャラを変更:${action.seat}→${action.to.join(',') || '無し'}` })
+      // iid はそれぞれ独立した ':' 区切りの段にする（画面の toPublicSteps が段ごとに1個の iid しか拾えないため。
+      // 「,」で1段に複数 iid を詰めると画面がカード名に置き換えられず iid のまま出てしまう＝R4b-2c 🔸1）
+      trace.push({ kind: 'name', text: action.to.length ? `参加キャラを変更:${action.seat}:${action.to.join(':')}` : `参加キャラを変更:${action.seat}:無し` })
       const s = { ...state, cards }
       return { state: setFrame(s, { ...f, battle: { ...b, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 } } }), log: '' }
     }
