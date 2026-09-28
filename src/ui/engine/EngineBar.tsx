@@ -199,7 +199,9 @@ export function EngineBar({
         </button>
       </div>
 
-      {engineOn && !turn && (
+      {/* mode が 'free' でも開始準備が済んでいれば出す（R4b-2c 🔸4: start の要求は host.ts が mode:'engine' にするので、
+          手動で盤面をいじっている途中でもここから始められる。turn が始まればこの帯は消えるので手動プレイは残る） */}
+      {!turn && (
         <div className="flex items-center gap-2">
           {setupDone(board) ? (
             <>
