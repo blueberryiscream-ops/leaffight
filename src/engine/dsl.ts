@@ -249,6 +249,16 @@ export type Op =
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }
   // ── 相手（や他者）に選ばせる・払わせる
   | { op: 'offer'; to: PlayerRef; prompt: string; pay: Op[]; payableIf?: Cond; ifPaid: Op[]; ifDeclined: Op[] }
+  /**
+   * 効果の中で、指定したプレイヤー（who）がコストを発生させて払う（PHASE-R4b §2(D)・借金取り・NH-19 呼び出しコストの土台）。
+   * who に「コストを発生させるアクション」を行うか問う（発生源＝自分の待機状態のキャラ→G/L/T と属性、
+   * 手札のキャラ・タッグ→無属性の W。7-1-1・7-1-2）。発生が済んだら（またはしなくても）、who の発生済みの
+   * コスト（board.costs[who]）から amount 分のトークンを選んで払う（どのアイコンも W として払える 7-1-1 の上位互換）。
+   * giveTo があれば、そのプレイヤーの発生済みのコストへアイコン W・属性そのままで移す（FAQ:1341・1344）。
+   * 無ければ消費（7-4）。recordAs は払った数を後で参照するための記録（交渉売買 R4b-3 続きで使う）。
+   * amount が { chosen: true } なら払う数も who が選ぶ（0 可。R4b-3a では型のみ・実装は次の束）
+   */
+  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; ifPaid: Op[]; ifNot: Op[] }
   // ── 能力と実体
   | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
   | { op: 'createToken'; token: TokenSpec; side: PlayerRef; orientation: 'ready' | 'rested' }

@@ -1890,6 +1890,8 @@ export type ProcAction =
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
   // useAsSeat（D20・R4a-2）＝発生させたのは seat だが、発生済みのコストは useAsSeat のものになる（《借金取り》）
   | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[]; useAsSeat?: Seat }
+  /** PHASE-R4b §2(D): who の発生済みのコスト（tokenIds）を払う（7-4）。giveTo があればアイコン W・属性そのままで移す。無ければ消費 */
+  | { type: 'procPayCost'; seat: Seat; tokenIds: string[]; giveTo: Seat | null }
   | { type: 'procCancelDown'; frameId: string }
   /**
    * 効果の乗っ取り（hijack・D11）が「適切な対象が無い」等で失敗したとき、乗っ取りの効果自身（いただきます等）を
@@ -2359,6 +2361,24 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       s = { ...s, costs: { ...s.costs, [bucket]: tokens } }
       trace.push({ kind: 'name', text: `コスト発生（効果）:${action.tokens.map((x) => x.icon + x.attrs.join('')).join('')}` })
       return { state: s, log: `${action.seat} に発生したコスト +${action.tokens.map((x) => x.icon).join('')}` }
+    }
+    case 'procPayCost': {
+      // PHASE-R4b §2(D): 発生済みのコストを払う（7-4）。giveTo があれば W・属性そのままで移す（FAQ:1341・1344）
+      const pool = state.costs[action.seat]
+      const paying = pool.filter((t) => action.tokenIds.includes(t.id))
+      if (paying.length !== action.tokenIds.length) return null
+      let s: BoardState = { ...state, costs: { ...state.costs, [action.seat]: pool.filter((t) => !action.tokenIds.includes(t.id)) } }
+      if (action.giveTo) {
+        const bucket = [...s.costs[action.giveTo]]
+        for (const t of paying) {
+          const [s2, id] = nextId(s, 'cost')
+          s = s2
+          bucket.push({ id, icon: 'W', attrs: t.attrs, frameId: null })
+        }
+        s = { ...s, costs: { ...s.costs, [action.giveTo]: bucket } }
+      }
+      trace.push({ kind: 'name', text: `コストを払う:${action.seat}${action.giveTo ? `→${action.giveTo}` : '（消費）'}` })
+      return { state: s, log: `${action.seat} が発生済みのコストを払う` }
     }
     case 'procCancelDown': {
       const f = findFrame(state, action.frameId)

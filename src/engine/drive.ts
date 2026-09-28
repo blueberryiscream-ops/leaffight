@@ -36,7 +36,7 @@ import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activa
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
-import type { Ability, Attr, BattleExpr, CardRef, Choice, Op, Selector } from './dsl'
+import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
 import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
@@ -62,7 +62,19 @@ interface ItemEng {
   /** 処理条件がある常時効果: 始めるときに《〜とき》を確かめ直す（K10）。seat＝eachPlayer のそのプレイヤー */
   recheck: { iid: string; index: number; seat?: Seat } | null
   /** 選択の答えを待っている。offer（K5・D8）: 払うか（'pay' を選べば払う・選ばなければ払わない）の答えを待つ */
-  awaiting: { id: string; kind: 'use' | 'choose' | 'order' | 'offer'; slot?: string; optional?: boolean; ops?: Op[]; bind?: Record<string, string[]>; payOps?: Op[]; ifPaidOps?: Op[]; ifDeclinedOps?: Op[] } | null
+  awaiting: {
+    id: string
+    kind: 'use' | 'choose' | 'order' | 'offer' | 'payByPlayer'
+    slot?: string
+    optional?: boolean
+    ops?: Op[]
+    bind?: Record<string, string[]>
+    payOps?: Op[]
+    ifPaidOps?: Op[]
+    ifDeclinedOps?: Op[]
+    /** payByPlayer（PHASE-R4b §2(D)・R4b-3a）: 段階を追って進める。ask（発生させるか）→source（発生源）→tokens（払うトークン） */
+    pay?: { stage: 'ask' | 'source' | 'tokens'; who: Seat; giveTo: Seat | null; amount: CostIcon[]; recordAs?: string; ifPaid: Op[]; ifNot: Op[] }
+  } | null
   seq: number
   /** 処理条件がある常時効果が受け手を差し替えた（H-2: 受け渡しは1件につき1回） */
   redirects?: boolean
@@ -898,6 +910,66 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       const tasks: Task[] = [...chosen.map((op) => ({ op })), ...eng.tasks]
       return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `${paid ? '払う' : '払わない'}:${item.label}` } }]
     }
+    if (a.kind === 'payByPlayer') {
+      const pay = a.pay!
+      const seat = pay.who
+      // すでに発生済みのコスト（board.costs[seat]）から amount 分を払う手筈を整える（'tokens' 段の入口）
+      const finishFromPool = (): BoardAction[] => {
+        const pool = state.costs[seat] ?? []
+        if (pool.length < pay.amount.length) {
+          const tasks: Task[] = [...pay.ifNot.map((op) => ({ op })), ...eng.tasks]
+          return [save({ awaiting: null, tasks }), { type: 'procTrace', entry: { kind: 'name', text: `払えない:${item.label}` } }]
+        }
+        if (pool.length === pay.amount.length) return finishPay(pool.map((t) => t.id))
+        const id3 = `${a.id}:tok`
+        return [
+          save({ awaiting: { ...a, id: id3, pay: { ...pay, stage: 'tokens' } } }),
+          {
+            type: 'procChoice',
+            choice: { id: id3, by: seat, kind: 'select', prompt: '払うトークン（どのアイコンも W として払える）', options: pool.map((t) => ({ key: t.id, label: `${t.icon}${t.attrs.join('')}` })), min: pay.amount.length, max: pay.amount.length, frameId: frame.id },
+          },
+        ]
+      }
+      const finishPay = (tokenIds: string[]): BoardAction[] => {
+        const acts: BoardAction[] = tokenIds.length ? [{ type: 'procPayCost', seat, tokenIds, giveTo: pay.giveTo }] : []
+        const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: [String(tokenIds.length)] } } } : {}
+        const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
+        return [save({ awaiting: null, tasks, ...envPatch }), ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
+      }
+      if (pay.stage === 'ask') {
+        if (ans.length === 0) return finishFromPool()
+        // 発生源の候補: 自分の待機状態のキャラ（フィールド）∪ 手札のキャラ・タッグ（7-1-1・7-1-2）
+        const fieldCands = Object.values(state.cards).filter((c) => c.owner === seat && isCharOnField(c) && c.orientation === 'ready')
+        const handCands = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'hand' && ['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? ''))
+        const cands = [...fieldCands, ...handCands]
+        if (cands.length === 0) return finishFromPool()
+        const id2 = `${a.id}:src`
+        return [
+          save({ awaiting: { ...a, id: id2, pay: { ...pay, stage: 'source' } } }),
+          { type: 'procChoice', choice: { id: id2, by: seat, kind: 'select', prompt: 'コストの発生源（自分の待機状態のキャラ、または手札のキャラクターカード・タッグキャラクターカード。7-2）', options: cands.map((c) => ({ key: c.iid, label: c.cardId })), min: 1, max: 1, frameId: frame.id } },
+        ]
+      }
+      if (pay.stage === 'source') {
+        const iid = ans[0]
+        const c = iid ? state.cards[iid] : undefined
+        if (!c) return finishFromPool()
+        const info = ctx.cards[c.cardId]
+        const fromHand = c.zone === 'hand'
+        const attrs = fromHand ? [] : attrsOf(info)
+        const restOrTrash: BoardAction = fromHand ? { type: 'procMove', iid: c.iid, to: 'trash' } : { type: 'procOrient', iid: c.iid, to: 'rested' }
+        if (pay.amount.length !== 1) {
+          warnings.push(`manual: ${item.label}: payByPlayer の amount が1件でない発生（R4b-3a では単一の発生源しか対応しない）`)
+          return [save({ awaiting: null, tasks: eng.tasks }), restOrTrash]
+        }
+        // giveTo があればその席へ、無ければ消費（発生させてそのまま払った扱い＝改めてトークンを起こさない）
+        const acts: BoardAction[] = pay.giveTo ? [{ type: 'procGenCost', seat: pay.giveTo, tokens: [{ icon: 'W', attrs }] }] : []
+        const envPatch = pay.recordAs ? { env: { ...eng.env, slots: { ...eng.env.slots, [pay.recordAs]: ['1'] } } } : {}
+        const tasks: Task[] = [...pay.ifPaid.map((op) => ({ op })), ...eng.tasks]
+        return [save({ awaiting: null, tasks, ...envPatch }), restOrTrash, ...acts, { type: 'procTrace', entry: { kind: 'name', text: `払う:${item.label}` } }]
+      }
+      // pay.stage === 'tokens'
+      return finishPay(ans)
+    }
     // choose（「〜できる」の最初の選択で何も選ばなければ、その効果は使わない）
     const slots = { ...eng.env.slots, [a.slot!]: ans }
     if (ans.length === 0 && a.optional) return [save({ awaiting: null, tasks: [] }), { type: 'procTrace', entry: { kind: 'name', text: `使わない:${item.label}` } }, done()]
@@ -1220,6 +1292,25 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         tasks: rest,
         patch: { awaiting: { id, kind: 'offer', payOps: op.pay, ifPaidOps: op.ifPaid, ifDeclinedOps: op.ifDeclined } },
         actions: [{ type: 'procChoice', choice: { id, by: to, kind: 'use', prompt: op.prompt, options: [{ key: 'pay', label: op.prompt }], min: 0, max: 1, purpose: 'offer', frameId: frame.id } }],
+      }
+    }
+    case 'payByPlayer': {
+      // PHASE-R4b §2(D): who にコストを発生させるアクションを行うか問う（7-2）。段階は itemStep の eng.awaiting.pay.stage で進める
+      const who = resolvePlayer(state, env, op.who)
+      const giveTo = op.giveTo ? resolvePlayer(state, env, op.giveTo) : null
+      const amount = Array.isArray(op.amount) ? op.amount : []
+      if (!Array.isArray(op.amount)) warnings.push(`manual: ${item.label}: payByPlayer の amount { chosen: true }（払う数を選ぶ）は R4b-3a では未実装（次の束・交渉売買）`)
+      const id = `${frame.id}:${item.key}:payByPlayer${eng.seq}`
+      return {
+        tasks: rest,
+        patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'ask', who, giveTo, amount, recordAs: op.recordAs, ifPaid: op.ifPaid, ifNot: op.ifNot } } },
+        actions: [
+          {
+            type: 'procChoice',
+            // purpose 'offer' を流用（払う/払わないの帯。K5・D8）。テストの answer(by, accept) もこの convention（pick ['pay']/[]）を使う
+            choice: { id, by: who, kind: 'use', prompt: 'コストを発生させるアクションを行うか（自分の待機状態のキャラを消耗させる、または手札のキャラクターカード・タッグキャラクターカードをゴミ箱送りにする。7-2）', options: [{ key: 'pay', label: 'コストを発生させる' }], min: 0, max: 1, purpose: 'offer', frameId: frame.id },
+          },
+        ],
       }
     }
     // ── R2b
