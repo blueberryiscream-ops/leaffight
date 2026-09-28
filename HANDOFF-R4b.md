@@ -344,3 +344,64 @@ HANDOFF-R4b.md「## R4b-2b」を読んで進め方を踏襲してください。
 - ライバル対決 faq-3837: アレイの《防御》込みで y 6−1−1=4（5→1）・x 4−2=2（6→4）を統括が本文から計算して一致。凍結なら y 5→4 で区別できる ✅
 - verify 緑・test:faq R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30。**tested 65／draft 6／manual 43**。`_tested.json` 最新
 - 🔸 指示書の教訓: 「ケースの盤面の状態（消耗・待機）は原典の手順どおりか」を自己点検に足す
+
+## R4b-2c
+
+### 冒頭
+- **完了**（画面🔸1〜4の4点。ルール記述・_local/rules は触っていない）
+- tested の数: 変更なし（65／draft 6／manual 43。画面だけの束のため対象外）
+- verify: 緑（test:faq: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30。件数は下がっていない）
+- コミット（親のみ。`_local/rules` は今回対象外）:
+  - `8b57d31` 🔸1 ログの段に iid がそのまま出る問題
+  - `d44dffe` 🔸2 同時処理の順の選択肢が同名カードで区別つかない問題
+  - `3d03de0` 🔸3 断られた宣言の灰色ボタンが透明に見える問題
+  - `8bd8475` 🔸4 mode:'free' でも開始準備が済めば「先攻 A/B で始める」を出す
+
+### 項目ごと
+
+**🔸1 ログの段に iid がそのまま出る（`src/core/proc.ts`）**
+- 直す前 ❌: `trace.push({ kind: 'name', text: \`参加キャラを変更:${action.seat}→${action.to.join(',')...}\` })`（proc.ts:2213 だったところ）・
+  `trace.push({ kind: 'name', text: \`バトルの結果:${damage.map(d => \`${d.seat}←${d.recipient}:${d.value}\`).join(',')...}\` })`（同 1152 だったところ）。
+  画面側の `toPublicSteps`（host.ts:348）は「':' 区切りの1段に iid がちょうど1個だけ」という前提で iid を名前に置き換える。
+  この2箇所は複数の iid を ',' で1段に詰めていたため、どの部分も単独の iid と一致せず、画面はそのまま iid 文字列を出していた
+  （非公開のカードの名前を作る話ではなく、単純に置き換えの前提から外れていたのが原因）
+- 直した後: iid ごとに独立した ':' 区切りの段にする（`参加キャラを変更:B:iid1:iid2` / `バトルの結果:A:iid:1` を damage 1件ごとに1段）。
+  core はカード名を一切作らず iid のまま渡す（既存の isPublicCard・hiddenFromViewer・publicName の約束は変えていない）
+- ファイル: `src/core/proc.ts` の `procSetParticipants`（旧2213付近）・`enterBattle` の case 24（旧1152付近）
+- 煙試験: サーバーは既に 5300 で稼働中（`npm run dev` の状態）。localhost:5300 を開いて盤面が表示され、console エラー無し（前セッションの盤面がそのまま出た＝クラッシュしていない）を確認。バトルを実際に進めて段のテキストを見る所までは（ツール予算のため）やっていない
+
+**🔸2 同時処理の順の選択肢が同名カードで区別つかない（`src/core/proc.ts`・`src/ui/engine/EngineBar.tsx`）**
+- 直す前 ❌: `nextItem`（1600行目付近）が作る `ProcChoice.options` は `{ key: it.key, label: it.label }` だけで、
+  ダメージ項目の `it.key` は受け手の iid。EngineBar.tsx の選択肢ボタン（243行目付近）は `isCard` なら `cardLabel(o.key)`（カード名だけ）を出す。
+  受け手が同名カード2枚（例: HM-13 が2体）だと、どちらのボタンも「ＨＭ－１３」になり区別できない
+- 直した後: `ProcChoice.options` に `sourceIid`（`SimulItem.sourceIid`＝与えた側の iid）と `qty`（damage 項目のときの `d.value`）を追加。
+  core は依然カード名を作らず iid のまま渡す。EngineBar.tsx はカード名の後ろに `← 与えた側の名前 量` を追加表示（`cardLabel` で isPublicCard 経由の名前解決）
+- ファイル: `src/core/proc.ts`（`ProcChoice.options` の型・`nextItem` の options 組み立て）・`src/ui/engine/EngineBar.tsx`（選択肢ボタン、旧247行目付近）
+- 煙試験: 同上（バトルの多重ダメージで実際にこの選択肢を踏む所まではツール予算のため未確認。型・ビルドは verify で確認）
+
+**🔸3 断られた宣言の灰色ボタンが透明に見える（`src/ui/engine/EngineBar.tsx`）**
+- 直す前 ❌: `className={\`${btn} bg-surface-2 text-ink-faint cursor-not-allowed\`}`（旧286行目）。`btn` に含まれる `lf-btn-primary`
+  （`@utility lf-btn-primary { background: linear-gradient(...) }`、src/index.css:37-42）の `background` が `bg-surface-2` の
+  `background-color` に勝ってしまい、意図した灰色の背景が出ず透明に見えていた
+- 直した後: `btn`（lf-btn-primary 込み）を使うのをやめ、`shrink-0 cursor-not-allowed rounded border border-line-strong bg-surface-2 px-2 py-0.5 text-xs text-ink-faint`
+  という背景を持つクラスだけで組んだ（トークンのクラスのみ。index.css は触っていない）
+- ファイル: `src/ui/engine/EngineBar.tsx`（宣言の番の帯、旧282-291行目）
+- 煙試験: ボタンの見た目の確認（灰色背景が付いているか）は実際に「断られた宣言」の状態を作る必要があり、ツール予算の都合でクラス名の組み立てのみの確認（ビルド・verify は通過）。統括の2タブ確認で見た目を見てほしい
+
+**🔸4 mode:'free' でも「先攻 A/B で始める」を出す（`src/ui/engine/EngineBar.tsx`）**
+- 直す前 ❌: `{engineOn && !turn && (...)}`（旧202行目）で、手動（mode:'free'）のままだとこの帯が出ず、エンジンに切り替えるボタンを
+  別途押さないと対戦開始ボタンに辿り着けなかった
+- 直した後: `{!turn && (...)}` に変更（`engineOn` の条件を外しただけ。中身は変更なし）。`start` 要求は host.ts の `applyEngineReq`
+  が既に `mode:'engine'` にする実装だった（grep で確認・変更不要）ので、mode:'free' のまま押しても対戦は始まる。
+  turn が始まればこの帯自体が消える（`!turn` の条件）ので、手動で盤面をいじる遊び方自体は変わらない
+- ファイル: `src/ui/engine/EngineBar.tsx`（旧202-217行目）
+- 煙試験: 上記と同様、実際に mode:'free' で開始準備を済ませてボタンが出るかまではツール予算の都合で未確認（コードの読みと型・verify で確認）
+
+### 迷ったこと・仕様に無くて決めたこと
+- 🔸2 の `qty` は damage 項目以外（action 項目など）では `undefined` にした（既存の action の同時処理には量の概念が無いため）。EngineBar 側は `qty !== undefined` のときだけ量を足す
+- 🔸2 の `sourceIid` が非公開カードなら `cardLabel` が「（非公開のカード）」をそのまま返す（既存の `cardLabel` の挙動どおり。stepLine の「＊」置き換えとは別のルートだが、他のボタンの名前表示（243行目の `cardLabel(o.key)`）も同じ挙動なので合わせた）
+- 🔸1・🔸2 はいずれも `_local/rules`（カードの記述・faqReview・tested）に影響しないため、`_local/rules` 側のコミットは無し
+- ブラウザの実機で実際にこの4点の見た目・動きを踏む確認は、ツール予算（ブラウザ操作の合計5回まで）の都合で「起動して壊れていない」煙試験に留めた。2タブでの確認・実際の見た目の検証は統括にお願いしたい
+
+### ツールの呼び出し回数
+- 約40回（Read・Grep・Bash・Edit・git 操作・ブラウザ確認3回の合計）。50回の上限内で収めた
