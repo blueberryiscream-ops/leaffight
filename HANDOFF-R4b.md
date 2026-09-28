@@ -459,3 +459,29 @@ verify: 緑（tsc・vite build・vitest engine-host 全成功・test:faq 上記�
 
 ### 9. ツールの呼び出し回数
 約85回（この束の作業全体。内訳の目安: 読み込み・調査 約35回、実装の Edit/Write 約15回、テスト作成・生成・実行・検証の反復 約25回、コミット・報告 約10回）。45回の節目を過ぎてから気づいたため、実装が一区切り（verify 緑・T ケース通過）まで進めてから止めた。次回はもっと早い段階で読み込みをサブエージェントに逃がすべきだった。
+
+## R4b-3a-1 直し
+
+統括のレビュー指摘（簡略化を認めない・完成度優先）に対応。完了。tested: 65→65（不変）。verify 緑（build・vitest engine-host 全成功・test:faq R2a✅57/保留1・R2b✅37・R3✅18・R4a✅30、いずれも下がっていない）。
+コミット（_local/rules）: 50063a3／コミット（親）: 2e5f6fa
+
+### 直した内容
+1. **7-2 の窓を実際に開く**: 新規 `procStartCostGen`（proc.ts）が、単独のコスト発生の宣言と全く同じ経路（`applyDeclare` の tail・`windowEnd` の frame=null 分岐と同じ `pushSimul→declItem→pushDeclFrame`、その上に `declPhaseFrame`）で who の costGen 決定を proc スタックに積む。who が選んだ発生源は 0件以上・複数可（7-2「１回で複数の発生源を指定できる」）。これにより [3]《コストを発生するとき》・[8]《コストが発生したとき》の本物の割り込み窓が開き、`enterCostGen`（proc.ts の既存コード。手を加えていない）をそのまま通るので、臨時収入・助太刀・スフィー《お店番》等が [3] の窓で使え、分厚い財布・衣装メイド服などの costGen 系の常時効果も自動的に効く（統括の指摘どおり、プールで影響する7枚に個別の対応は不要）。
+   drive.ts の payByPlayer は ask→source（0件以上の複数選択。1件固定をやめた）→**genPending**（procStartCostGen で積んだ宣言が proc スタックから消える＝終わるのを待つ新しい段）→tokens の4段に直した。
+2. **FAQ:1344 の属性確認**: `src/engine/faqCase.ts` の `Expect` に `costToken: [side, icon, attr?]` を追加、`scripts/lib/faq-run.ts` の `checkExpect` に対応するチェックを追加（発生済みのコストにそのアイコン・属性を持つものがあるか）。`_local/rules/tools/authored/_lib.mjs` に `CT(side, icon, attr)` ヘルパーを追加。faq-1344 のケースに `CT('you', 'W', '感')` を足した。faq-1341 は「手札を捨てる」形→「フィールドのキャラ（エリア）を消耗させる」形に直した（自己消耗・他人消耗コストの答えに合わせた）。faq-1356 にも `CT('you', 'W')`（元 G だったトークンが W になっている）を足した。
+3. **窓のケース**: FAQ 由来でなく 7-2[3] と臨時収入の本文（「[WWW]を発生する。コストを発生するときに使うこともできる」）から、`scripts/test-engine-host.ts` に単体テストを追加（PBP・RC の最小限フィクスチャ。臨時収入・借金取りの実物ではなく、同じ本文の構造だけを持つ最小限のカードで確かめる形。FAQ ケースの authored/*.mjs は実カードだけを扱う場なので、非 FAQ の機構テストはここに置いた）。
+   - PBP（A のキャラ・特殊能力「Ask」＝ payByPlayer who:opponent amount:['W'] giveTo:'you'）
+   - RC（B の手札のイベント。臨時収入と同じ本文の最小限＝割込型のみ。トリガー「コストを発生するとき」・効果 generateCost ['W','W','W']）
+   - 確かめたこと: (a) ask 段で B に問う（offer の帯） (b) source 段の候補（B の待機状態のキャラ＝リーダー LB のみ。0件でも進められる） (c) 0件を選んで進めると [3] の窓が開き、そこで RC を宣言できる（`declare({by:'B', source:'RC'})` が通る） (d) RC の効果 [WWW] が実際に B に発生する（`s.costs.B` が3枚の W になる） (e) 3枚中1枚を選ぶ選択が開く（amount ['W'] のとおり min1・max1） (f) 選んだ1枚が A（giveTo 'you'）へ移り、残り2枚は B の手元に残る（7-3・FAQ:1353 と同じ理屈）
+
+### 直す前 ❌ の出力
+直す前（今回の直しの前・R4b-3a-1 で一度コミットした簡略化版）を `git stash` で一時的に戻して test:faq を再実行した（親リポジトリの src/core/proc.ts・src/engine/drive.ts・src/engine/faqCase.ts・scripts/lib/faq-run.ts・scripts/test-engine-host.ts の5ファイルだけを戻す。_local/rules 側のカード・T ケースの記述はそのまま＝新しい expect costToken を使う形のまま）。
+
+- 直す前（簡略化版）の `対象の外・参考`（1行）: `実行（対象の外・参考 28件）: ✅ 16／保留 12`（直した後は `✅ 19／保留 9`）。costToken という expect の種類自体が無いため、faq-1341・faq-1344・faq-1356 の3件が ❌ ではなく「保留（型で書けない期待）」に落ちた（✅19→16・保留9→12の差分）
+- 窓のケース（test-engine-host.ts の PBP・RC）はこの直しで新規に書いたもの（旧実装には対応する仕組みが無く、declare('B','RC') が「宣言の機会が無い（窓が開いていない）」で断られて成立しない＝旧実装のコードでは書けないテストだった）
+- 直した後: 上記のとおり test:faq は該当3件を含めて `✅ 19／保留 9`（R4b-3a-1 の最初の報告時と同じ数）に戻り、test:engine-host も全成功（PBP・RC の5行がすべて ✅）
+
+### 迷ったこと・仕様に無くて決めたこと（今回の追加分）
+- procStartCostGen の trigger は `nearestActionFrame(state)` にした（PHASE の decl.trigger は「割り込みの窓のフレーム」を指す約束だが、payByPlayer は効果の途中の任意のタイミングで起きるため、対応する単一の「窓」がない。最も近いアクションフレームを控える形にした。実害は無い＝trigger は診断・表示用途中心）。
+- amount が {chosen:true} のときの扱いは前回どおり型のみ（manual 警告）。次の束（交渉売買）で実装する。
+- 発生源の候補が複数（例: リーダー＋キャラ複数）でも、7-2「１回で複数の発生源を指定できる」に対応できるよう min0/maxN の複数選択にした。借金取り自身は amount ['W']（1枚payえば足りる）なので、複数発生源を選んでも払うトークンの選択（tokens 段）で1枚だけ選ぶ形になる（余りは B の手元に残る＝FAQ:1353 と整合）。
