@@ -485,3 +485,11 @@ verify: 緑（tsc・vite build・vitest engine-host 全成功・test:faq 上記�
 - procStartCostGen の trigger は `nearestActionFrame(state)` にした（PHASE の decl.trigger は「割り込みの窓のフレーム」を指す約束だが、payByPlayer は効果の途中の任意のタイミングで起きるため、対応する単一の「窓」がない。最も近いアクションフレームを控える形にした。実害は無い＝trigger は診断・表示用途中心）。
 - amount が {chosen:true} のときの扱いは前回どおり型のみ（manual 警告）。次の束（交渉売買）で実装する。
 - 発生源の候補が複数（例: リーダー＋キャラ複数）でも、7-2「１回で複数の発生源を指定できる」に対応できるよう min0/maxN の複数選択にした。借金取り自身は amount ['W']（1枚payえば足りる）なので、複数発生源を選んでも払うトークンの選択（tokens 段）で1枚だけ選ぶ形になる（余りは B の手元に残る＝FAQ:1353 と整合）。
+
+## 統括17の検証（R4b-3a-1）— 差し戻し1回の後に合格
+- サブのツール: 初回 **記録110回**（上限60）／直し **記録91回**（上限50）
+- 初回は 7-2[3][8] の窓を開かない簡略化（「単独のコスト発生はフレーム化しない」と報告＝誤り。drive.ts req.costGen → proc.ts declPhaseFrame の経路がある）と、FAQ:1344 のケースが属性を見ていない → 差し戻し。プールで窓に関わるのは7枚（スフィー《お店番》・助太刀・臨時収入・HM-12S《お手伝い》・郁美&雄蔵《バックアップ》・衣装メイド服・分厚い財布）
+- 直し: `procStartCostGen` が単独のコスト発生と同じ pushSimul→declPhaseFrame で積む（差分を読んだ ✅）。expect に costToken（アイコン・属性）。1341 はフィールドのキャラを消耗させる形に。窓のケース（[3] で臨時収入相当 → WWW → 1枚払う → 相手へ）✅
+- 直す前 ❌: サブが stash で戻して 参考 ✅16／保留12（直した後 ✅19／保留9）。stash の取り残し無し
+- verify 緑・tested 65／draft 6／manual 43（借金取りは FAQ:1353 ブーストが manual で draft のまま）。`_tested.json` 最新
+- 2タブは R4b-3a-2（交渉売買）の後にまとめて行う
