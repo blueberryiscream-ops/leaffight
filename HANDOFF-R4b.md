@@ -405,3 +405,9 @@ HANDOFF-R4b.md「## R4b-2b」を読んで進め方を踏襲してください。
 
 ### ツールの呼び出し回数
 - 約40回（Read・Grep・Bash・Edit・git 操作・ブラウザ確認3回の合計）。50回の上限内で収めた
+
+## 統括17の検証（R4b-2c）— 差分と verify は合格・見た目は利用者の試遊で
+- サブのツール: **記録78回**（申告約42・上限50）
+- 差分を読んだ: 🔸1 trace の段を iid 1個ずつに（toPublicSteps が名前に置き換える形）／🔸2 ProcChoice.options に sourceIid・qty／🔸3 灰色ボタンは lf-btn-primary を使わず背景つきクラスで／🔸4 `!turn` なら mode に関わらず開始の帯（開始準備前は「開始準備の途中」の文が出る）✅
+- verify 緑・tested 65／draft 6／manual 43。zip 作り直し（2026-09-28 11:44）・push
+- 2タブの見た目の確認は、利用者の試遊（公開サイト）で兼ねる
