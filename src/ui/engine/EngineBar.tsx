@@ -243,9 +243,12 @@ export function EngineBar({
                 {ch.options.map((o) => {
                   const isCard = !!board.cards[o.key]
                   const n = ui.pick.filter((k) => k === o.key).length
+                  // 同時処理の順（damage 項目）は受け手のカード名だけだと同名カードで見分けが付かない→与えた側と量を添える
+                  const src = o.sourceIid ? `${cardLabel(o.sourceIid)}${o.qty !== undefined ? ` ${o.qty}` : ''}` : null
                   return (
                     <button key={o.key} type="button" className={`${btn} ${n ? 'ring-2 ring-warn' : ''}`} onClick={() => ui.togglePick(o.key)}>
                       {isCard ? cardLabel(o.key) : o.label}
+                      {src ? ` ← ${src}` : ''}
                       {n > 1 ? ` ×${n}` : ''}
                     </button>
                   )

@@ -296,7 +296,8 @@ export interface ProcChoice {
   by: Seat
   kind: 'order' | 'select' | 'use'
   prompt: string
-  options: { key: string; label: string }[]
+  /** sourceIid・qty は同時処理の順（damage 項目）を画面が区別して出すため（R4b-2c 🔸2: 同じカード名の受け手が2件あると選択肢が同じ文字になる） */
+  options: { key: string; label: string; sourceIid?: string | null; qty?: number }[]
   min: number
   max: number
   /** 同じ選択肢を何度も選べる（割り振り） */
@@ -1598,7 +1599,7 @@ function nextItem(state: BoardState, frame: ProcFrame, _trace: ProcTrace[]): Boa
         by: ap,
         kind: 'order',
         prompt: '同時処理の順（AP が決める）',
-        options: sim.items.map((it) => ({ key: it.key, label: it.label })),
+        options: sim.items.map((it) => ({ key: it.key, label: it.label, sourceIid: it.sourceIid, qty: it.type === 'damage' ? it.damage!.value : undefined })),
         min: 0,
         max: sim.items.length,
         frameId: frame.id,
