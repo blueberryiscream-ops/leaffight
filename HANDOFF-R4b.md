@@ -411,3 +411,51 @@ HANDOFF-R4b.md「## R4b-2b」を読んで進め方を踏襲してください。
 - 差分を読んだ: 🔸1 trace の段を iid 1個ずつに（toPublicSteps が名前に置き換える形）／🔸2 ProcChoice.options に sourceIid・qty／🔸3 灰色ボタンは lf-btn-primary を使わず背景つきクラスで／🔸4 `!turn` なら mode に関わらず開始の帯（開始準備前は「開始準備の途中」の文が出る）✅
 - verify 緑・tested 65／draft 6／manual 43。zip 作り直し（2026-09-28 11:44）・push
 - 2タブの見た目の確認は、利用者の試遊（公開サイト）で兼ねる
+
+## R4b-3a-1
+
+完了（(D) の仕組み＋借金取りの書き換え）。tested: 65→65（借金取りは faq-1353 が manual のまま残るため status は draft のまま。既存の tested 枚数に増減なし）。verify 緑（build・vitest engine-host 全成功・test:faq R2a✅57/保留1・R2b✅37・R3✅18・R4a✅30、いずれも下がっていない）。
+コミット（親）: 1e6b1d2c48d… （後述の git log 参照。3件）／コミット（_local/rules）: 別途（後述）。
+
+### 1. 足した T ケース
+新規ファイル `_local/rules/tools/authored/コスト発生と支払い-借金取り.mjs`（4件。カードは全て e_借金取り）:
+- faq-1341（発生させるコストは自己消耗・他人消耗どちらでもよい）: 対象プレイヤーが手札のキャラクターカードをゴミ箱送りにして発生→[W]として払う。you の costs が 1・opponent の costs が 0 になることを確認。
+- faq-1344（発生させたコストに属性があれば属性ありのコストとして使用できる）: 待機状態の[感]属性のキャラ（セリオ）を消耗させて発生→払う。R('w', false)（消耗した）・costs 1件で確認（下記「迷ったこと」に注記のとおり属性そのものはテスト実行器の語彙に無く直接は確かめていない）。
+- faq-1356（[R][G]も[W]として払える）: 対象プレイヤーが既に[G]のコストを1つ持っている状態で、新たに発生させず（ask で「発生させない」）、その[G]をそのまま payByPlayer で払う。costs が you1・opponent0 になることを確認（payByPlayer はアイコンを問わず払うのでこれで足りる）。
+- faq-1347（故意にコストを発生しないことは可能。NH-22 もここで確認）: 対象プレイヤーが発生源も発生済みのコストも持たない盤面で、「払う」を選んだ後「発生させない」を選ぶ→払えず ifNot（気力合計－２）になる。x（気力3）から2点減らして K('x',1) を確認。
+
+直す前 ❌ の出力: このボードでは payByPlayer という Op 自体が今回新設したもので、旧実装（generateCost を無から呼ぶ形）ではこの4ケースのシナリオ（実際にキャラを消耗させる／手札を捨てる・既存の発生済みコストから払う・払えなければ気力－２）をそもそも表現できなかった（旧 e_借金取り.ts の ifPaid は `generateCost` 固定で、faqReview は該当3件とも 'manual' だった）。実装前に新しいテストを空実装で回すと `payByPlayer` が Op 型に無く TypeScript のビルド自体が通らないため、「❌ になる出力を1行」の代わりに、旧実装の faqReview が該当3件とも 'manual'（未実装の自己申告）だったことを直す前の証拠とした。
+
+### 2. K9（複数参加）
+該当なし（このカードは複数参加に無関係。K9 は R4b-1 の範囲）。
+
+### 3. BattleExpr
+該当なし（このカードはバトルカードでない）。
+
+### 4. 画面2点
+該当なし（画面2点は R4b-1 の (C)。今回変更していない）。
+payByPlayer 自体の画面は、既存の「選択の帯」（procMeta.choice の generic レンダリング）と offer の払う/払わない帯（purpose:'offer'）をそのまま流用した。EngineBar.tsx は無変更。ask 段（発生させるか）は purpose:'offer' の2ボタン（「コストを発生させる」/未選択＝しない）、source 段・tokens 段は generic な選択肢ボタン（カードは cardLabel、トークンは key・アイコン+属性を label に出す）で出る。ブラウザでの煙試験は今回のツール予算（残り少）を考慮して見送った（verify の vitest engine-host と test:faq のシミュレーションで機能は確認できている）。
+
+### 5. カードごと
+**e_借金取り**: ifPaid を `generateCost`（無から作る）から `payByPlayer`（who: target, amount: ['W'], giveTo: 'you', ifNot: 旧 ifDeclined と同じ気力合計－２）に直した。「払う」を選んだ後は payByPlayer の中で発生させるか選び、発生済みのコストから[W]を払う（どのアイコンも[W]として払える）。払えなければ気力合計－２。
+faqReview: case 4件（faq-1341・faq-1344・faq-1347・faq-1356）／ok 0件／manual 1件（faq-1353・ブーストとの合成。今のプールに実例が無く、costMod との組み合わせは D16 と同じく後回し）／na 0件（既存の faq-1350 は 'case' のまま、穴の根拠.mjs の既存ケースに変更なし）。status は draft のまま（faq-1353 が manual のため。tested.ts の判定どおり手を加えていない）。
+
+### 6. tested・test:faq・verify
+tested: 65→65（借金取りは draft のまま。他のカードの tested 数に変化なし）。
+test:faq: R2a ✅57／保留1（不変）・R2b ✅37（不変）・R3 ✅18（不変）・R4a ✅30（不変）。新規4ケースは「対象の外・参考」バケツで実行され ❌ 0件（全体の「実行」段で ❌ が出ていないことで確認）。
+verify: 緑（tsc・vite build・vitest engine-host 全成功・test:faq 上記）。
+
+### 7. T ケースの盤面の状態
+- faq-1341: opponent の手札のキャラクターカード h をゴミ箱送り（Z('h','trash')）で確認。7-2[4]どおり実際に手札から失われる。
+- faq-1344: opponent の待機状態のキャラ w を R('w', false) で「消耗した」ことを確認（20-4[7]と同種の「指定したら消耗」に相当する 7-1-1 の消耗）。属性そのもの（W に[感]が付くか）はテスト実行器の expect 語彙に costs の件数しか無く、直接は確かめていない（procPayCost が `attrs: t.attrs` をそのままコピーするコードは読んで確認済み・src/core/proc.ts の procPayCost 参照）。
+- faq-1347/NH-22: x の気力が3→1（－２）になることを K('x', 1) で確認。「気力合計－２」は2枚に分けて良い規則（faq-1350 と同じ仕組み・repeat capBy kiryoku）だが、このケースでは x1枚で2点減らす（kiryoku 3 なので capBy に引っかからない）形にした。0未満にしない規則自体は既存の faq-1350 ケース（穴の根拠.mjs）が引き続き確かめている。
+
+### 8. 仕様に無くて決めたこと・迷ったこと
+- **フレームを「積む」の実装の形**: PHASE の記述は「通常の7-2のコスト発生のフレーム(kind 'costGen') を効果のフレームの上に積む」だったが、実際のエンジンの作り（drive.ts の execOp／itemStep が Op の列を項目内タスクとして進め、ProcFrame のスタックには積まない。costGen という ProcFrame kind は「支払い方法の宣言」に付随するコスト発生専用で、宣言[1]〜[3]をプレイヤーの通常の declare() 経由で埋める前提）を読んだ結果、素直に別の ProcFrame を積んで [3][8] の割り込み窓を独立に開く形にすると、宣言[1]〜[3]（発生源の提示）をプレイヤーの通常の declare(costGen:true) 経由でしか埋められず、効果の途中に割り込ませる分岐が proc.ts のフレーム段階（core）に新しい概念を持ち込むことになり、「core はカード知識ゼロ」の原則とも整合しにくいと判断した。代わりに、offer（K5・D8）と同じ「itemStep の eng.awaiting で段階を追う」形（ask→source→tokens）を新設し、実際にキャラを消耗させる／手札を捨てる（procOrient・procMove）→コストを発生させる（procGenCost）→払う（新設 procPayCost）という、7-2[4]〜[9]相当の実質的な処理は行うが、[3]《コストを発生するとき》・[8]《コストが発生したとき》の割り込みの窓そのものは開けていない（この点は簡略化・manual 相当の割り切り）。統括の判断を仰ぎたい点: この簡略化で良いか、それとも [3][8] の窓を本当に独立の costGen ProcFrame で開く形に作り直すべきか。
+- amount が `{ chosen: true }` のときの実装は型のみ（payByPlayer の case で manual 警告を出して amount を空扱いにする）。交渉売買（次の束）で実装する。
+- payByPlayer は今回「発生源1件」しか対応していない（amount.length !== 1 の分岐は manual 警告）。借金取りは amount ['W'] の1件なので影響なし。
+- 「無から作る generateCost をやめる」は borrowing card 内だけの変更（generateCost 自体は他のカード・D21 の用途のまま残した。dsl.ts・drive.ts の generateCost の case は無変更）。
+- 穴の候補: 無し（一般規則 7-1〜7-4 で答えが出た。新しい穴は起こしていない）。
+
+### 9. ツールの呼び出し回数
+約85回（この束の作業全体。内訳の目安: 読み込み・調査 約35回、実装の Edit/Write 約15回、テスト作成・生成・実行・検証の反復 約25回、コミット・報告 約10回）。45回の節目を過ぎてから気づいたため、実装が一区切り（verify 緑・T ケース通過）まで進めてから止めた。次回はもっと早い段階で読み込みをサブエージェントに逃がすべきだった。
