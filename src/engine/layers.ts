@@ -64,8 +64,13 @@ interface Eff {
 interface Derived {
   ctx: EngineCtx
   effs: Eff[]
-  /** 特殊能力を失っているキャラ */
+  /** 特殊能力を失っているキャラ（shieldParticipants from 特殊能力・loseAbilities） */
   lost: Set<string>
+  /** イベントが効果を失う参加キャラ（shieldParticipants from イベント） */
+  lostEv: Set<string>
+  /** 参加キャラ → 失わせている shieldParticipants の効果（違反の根拠の表示用） */
+  srcA: Map<string, Eff>
+  srcE: Map<string, Eff>
 }
 
 const cache = new WeakMap<BoardState, Derived>()
@@ -91,12 +96,25 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
     all.push({ layer: l, effect: b.effect, env: layerEnv(state, l) })
   }
   // 特殊能力を失う（《能力禁止》）: 失っているキャラの常時効果の層は効かない（常時効果の発生源が「特殊能力」＝キャラのものだけ）
-  const d0: Derived = { ctx, effs: all, lost: new Set() }
+  const d0: Derived = { ctx, effs: all, lost: new Set(), lostEv: new Set(), srcA: new Map(), srcE: new Map() }
   cache.set(state, d0)
   const lost = new Set<string>()
-  for (const e of all) if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) lost.add(x)
+  const lostEv = new Set<string>()
+  const srcA = new Map<string, Eff>()
+  const srcE = new Map<string, Eff>()
+  for (const e of all) {
+    if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) lost.add(x)
+    else if (e.effect.ce === 'shieldParticipants') {
+      const f = e.effect
+      if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
+      for (const x of targetsOf(ctx, state, e)) {
+        if (f.from.includes('特殊能力')) { lost.add(x); srcA.set(x, e) }
+        if (f.from.includes('イベント')) { lostEv.add(x); srcE.set(x, e) }
+      }
+    }
+  }
   const effs = all.filter((e) => !(e.layer.ability !== null && e.layer.source && lost.has(e.layer.source) && isCharOnField(state.cards[e.layer.source])))
-  const d: Derived = { ctx, effs, lost }
+  const d: Derived = { ctx, effs, lost, lostEv, srcA, srcE }
   cache.set(state, d)
   return d
 }
@@ -111,6 +129,8 @@ function targetsOf(ctx: EngineCtx, state: BoardState, e: Eff): string[] {
 
 function effectOn(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): boolean {
   if (!targetsOf(ctx, state, e).includes(iid)) return false
+  // 参加していないキャラの常時の特殊能力が、特殊能力を失っている参加キャラに及ぼす効果も働かない（FAQ:597 後半・R4b-3b-2）
+  if (e.layer.ability !== null && isCharSource(ctx, state, e.layer.source) && derived(ctx, state).lost.has(iid)) return false
   const when = (e.effect as { when?: Parameters<typeof evalCond>[3] }).when
   if (e.effect.ce !== 'prohibit' && when && !evalCond(ctx, state, e.env, when)) return false
   // 【～の対象にならない】特殊能力: 特殊能力の常時効果（キャラの能力）の影響も受けない（《魔法のサークレット》FAQ:697・709）
@@ -399,6 +419,26 @@ export function collectEffectTargets(ctx: EngineCtx, state: BoardState, env: Env
   return out
 }
 
+/** forEach・selector で効果が及ぶキャラ（宣言の効果のうち実際に及ぼす op を含む forEach の in。R4b-3b-2。(B) は実行時に外すが、宣言の可否には使う） */
+function forEachReach(ctx: EngineCtx, state: BoardState, decl: ProcDecl): string[] {
+  const cardId = decl.eng.cardId as string | undefined
+  const idx = decl.eng.index as number | undefined
+  if (cardId === undefined || idx === undefined) return []
+  const ab = ctx.defs[cardId]?.abilities[idx]
+  if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play')) return []
+  const env: Env = { self: decl.sourceIid, you: decl.by, slots: (decl.eng.slots as Record<string, string[]>) ?? {}, trigger: decl.trigger, declId: decl.id, declared: (decl.eng.declared as Env['declared']) ?? {} }
+  const out: string[] = []
+  const walk = (ops: Op[]) => {
+    for (const op of ops) {
+      if (op.op === 'if') walk(evalCond(ctx, state, env, op.cond) ? op.then : op.else ?? [])
+      else if (op.op === 'simul') walk(op.do)
+      else if (op.op === 'forEach' && op.do.some((o) => effectRefsOf(o).length > 0)) out.push(...select(ctx, state, env, op.in))
+    }
+  }
+  walk(ab.effect)
+  return out
+}
+
 /** 宣言が層の「禁止・対象にならない・特殊能力を失っている」に当たるか（宣言[1]〜[5] を済ませた ProcDecl で調べる） */
 export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): Violation[] {
   const out: Violation[] = []
@@ -417,8 +457,18 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     const u = untargetableBy(ctx, state, t, kind)
     if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
   }
-  if (decl.kind === 'ability' && decl.sourceIid && d.lost.has(decl.sourceIid)) {
-    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っている（【特殊能力を失う】）`, source: '特殊能力を失う', sourceIid: decl.sourceIid })
+  // 参加キャラに対して効果を発揮する特殊能力・イベントは使えない（FAQ:3735 の線引き。効果が参加キャラに及ばなければ使える＝3070・1013・3224）。
+  // 及ぶ＝対象に選ぶ／選ばずに決まる（R4b0 の暗黙の対象 implicitTargetsOf）／forEach・selector で及ぶ
+  if (decl.kind === 'ability' || decl.kind === 'event') {
+    const sh = decl.kind === 'ability' ? d.lost : d.lostEv
+    if (sh.size) {
+      for (const t of [...allTargets, ...forEachReach(ctx, state, decl)]) {
+        const e = (decl.kind === 'ability' ? d.srcA : d.srcE).get(t)
+        if (!sh.has(t)) continue
+        out.push({ kind: 'lostAbility', text: `${name(t)}はバトル参加キャラ（「${e?.layer.label ?? '特殊能力を失う'}」）なので、効果が及ぶ${kind}は使用できない`, source: e?.layer.label ?? '特殊能力を失う', sourceIid: e?.layer.source ?? null })
+        break
+      }
+    }
   }
   if (decl.kind === 'equip' && decl.sourceIid && decl.equipTo) {
     const why = equipProblem(ctx, state, state.cards[decl.sourceIid], decl.equipTo, decl.by)
@@ -586,6 +636,8 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     else if (l.until === 'whileSource' && l.source && !staticSourceActive(state, l.source)) remove.push(l.id)
     // 《能力禁止》: 参加キャラに対して効果を発揮している特殊能力の効果は失われ、バトルの後も戻らない（FAQ:597・606）
     else if (bodyOf(l).origin === 'ability' && l.targets.some((x) => participants.has(x))) remove.push(l.id)
+    // イベントが足した層も（《エクストリーム》《ファッション》。FAQ:3829 スランプなど。R4b-3b-2）
+    else if (bodyOf(l).origin === 'event' && l.targets.some((x) => derived(ctx, state).lostEv.has(x))) remove.push(l.id)
   }
   // ── 控え: bound（装備対象が1枚に決まるアイテム）
   const bound: Record<string, string | null> = {}

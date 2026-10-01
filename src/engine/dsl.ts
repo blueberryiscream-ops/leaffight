@@ -121,6 +121,7 @@ export type Cond =
   | { pureAttrs: CardRef; side: 'atk' | 'def' | 'both' } // 用語【属性のみで構成された～】oldrule.txt:1250-1252
   | { exists: Selector }
   // ── R2a で足した（HANDOFF-R2a「決めたこと」）
+  | { equipsNamed: [CardRef, string] }          // そのキャラが、名前が prefix で始まるアイテムを装備している（《ファッション》の「衣装」FAQ:3819・3822）
   | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
   | { targets: CardRef }                       // 進行中の宣言（イベントの役 declaredAction）がこのカードを対象にしている（《すっとぼけ》）
   // ── R2b で足した
@@ -356,6 +357,13 @@ export type Continuous =
   | { ce: 'stayRested'; who: CardRef | Selector; always?: boolean }
   /** 【特殊能力を失う】（oldrule.txt:1176-1177）。そのキャラの特殊能力が存在しないものとして扱う（《能力禁止》FAQ:593・597） */
   | { ce: 'loseAbilities'; who: CardRef | Selector }
+  /** 「バトルに参加しているキャラに対して効果を発揮している、特殊能力、イベントカードは効果を失う。また使用することもできない」
+   *  （R4b-3b-2・統括18。《エクストリーム》《ファッション》《能力禁止》FAQ:593・597・600・603・606・1013・1556・3070・3224・3732・3735・3738・3826）。
+   *  who＝参加キャラ（when が真のあいだ）。from＝失わせる側。効き方は layers.ts:
+   *  (1) who 自身の常時・誘発の特殊能力は働かない (2) 参加していないキャラの常時の特殊能力が who に及ぼす効果も働かない（FAQ:597後半）
+   *  (3) 宣言して使うものは、効果が who に及ぶなら宣言できない（及ばなければ使える FAQ:3735・3070・1013）
+   *  (4) 効果で足した層（特殊能力・イベント）は who から外れ、バトル後も戻らない（FAQ:606・3732） */
+  | { ce: 'shieldParticipants'; who: Selector; from: ('特殊能力' | 'イベント')[]; when?: Cond }
   /** 気力の上限を変える（15-4）。set＝その値にする・delta＝増減。層の順で重ねる（《ベース・ライフ》FAQ:4206・4209）。残り気力は変えない（FAQ:240・4212） */
   | { ce: 'maxKiryoku'; who: CardRef | Selector; set?: number; delta?: number }
   /** この効果が失われたとき（発生源がフィールドを離れた・装備先が変わった）に処理する。装備対象を満たせずに失ったときは処理しない（《電波での復活》FAQ:550・559） */
