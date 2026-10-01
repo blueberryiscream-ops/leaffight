@@ -31,6 +31,17 @@ function readAutoPass(): AutoPass {
   }
 }
 
+/** ⑦ offer の2ボタンの文字。選択肢の label が問いの文そのもの（借金取り）なら「払う／払わない」、
+ *  それ以外（payByPlayer の発生の問い「コストを発生させる」）は label と、その打ち消し */
+function offerYes(ch: { prompt: string; options: { label: string }[] }): string {
+  const l = ch.options[0]?.label
+  return !l || l === ch.prompt ? '払う' : l
+}
+function offerNo(ch: { prompt: string; options: { label: string }[] }): string {
+  const y = offerYes(ch)
+  return y === '払う' ? '払わない' : y.endsWith('させる') ? `${y.slice(0, -3)}させない` : 'しない'
+}
+
 /** 段の1行（iid は公開か自分のカードのときだけ名前、他は「＊」） */
 export function stepLine(board: BoardState, viewer: Seat, nameOf: (cardId: string) => string, s: PublicStep): string {
   const names = s.iids.map((iid) => {
@@ -233,10 +244,10 @@ export function EngineBar({
               <>
                 <span className="font-bold">{solo ? `${ch.by}: ` : ''}{ch.prompt}</span>
                 <button type="button" className={btn} onClick={() => engineRequest({ kind: 'choose', by: ch.by, id: ch.id, pick: ['pay'] })}>
-                  払う
+                  {offerYes(ch)}
                 </button>
                 <button type="button" className={btn} onClick={() => engineRequest({ kind: 'choose', by: ch.by, id: ch.id, pick: [] })}>
-                  払わない
+                  {offerNo(ch)}
                 </button>
               </>
             ) : (

@@ -545,7 +545,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       const cardDef = b.battleCard ? ctx.defs[state.cards[b.battleCard]?.cardId ?? ''] : undefined
       const usesPaid = (e?: BattleExpr) => !!e && 'paid' in e
       if (cardDef?.battle && (usesPaid(cardDef.battle.atk) || usesPaid(cardDef.battle.def)) && !b.negotiated) {
-        return [{ type: 'procBattle', frameId: top.id, negotiated: true }, forceOp(state, negotiateChain('challenger', 60))]
+        return [{ type: 'procBattle', frameId: top.id, negotiated: true }, forceOp(state, negotiateChain('challenger', 60), {}, '交渉（[23]の交互の支払い）')]
       }
       return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings), dmgCap: cardDef?.battle?.dmgCap }]
     }
@@ -1517,10 +1517,10 @@ function negotiateChain(first: 'challenger' | 'challenged', depth: number): Op {
 }
 
 /** Op を1つ、どの宣言にも属さない効果として積む（AP が起こしたものとして扱う） */
-export function forceOp(state: BoardState, op: Op, bind: Record<string, string[]> = {}): BoardAction {
+export function forceOp(state: BoardState, op: Op, bind: Record<string, string[]> = {}, label = '状況を作る'): BoardAction {
   const you = activeSeat(state)
   const eng: ItemEng = { tasks: [{ op }], env: { self: null, you, slots: bind, trigger: null, declId: null, declared: {} }, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
-  return { type: 'procStart', item: { key: 'force', label: '状況を作る', by: you, sourceIid: null, eng: eng as unknown as Record<string, unknown> } }
+  return { type: 'procStart', item: { key: 'force', label, by: you, sourceIid: null, eng: eng as unknown as Record<string, unknown> } }
 }
 
 /** 選択肢の答えを作る小道具（画面・テスト用）: 答えの中身が選択肢にあるか */
