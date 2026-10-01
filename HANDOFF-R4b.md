@@ -666,3 +666,50 @@ tested 67→68・manual 46→47（エクストリームは 1556 が manual、能
 - 1556（二重人格）manual は二重人格が未記述のため＝正当
 - verify 緑・R4b の gate 14件 ✅・**tested 68**／draft 6／manual 47。rules `5c19e07`
 - ⏭ 残り: ミスコン／ミスターコンの効果喪失の部分と i_イベント禁止 を shieldParticipants に差し替え（R4b-3c-3 として小さく渡す）
+
+## R4b-3c-1
+
+**完了**: 漫画・鶴来屋温泉三本勝負を記述、野球拳の icons を直した。
+- tested: 前 68／draft 6／manual 47 → 後 70／draft 5／manual 48（新規2枚: 鶴来屋＝tested／漫画＝manual〈faq-2416 が九品仏大志「おたく道指南」未記述のため〉。もう1枚 draft→tested が出た＝`faq/_tested.json` の差分で確認可）。`npm run verify` 緑。test:faq: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30／R4b の対象 16件 ✅16（14→16。_r4b-scope.json に 3985・3967 を足した）
+- コミット: `_local/rules/` = 78de48c／親 = 7ab1106（push していない。この節を足したコミットは親の先頭）
+- ツール呼び出し: 約 30 回（上限 60）
+
+### 1. 足した T ケース
+| 場所 | 期待（出所） | 結果 |
+|---|---|---|
+| faq-3985（faq/R4b-3c-1.ts。元 tools/authored/R4b-3c-1.mjs） | 漫画: エリア(賢4感2)が挑みセリオ(根2賢3感3)。x→y は 6−2=4→半分で 2（5→3）、y→x は 6−1=5→半分で 3＝切り上げ（5→2）。差4→2・差5→3（答え「攻・防を比較して計算をして、その結果を半分に」＋本文の端数切り上げ） | ✅ |
+| faq-3967（既存・期待は書き換えていない） | 鶴来屋の3組の合計が1回のダメージ・身代わり1枚 | 保留 → ✅ |
+| scripts/test-engine-host.ts「鶴来屋温泉三本勝負」5項目（本文から。FAQ に該当問答が無い） | 種目が決まったら参加キャラの能力値修正（効果・怪しい薬）・攻防修正が失われる／後から足した修正も失われる／3組それぞれ0以下は0にして合計（TB 2・TA 2）／バトル後に効果の修正は戻らず怪しい薬は導き直される | ✅ |
+- **直す前 ❌**: 漫画の `dmgHalf` をコメントアウトして test:faq → `❌ faq-3985: 気力 y = 1（期待 3） / 気力 x = 0（期待 2）`。鶴来屋の `mods:true` を false にして test-engine-host → `❌ 鶴来屋: 種目が決まったら、参加キャラの能力値修正（効果・アイテムとも）・攻防修正は失われる（本文）…` ほか4項目が ❌（3967 は元が保留＝カードの記述が無く manual 扱いだったので、「❌→✅」ではなく「保留→✅」）
+- 盤面: 3985 は本来の手順（[15] から choose で種目を選び、参加キャラは ready:false＝消耗済み）。鶴来屋の本文テストは startBattleAt(at:19)＋実カード（怪しい薬を attachedTo で装備・効果の修正は procLayers の層）。期待値は FAQ・本文から書いた（実装の出力は写していない。ダメージは各組を手で計算）。
+
+### 2. K9・型の変更
+- `src/engine/dsl.ts`: `battle.dmgHalf?: 'ceil'`・`battle.rounds?: {atk,def}[]`・`shieldParticipants.mods?: boolean`。
+- `src/core/proc.ts`: ProcBattle に `dmgHalf`、values に `rounds?`、[24] で rounds があれば組ごとに `max(0, atk_i−def_i)` の合計・dmgHalf があれば pendingEdits の前に `ceil(value/2)`（0以下はそのまま）、procBattle action に `dmgHalf`。
+- `src/engine/drive.ts`: battleValues が rounds を評価（攻防修正は各組に足さない）・battleValues ステップが dmgHalf を渡す。
+- `src/engine/layers.ts`: Derived に `modLost`。currentStats は modLost の iid の能力値修正（一度きりの層・常時の statMod）を飛ばす。battleMod は 0。syncActions は modLost の iid を対象とする `body.mod` の層を発生源を問わず外す（戻さない）。
+- 既存の動きが変わっていない根拠: rounds/dmgHalf/mods は未指定なら通らない分岐。R2a/R2b/R3/R4a と R4b の既存ケースが全部 ✅。
+
+### 3. BattleExpr
+足していない（5−賢＝既存の sub）。
+
+### 4. 画面
+変更なし・煙試験なし。values の型に rounds? を足したので host.ts（UI）の型は互換（tsc 緑）。UI の攻防の表示は rounds を見ない（合計の atk/def のまま）。
+
+### 5. カードごと
+- **漫画**: atk sum(賢,感)・def 根・icons 賢感/根・dmgHalf 'ceil'。faqReview 5件＝case 1（3985）／manual 1（2416）／na 3（658・2063・4042＝プール外の分厚い辞典・ヌワンギ・インファイト）。
+- **鶴来屋温泉三本勝負**: rounds 3組・icons 根早賢/根感賢・static shieldParticipants(mods)・conditional 選択時ゴミ箱送り。faqReview 3件＝case 1（3967）／ok 1（3970）／na 1（673 分厚い辞典プール外）。
+- **野球拳**: icons を atk ['賢']・def ['賢'] に・コメントの FAQ:28-29 の説明を直した。既存ケースの期待は触っていない。
+
+### 6. tested・件数
+上の冒頭のとおり。`faq/_tested.json` を再生成して rules の同じコミットに入れた。
+
+### 7. 自己点検（盤面）
+3985: 本来の手順。期待値は答えから手計算。鶴来屋のテストは本文から（FAQ ケースにできない理由: 該当する問答が無い。faq 番号に無理に紐づけていない）。
+
+### 8. 決めたこと・迷ったこと
+- 鶴来屋の「失われる」: 本文に禁止が無いので足すことはできるが失われる、と読んだ（指示どおり）。**常時の攻防修正（static の statMod kind 攻防修正）は元々 battleMod が読まない**（層の mod のみ）ため、modLost で止める対象は一度きりの層＋常時の能力値修正のみ。常時の攻防修正を持つカードがあれば別途確認が要る。
+- manualMods（利用者が右クリックで足す手直し）は失わせていない（人の手直しは最後に重ねる既存方針）。
+- 複数参加と重なる鶴来屋は rounds が組ごとに働くので特に manual にはしていない（プールでは種目が鬼ごっこ系と重ならない）。
+- 穴の候補: なし。
+- 統括への確認: 漫画 2416 の manual は九品仏大志が記述されれば case にできる（バトルチェンジで漫画から変わると「おたく道指南」の修正が失われる）。
