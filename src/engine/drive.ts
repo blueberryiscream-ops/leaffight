@@ -351,7 +351,10 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     return out
   }
   // 能力値を1つ選ぶ（「このキャラの能力値１つを＋２」）。rule any だけ（maxBase・minBase は R4）
-  if ('stat' in p && p.rule === 'any') return ['力', '早', '賢', '根', '感'].map((a) => ({ key: a, label: a }))
+  if ('stat' in p && p.rule === 'any') {
+    const banned = p.excludeSlot ? env.slots[p.excludeSlot]?.[0] : undefined
+    return ['力', '早', '賢', '根', '感'].filter((a) => a !== banned).map((a) => ({ key: a, label: a }))
+  }
   // プレイヤーを選ぶ（D20・借金取り）。候補は chooser の相手だけ（NH-20：自分は選べない）
   if ('player' in p) {
     const seat = other(resolvePlayer(state, env, ch.chooser))
@@ -565,6 +568,10 @@ export function evalBattleExpr(ctx: EngineCtx, state: BoardState, iid: string, s
   if ('chosenStat' in expr) {
     const chosen = b.battleChoices[seat]
     return chosen ? currentStat(ctx, state, iid, chosen) + expr.plus : null
+  }
+  if ('pickedStat' in expr) {
+    const chosen = b.statPick[expr.pickedStat]
+    return chosen ? currentStat(ctx, state, iid, chosen) : null
   }
   if ('sum' in expr) {
     let total = 0

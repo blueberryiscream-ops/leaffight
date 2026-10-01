@@ -153,7 +153,7 @@ export type Cond =
 export type Pick =
   | { cards: Selector }
   | { ability: Selector; excludeNames?: string[] }    // キャラの特殊能力を1つ選ぶ（模写）
-  | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase' }
+  | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase'; excludeSlot?: string }  // excludeSlot＝その枠で選んだ能力値は選べない（《選り取りバトル》「[攻]／[防]は同じ能力値を使ってはならない」）
   | { option: string[] }
   | { number: { min: number } }  // 数を選ぶ（可変の使用代償・D16「世話焼き」。答えは数の文字列。1以上・上限は無いが候補は実装で有限に区切る）
   | { player: true }             // プレイヤーを選ぶ（候補は chooser の相手だけ。D20「借金取り」・NH-20。答えは席の文字）
@@ -440,6 +440,8 @@ export type BattleExpr =
   | { sum: BattleExpr[] }
   | { sub: [BattleExpr, BattleExpr] }
   | { statPick: 'max' | 'min' }
+  /** 《選り取りバトル》（FAQ:3956）: 種目を選んだ時点でアクティブプレイヤーが決めた能力値（setBattleChoice の key 'atk'／'def'）。両陣営とも同じ能力値を使う。未選択なら null（人が入れる） */
+  | { pickedStat: 'atk' | 'def' }
   | { kiryoku: true }
   | { count: Selector }
   | { itemCost: true }

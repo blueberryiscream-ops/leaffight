@@ -160,6 +160,8 @@ export interface BattleState {
   /** [17]〜 隠し芸などの「各陣営が能力値を1つ選ぶ」の答え（K13・BattleExpr の chosenStat）。席ごとに選んだ能力値の名前（力/早/賢/根/感）。
    *  core はカードの知識を持たないので、値の意味（能力値の名前）は文字列のまま持つ（engine が dsl.ts の Attr として解釈する） */
   battleChoices: Record<Seat, string | null>
+  /** 《選り取りバトル》: [攻]／[防]に使う能力値（AP が決める。key 'atk'／'def' の setBattleChoice）。両陣営共通 */
+  statPick: { atk: string | null; def: string | null }
   /** 《先手必勝》など: 先にダメージを与える側（key＝効果の宣言） */
   firstStrike: { seat: Seat; key: string }[]
   firstChosen: Seat | null
@@ -667,6 +669,7 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
     damage: null,
     pendingEdits: [],
     battleChoices: { A: null, B: null },
+    statPick: { atk: null, def: null },
     firstStrike: [],
     firstChosen: null,
     dmgPhase: 0,
@@ -2230,7 +2233,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       if (action.endTrash) b = { ...b, endTrash: [...b.endTrash, action.endTrash] }
       if (action.battleChoice) {
-        b = { ...b, battleChoices: { ...b.battleChoices, [action.battleChoice.seat]: action.battleChoice.value } }
+        b = action.battleChoice.key === 'atk' || action.battleChoice.key === 'def'
+          ? { ...b, statPick: { ...b.statPick, [action.battleChoice.key]: action.battleChoice.value } }
+          : { ...b, battleChoices: { ...b.battleChoices, [action.battleChoice.seat]: action.battleChoice.value } }
         trace.push({ kind: 'name', text: `選んだ能力値:${action.battleChoice.seat}:${action.battleChoice.value}` })
       }
       if (action.negotiated) b = { ...b, negotiated: true }
