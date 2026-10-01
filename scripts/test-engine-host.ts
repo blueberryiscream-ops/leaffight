@@ -15,12 +15,14 @@ import { applyAction } from '../src/core/actions'
 import type { ProcDecl } from '../src/core/proc'
 import { currentStat, declare, drive } from '../src/engine/drive'
 import { applyCostMod, continuousSeed, staticSourceActive, violations } from '../src/engine/layers'
-import { select } from '../src/engine/eval'
+import { battleModOf, select } from '../src/engine/eval'
 import { setEnforce } from '../src/engine/enforce'
 import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 import { def as kusuguriDef } from '../_local/rules/cards/b_くすぐりマシ-ン'
 import { def as misterDef } from '../_local/rules/cards/b_ミスタ-コンテスト'
+import { def as tsuruDef } from '../_local/rules/cards/b_鶴来屋温泉三本勝負'
+import { def as kusuriDef } from '../_local/rules/cards/i_怪しい薬'
 
 let failures = 0
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -860,6 +862,49 @@ function battleStart(battleCard: string): History {
   // MA: 攻防=全能力合計値=5（力1+早1+賢1+根1+感1）／MB: 攻防=全能力合計値=4（力0+早1+賢1+根1+感1）。
   // 結果ダメージ（20-10）: MB←MAの攻5-MBの防4=1（気力6→5）／MA←MBの攻4-MAの防5=負→0（気力6のまま）
   eq([ms.cards.MA.kiryoku, ms.cards.MB.kiryoku], [6, 5], 'ミスター・コンテスト: 攻防=全能力合計値（本文どおり。FAQ無し）。MAの攻5-MBの防4=1ダメージ・MBの攻4-MAの防5は負でダメージ無し')
+}
+
+// 鶴来屋温泉三本勝負（b_鶴来屋温泉三本勝負・R4b-3c-1）: 本文「上から順に3回計算をし、その合計をバトルの結果とする。バトル参加キャラに対する能力値修正、攻防修正は失われる」
+// （本文から。FAQ に能力値修正の喪失そのものを問う問答は無いので FAQ 由来ではない。実カードの記述 b_鶴来屋温泉三本勝負・i_怪しい薬 を実際にインポートし、drive() を通す。
+//  線引きは《能力禁止》FAQ:606 と同じ＝一度きりの効果の修正は外れて戻らない／常時（アイテム）はバトルの間だけ止めて後で導き直す）
+{
+  const tInfo = (id: string, stats: Record<string, number>): CardInfo => ({ id, name: id, kind: 'c', kiryoku: 5, stats: stats as CardInfo['stats'], cost: '', attr: '', abilities: [] })
+  const tInfos: CardInfo[] = [
+    tInfo('TA', { 力: 3, 早: 2, 賢: 3, 根: 2, 感: 3 }),
+    tInfo('TB', { 力: 1, 早: 1, 賢: 1, 根: 1, 感: 1 }),
+    { id: 'b_鶴来屋温泉三本勝負', name: '鶴来屋温泉三本勝負', kind: 'b', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] },
+    { id: 'i_怪しい薬', name: '怪しい薬', kind: 'i', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] },
+  ]
+  const tCtx = { cards: Object.fromEntries(tInfos.map((c) => [c.id, c])), defs: { 'b_鶴来屋温泉三本勝負': tsuruDef, 'i_怪しい薬': kusuriDef } }
+  const tSeed = (stat: string, delta: number, kind: '能力値修正' | '攻防修正') => ({ source: null, ability: null, by: 'A' as const, label: `${stat}${delta}`, kind, until: 'turn' as const, targets: ['TA'], host: null, body: { mod: { stat, delta } } })
+  let t: BoardState = { ...EMPTY_BOARD, cards: { TA: card('TA', 'A', 'char', { kiryoku: 5 }), TB: card('TB', 'B', 'char', { kiryoku: 5 }), 'b_鶴来屋温泉三本勝負': card('b_鶴来屋温泉三本勝負', 'A', 'battle'), 'i_怪しい薬': card('i_怪しい薬', 'A', 'char', { attachedTo: 'TA' }) }, turn: { active: 'A', phase: 'メイン' } }
+  t = applyAction(t, { type: 'procLayers', add: [tSeed('力', 2, '能力値修正'), tSeed('atk', 3, '攻防修正')] }).state
+  t = drive(t, tCtx).state
+  // 前提（バトルの外）: 力 3＋2（効果）−1（怪しい薬・常時）＝4・攻の攻防修正 +3
+  eq([currentStat(tCtx, t, 'TA', '力'), battleModOf(tCtx, t, 'TA', 'atk')], [4, 3], '鶴来屋 前提: バトルの外では能力値修正・攻防修正が効く（力 3+2−1=4・攻+3）')
+  t = startBattleAt(t, { challenger: 'A', at: 19, participants: { A: ['TA'], B: ['TB'] }, battleCard: 'b_鶴来屋温泉三本勝負' })
+  t = drive(t, tCtx).state
+  eq([currentStat(tCtx, t, 'TA', '力'), battleModOf(tCtx, t, 'TA', 'atk')], [3, 0], '鶴来屋: 種目が決まったら、参加キャラの能力値修正（効果・アイテムとも）・攻防修正は失われる（本文）。力は印刷値の3・攻防修正は0')
+  t = applyAction(t, { type: 'procLayers', add: [tSeed('感', 5, '能力値修正')] }).state
+  t = drive(t, tCtx).state
+  eq(currentStat(tCtx, t, 'TA', '感'), 3, '鶴来屋: このバトルの間に後から足された修正も失われる（足すことはできるが失われる・統括18の読み）。感は印刷値の3')
+  for (let i = 0; i < 40 && !t.result && t.proc.length; i++) {
+    if (t.procMeta.choice) {
+      const ch = t.procMeta.choice
+      const pick = ch.options.some((o) => o.key === 'next') ? ['next'] : [ch.options[0].key]
+      t = drive(applyAction(t, { type: 'procChoose', id: ch.id, pick }).state, tCtx).state
+      continue
+    }
+    const seat = awaitingSeat(t)
+    if (!seat) break
+    t = drive(applyAction(t, { type: 'procPass', by: seat }).state, tCtx).state
+  }
+  // 3組の結果ダメージ（20-10。各組で0以下は0にして合計）。TA（根2早2賢3）と TB（根1早1賢1）:
+  //   TA→TB: (根2−根1)=1 ＋ (早2−感1)=1 ＋ ((5−賢3)−(5−賢1))=2−4→0 ＝ 2（気力5→3）／各組を0以下にしないと 1+1−2=0
+  //   TB→TA: (根1−根2)→0 ＋ (早1−感3)→0 ＋ ((5−賢1)−(5−賢3))=4−2=2 ＝ 2（気力5→3）／各組を0以下にしないと −1−2+2=−1→0
+  eq([t.cards.TB.kiryoku, t.cards.TA.kiryoku], [3, 3], '鶴来屋: 3組それぞれ0以下は0にして合計（20-10・本文「上から順に3回計算をし、その合計」）。TBは2・TAは2のダメージ')
+  // バトル後: 一度きりの効果（力+2・攻+3・感+5）は戻らない／常時の怪しい薬（−1）は導き直される
+  eq([currentStat(tCtx, t, 'TA', '力'), currentStat(tCtx, t, 'TA', '感'), battleModOf(tCtx, t, 'TA', 'atk')], [2, 2, 0], '鶴来屋 バトル後: 効果の修正は戻らず（力+2・感+5・攻+3）、アイテム（怪しい薬 −1）はバトル後に導き直される（FAQ:606 と同じ線）。力 3−1=2・感 3−1=2')
 }
 
 if (failures) {

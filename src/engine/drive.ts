@@ -547,7 +547,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       if (cardDef?.battle && (usesPaid(cardDef.battle.atk) || usesPaid(cardDef.battle.def)) && !b.negotiated) {
         return [{ type: 'procBattle', frameId: top.id, negotiated: true }, forceOp(state, negotiateChain('challenger', 60), {}, '交渉（[23]の交互の支払い）')]
       }
-      return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings), dmgCap: cardDef?.battle?.dmgCap }]
+      return [{ type: 'procBattle', frameId: top.id, values: battleValues(ctx, state, top, warnings), dmgCap: cardDef?.battle?.dmgCap, dmgHalf: cardDef?.battle?.dmgHalf }]
     }
     case 'place':
       return [{ type: 'procPlace', frameId: top.id, kiryoku: placeKiryoku(ctx, state, top) }]
@@ -607,9 +607,9 @@ export function evalBattleExpr(ctx: EngineCtx, state: BoardState, iid: string, s
  * その席は人が入れる）。K13: カードの記述（defs[].battle）があれば BattleExpr として評価。無ければ基本バトルカード
  * （属性のみ・テキストなし）を {attr} として評価する
  */
-export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, Record<string, { atk: number; def: number }> | null> {
+export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings: string[]): Record<Seat, Record<string, { atk: number; def: number; rounds?: { atk: number; def: number }[] }> | null> {
   const b = frame.battle!
-  const out: Record<Seat, Record<string, { atk: number; def: number }> | null> = { A: null, B: null }
+  const out: Record<Seat, Record<string, { atk: number; def: number; rounds?: { atk: number; def: number }[] }> | null> = { A: null, B: null }
   const info = b.battleCard ? ctx.cards[state.cards[b.battleCard]?.cardId ?? ''] : undefined
   const cardDef = b.battleCard ? ctx.defs[state.cards[b.battleCard]?.cardId ?? ''] : undefined
   const one = (x: string | undefined): Attr | null => (x && x.length === 1 && '力早賢根感'.includes(x) ? (x as Attr) : null)
@@ -638,7 +638,7 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
       out[seat] = {}
       continue
     }
-    const values: Record<string, { atk: number; def: number }> = {}
+    const values: Record<string, { atk: number; def: number; rounds?: { atk: number; def: number }[] }> = {}
     let ok = true
     for (const p of ps) {
       const atk = evalBattleExpr(ctx, state, p, seat, b, atkExpr)
@@ -648,6 +648,17 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
         break
       }
       values[p] = { atk: atk + battleModOf(ctx, state, p, 'atk'), def: def + battleModOf(ctx, state, p, 'def') }
+      // 複数回計算（鶴来屋温泉三本勝負）: 各回の攻防を求める。攻防修正は失われる（shieldParticipants mods）ので各回には足さない
+      if (cardDef?.battle?.rounds) {
+        const rs: { atk: number; def: number }[] = []
+        for (const r of cardDef.battle.rounds) {
+          const ra = evalBattleExpr(ctx, state, p, seat, b, r.atk)
+          const rd = evalBattleExpr(ctx, state, p, seat, b, r.def)
+          if (ra === null || rd === null) { ok = false; break }
+          rs.push({ atk: ra, def: rd })
+        }
+        values[p].rounds = rs
+      }
     }
     if (ok) out[seat] = values
     else warnings.push(`manual: 複数参加のバトルの攻防の値（${seat} 席・K9）を人が入れる`)

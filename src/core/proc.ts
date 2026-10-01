@@ -152,7 +152,7 @@ export interface BattleState {
    * [23] 攻撃能力値・防御能力値（参加キャラ・iid ごと。K9・統括16で複数参加に広げた。その席の値が丸ごと null＝人が入れる。
    * 単数参加なら参加キャラ1体ぶんの1エントリ）
    */
-  values: Record<Seat, Record<string, { atk: number; def: number }> | null> | null
+  values: Record<Seat, Record<string, { atk: number; def: number; rounds?: { atk: number; def: number }[] }> | null> | null
   /** [24] バトルの結果ダメージ（組ごと。null＝計算していない。K9: 挑んだ側1体×挑まれた側N体なら挑んだ側はN件受ける FAQ:3878-3879） */
   damage: BattleDamageEntry[] | null
   /** [24] より前に使われた結果ダメージの増減（計算の後に当てる。同じ席の全件に当てる＝K9 の広報） */
@@ -184,6 +184,8 @@ export interface BattleState {
   negotiated: boolean
   /** 結果ダメージの上限（NH-21・交渉売買）。null＝上限なし。pendingEdits・[24]以降の増減にも当てる（FAQ:3921） */
   dmgCap: number | null
+  /** 結果ダメージを半分にする（《漫画》FAQ:3985）。null＝しない */
+  dmgHalf: 'ceil' | null
 }
 
 /** 層を足すときの形（id・seq・battleId は core が決める。battleId は until battle か攻防修正のとき最も近いバトル）。R3 で R2b の ProcMod を置き換えた */
@@ -678,6 +680,7 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
     paid: { A: 0, B: 0 },
     negotiated: false,
     dmgCap: null,
+    dmgHalf: null,
     ...extra,
   }
 }
@@ -1153,11 +1156,15 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
         for (const bb of aliveB) {
           const vb = b.values.B[bb]
           if (!vb) continue
-          entries.push({ seat: 'A', recipient: a, dealer: bb, value: vb.atk - va.def })
-          entries.push({ seat: 'B', recipient: bb, dealer: a, value: va.atk - vb.def })
+          // 鶴来屋温泉三本勝負（FAQ:3967）: 上から順の各回で結果ダメージ（0以下は0）を出して合計する。ダメージの処理は1件
+          const pairValue = (atk: { atk: number; rounds?: { atk: number; def: number }[] }, def: { def: number; rounds?: { atk: number; def: number }[] }) =>
+            atk.rounds && def.rounds ? atk.rounds.reduce((sum, r, i) => sum + Math.max(0, r.atk - def.rounds![i].def), 0) : atk.atk - def.def
+          entries.push({ seat: 'A', recipient: a, dealer: bb, value: pairValue(vb, va) })
+          entries.push({ seat: 'B', recipient: bb, dealer: a, value: pairValue(va, vb) })
         }
       }
-      let damage = entries
+      // 漫画（FAQ:3985）: 攻・防を比較して出した結果を半分に（端数切り上げ）。増減（pendingEdits）より前。0以下はそのまま
+      let damage = b.dmgHalf === 'ceil' ? entries.map((e) => (e.value > 0 ? { ...e, value: Math.ceil(e.value / 2) } : e)) : entries
       for (const e of b.pendingEdits) damage = applyBattleEdit(damage, e)
       // NH-21（交渉売買）: 結果ダメージの上限。0以下（ダメージ不発生）はそのまま・上限を超える分だけ切り下げる
       if (b.dmgCap !== null) damage = damage.map((e) => (e.value > b.dmgCap! ? { ...e, value: b.dmgCap! } : e))
@@ -1939,7 +1946,7 @@ export type ProcAction =
   | {
       type: 'procBattle'
       frameId: string
-      values?: Record<Seat, Record<string, { atk: number; def: number }> | null>
+      values?: Record<Seat, Record<string, { atk: number; def: number; rounds?: { atk: number; def: number }[] }> | null>
       edit?: BattleEdit
       firstStrike?: { seat: Seat; key: string }
       skipActions?: boolean
@@ -1954,6 +1961,8 @@ export type ProcAction =
       paidAdd?: { seat: Seat; amount: number }
       /** 交渉売買 R4b-3a-2（NH-21）: 結果ダメージの上限。カードの記述（battle.dmgCap）を engine が渡す */
       dmgCap?: number
+      /** 漫画 R4b-3c-1: 結果ダメージを半分にする（battle.dmgHalf） */
+      dmgHalf?: 'ceil'
     }
   /** K9: 参加キャラを差し替える（鬼ごっこ系「待機状態の味方キャラ全てに変更」）。previous: 'readyIfWasReady' は未実装（人が処理・報告） */
   | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
@@ -2230,6 +2239,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
         trace.push({ kind: 'name', text: `払った合計:${action.paidAdd.seat}:${b.paid[action.paidAdd.seat]}` })
       }
       if (action.dmgCap !== undefined) b = { ...b, dmgCap: action.dmgCap }
+      if (action.dmgHalf !== undefined) b = { ...b, dmgHalf: action.dmgHalf }
       if (action.abort && !b.aborted) {
         b = { ...b, aborted: action.abort }
         trace.push({ kind: 'abort', text: `バトル中断: ${action.abort}`, id: f.decl?.id })

@@ -363,7 +363,10 @@ export type Continuous =
    *  (1) who 自身の常時・誘発の特殊能力は働かない (2) 参加していないキャラの常時の特殊能力が who に及ぼす効果も働かない（FAQ:597後半）
    *  (3) 宣言して使うものは、効果が who に及ぶなら宣言できない（及ばなければ使える FAQ:3735・3070・1013）
    *  (4) 効果で足した層（特殊能力・イベント）は who から外れ、バトル後も戻らない（FAQ:606・3732） */
-  | { ce: 'shieldParticipants'; who: Selector; from: ('特殊能力' | 'イベント')[]; when?: Cond }
+  | { ce: 'shieldParticipants'; who: Selector; from: ('特殊能力' | 'イベント')[]; when?: Cond
+      /** true＝who の能力値修正・攻防修正を発生源を問わず（特殊能力・イベント・アイテム・フィールド）失わせる（《鶴来屋温泉三本勝負》）。
+       *  一度きりの効果の層は外して戻さない／常時のものはその間だけ止める（バトル後に導き直す）／足された修正も失われる */
+      mods?: boolean }
   /** 気力の上限を変える（15-4）。set＝その値にする・delta＝増減。層の順で重ねる（《ベース・ライフ》FAQ:4206・4209）。残り気力は変えない（FAQ:240・4212） */
   | { ce: 'maxKiryoku'; who: CardRef | Selector; set?: number; delta?: number }
   /** この効果が失われたとき（発生源がフィールドを離れた・装備先が変わった）に処理する。装備対象を満たせずに失ったときは処理しない（《電波での復活》FAQ:550・559） */
@@ -473,6 +476,10 @@ export interface CardDef {
     icons: { atk: Attr[]; def: Attr[] }
     /** 結果ダメージの上限（NH-21・交渉売買「５点以上にはならない」＝4）。pendingEdits（ダメージ返し等）の後にも当てる FAQ:3921 */
     dmgCap?: number
+    /** 結果ダメージを半分にする（《漫画》FAQ:3985）。'ceil'＝端数切り上げ。[24] で攻防を比べた直後・pendingEdits より前（0以下はそのまま） */
+    dmgHalf?: 'ceil'
+    /** 上から順に複数回計算し、その合計を結果とする（《鶴来屋温泉三本勝負》）。各回は 20-10 の結果ダメージ（0以下は0）を出して合計する。atk/def は表示用。FAQ:3967・3970 */
+    rounds?: { atk: BattleExpr; def: BattleExpr }[]
   }
   abilities: Ability[]
   /**

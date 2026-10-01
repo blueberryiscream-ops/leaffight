@@ -68,6 +68,8 @@ interface Derived {
   lost: Set<string>
   /** イベントが効果を失う参加キャラ（shieldParticipants from イベント） */
   lostEv: Set<string>
+  /** 能力値修正・攻防修正を発生源を問わず失う参加キャラ（shieldParticipants mods。鶴来屋温泉三本勝負） */
+  modLost: Set<string>
   /** 参加キャラ → 失わせている shieldParticipants の効果（違反の根拠の表示用） */
   srcA: Map<string, Eff>
   srcE: Map<string, Eff>
@@ -96,10 +98,11 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
     all.push({ layer: l, effect: b.effect, env: layerEnv(state, l) })
   }
   // 特殊能力を失う（《能力禁止》）: 失っているキャラの常時効果の層は効かない（常時効果の発生源が「特殊能力」＝キャラのものだけ）
-  const d0: Derived = { ctx, effs: all, lost: new Set(), lostEv: new Set(), srcA: new Map(), srcE: new Map() }
+  const d0: Derived = { ctx, effs: all, lost: new Set(), lostEv: new Set(), modLost: new Set(), srcA: new Map(), srcE: new Map() }
   cache.set(state, d0)
   const lost = new Set<string>()
   const lostEv = new Set<string>()
+  const modLost = new Set<string>()
   const srcA = new Map<string, Eff>()
   const srcE = new Map<string, Eff>()
   for (const e of all) {
@@ -110,11 +113,12 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
       for (const x of targetsOf(ctx, state, e)) {
         if (f.from.includes('特殊能力')) { lost.add(x); srcA.set(x, e) }
         if (f.from.includes('イベント')) { lostEv.add(x); srcE.set(x, e) }
+        if (f.mods) modLost.add(x)
       }
     }
   }
   const effs = all.filter((e) => !(e.layer.ability !== null && e.layer.source && lost.has(e.layer.source) && isCharOnField(state.cards[e.layer.source])))
-  const d: Derived = { ctx, effs, lost, lostEv, srcA, srcE }
+  const d: Derived = { ctx, effs, lost, lostEv, modLost, srcA, srcE }
   cache.set(state, d)
   return d
 }
@@ -168,11 +172,12 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   const items: { seq: number; run: () => void }[] = []
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
-    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v) items.push({ seq: l.seq, run: () => (v[m.stat] += m.delta) })
+    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => (v[m.stat] += m.delta) })
   }
   for (const e of d.effs) {
     const f = e.effect
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
+      if (d.modLost.has(iid)) continue
       items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
     } else if (f.ce === 'statSwap') {
       items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v) })
@@ -266,7 +271,7 @@ function manualMods(state: BoardState, iid: string) {
 
 /** 攻防修正の合計（atk・def）: 効果で足した攻防修正の層＋手直しの層の攻防修正 */
 export function battleMod(ctx: EngineCtx, state: BoardState, iid: string, side: 'atk' | 'def'): number {
-  void ctx
+  if (derived(ctx, state).modLost.has(iid)) return 0
   let n = 0
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
@@ -636,6 +641,8 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     else if (l.until === 'whileSource' && l.source && !staticSourceActive(state, l.source)) remove.push(l.id)
     // 《能力禁止》: 参加キャラに対して効果を発揮している特殊能力の効果は失われ、バトルの後も戻らない（FAQ:597・606）
     else if (bodyOf(l).origin === 'ability' && l.targets.some((x) => participants.has(x))) remove.push(l.id)
+    // 能力値修正・攻防修正を失う参加キャラ（《鶴来屋温泉三本勝負》）: 発生源を問わず、効果で足した修正の層を外す（戻さない）
+    else if (bodyOf(l).mod && l.targets.some((x) => derived(ctx, state).modLost.has(x))) remove.push(l.id)
     // イベントが足した層も（《エクストリーム》《ファッション》。FAQ:3829 スランプなど。R4b-3b-2）
     else if (bodyOf(l).origin === 'event' && l.targets.some((x) => derived(ctx, state).lostEv.has(x))) remove.push(l.id)
   }
