@@ -265,6 +265,11 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.charType[0])
     return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.charTypes ?? []).includes(c.charType[1]))
   }
+  if ('hasAbility' in c) {
+    // 見出しの完全一致（FAQ:3762「アイドル声優」は「アイドル」に該当しない）。印刷された能力で見る（特殊能力を失う層は見ない）
+    const xs = resolveRef(state, env, c.hasAbility[0])
+    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.abilities ?? []).some((h) => h.header === c.hasAbility[1]))
+  }
   if ('downed' in c) {
     // ダウン処理が（cancelDown で）打ち消されずに終わったかの近似＝今ゴミ箱にあるか（D22 の読み合わせと同じ理由）
     const xs = resolveRef(state, env, c.downed)

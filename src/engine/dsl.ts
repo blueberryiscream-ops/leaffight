@@ -133,6 +133,7 @@ export type Cond =
   // ── R3 で足した
   | { hasAttr: [CardRef, Attr] }               // キャラの属性にその属性が含まれる（「[力]属性のキャラ」。複数の属性なら含めば当たる FAQ:1709）
   | { charType: [CardRef, string] }            // キャラタイプを持つか（「[ロボ]の」等。D24・R4a-2）
+  | { hasAbility: [CardRef, string] }          // 印刷された特殊能力の見出しがちょうどその名前のものを持つか（「「アイドル」を持っているキャラ」。FAQ:3762 アイドル声優は該当しない。R4b-3b-1）
   | { isKind: [CardRef, CardKind] }            // カードの種別（c・t・b・i・e・f）が一致するか（《パーティ》の分岐・D19・R4a-2）
   | { downed: CardRef }                        // そのカードが今ゴミ箱にある＝ダウン処理が打ち消されずに終わった近似（D22・D16・R4a-2）
   | { sameName: [CardRef, CardRef] }           // 2枚の名前が一致する（動的な相手。D18「同名キャラがいる」・R4a-2）

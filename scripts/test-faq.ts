@@ -230,7 +230,9 @@ const scopeB = readScope('_r2b-scope.json')
 const scopeC = readScope('_r3-scope.json')
 // R4a（_r4a-scope.json）: PHASE-R4a-2 §3-11 で正式 gate に組み込んだ（対象30件が✅・❌0になったため）
 const scopeD = readScope('_r4a-scope.json')
-const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC, ...scopeD])
+// R4b（_r4b-scope.json）: R4b-3b-1 から束ごとに足す（PHASE-R4b §2(E)）。対象の ❌ は終了コード1
+const scopeE = readScope('_r4b-scope.json')
+const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC, ...scopeD, ...scopeE])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
   const results: (CaseResult & { inScope: boolean })[] = []
@@ -246,7 +248,7 @@ if (Object.keys(cardInfos).length) {
   const count = (xs: typeof results) => ({ total: xs.length, ok: xs.filter((r) => r.verdict === '✅').length, hold: xs.filter((r) => r.verdict === '保留').length, ng: xs.filter((r) => r.verdict === '❌').length })
   // R2a・R2b の対象ごとに結果のファイルを書く（inScope はそのフェイズの対象か）
   let ng = 0
-  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB], ['R3', scopeC], ['R4a', scopeD]] as const) {
+  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB], ['R3', scopeC], ['R4a', scopeD], ['R4b', scopeE]] as const) {
     const rs = results.map((r) => ({ ...r, inScope: sc.has(r.id) }))
     const inS = rs.filter((r) => r.inScope)
     const missing = [...sc].filter((id) => !rs.some((r) => r.id === id))

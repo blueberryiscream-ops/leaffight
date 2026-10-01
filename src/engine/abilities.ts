@@ -52,6 +52,8 @@ export function sourceActive(state: BoardState, iid: string): boolean {
   const c = state.cards[iid]
   if (!c) return false
   if (c.zone === 'field' || c.zone === 'battle') return true
+  // 20-9・12-2: そのバトルの種目として使われているバトルカードは、使用済みでゴミ箱に送られていても発生源（《ナイトライター》の [28]。R4b-3b-1）
+  if (c.zone === 'trash' && state.proc.some((f) => f.kind === 'battle' && f.status !== 'done' && f.battle?.battleCard === iid)) return true
   // 付いているアイテム: キャラに・バトルカードに（《能力禁止》R3）
   if (c.attachedTo) {
     const h = state.cards[c.attachedTo]
