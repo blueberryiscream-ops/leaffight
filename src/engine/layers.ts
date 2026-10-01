@@ -657,6 +657,13 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const unusable = new Set<string>()
   const d = derived(ctx, state)
   for (const e of d.effs) if (e.effect.ce === 'battleCardUnusable') for (const x of targetsOf(ctx, state, e)) unusable.add(x)
+  const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
+  for (const c of Object.values(state.cards)) {
+    const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
+    if (bd?.reusable) reuseNow.reusable.push(c.iid)
+    if (bd?.oncePerCharPerTurn) reuseNow.oncePerChar.push(c.iid)
+  }
+  const reuseChanged = reuseNow.reusable.join(',') !== state.layers.reusable.join(',') || reuseNow.oncePerChar.join(',') !== state.layers.oncePerChar.join(',')
   const unusableList = [...unusable].sort()
   const unusableChanged = unusableList.join(',') !== [...state.layers.unusable].sort().join(',')
   // ── 常に消耗状態（stayRested）
@@ -689,7 +696,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   }
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
-  if (add.length || remove.length || update.length || hasBound || unusableChanged || clamp.length || orient.length) {
+  if (add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || clamp.length || orient.length) {
     acts.push({
       type: 'procLayers',
       ...(add.length ? { add } : {}),
@@ -697,6 +704,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(update.length ? { update } : {}),
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
+      ...(reuseChanged ? { reuse: reuseNow } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
     })

@@ -779,3 +779,35 @@ tested 67→68・manual 46→47（エクストリームは 1556 が manual、能
 
 ### 9. 穴の候補
 なし。
+
+
+## R4b-3c-2 続き（百物語）
+
+**完了**: 《百物語》を記述（4枚のうち最後の1枚）。
+- tested: 前 72／draft 5／manual 49 → 後 73／draft 5／manual 49（百物語＝tested）。`npm run verify` 緑。test:faq: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30／R4b の対象 20件 ✅20（19→20。_r4b-scope.json に faq-3974 を足した）
+- コミット: `_local/rules/` と親（ハッシュは最後の返答）。push していない
+- ツール呼び出し: この続きで約 15 回（上限 30）
+
+### 1. 足した T ケース
+| 場所 | 期待（出所） | 結果 |
+|---|---|---|
+| faq-3974（faq/R4b-3c-2.ts） | 百物語を場に置いたまま種目に使わず、ターンを終える（advancePhase ターン終了）→ ゴミ箱（答え「はい。ゴミ箱送りにして下さい」） | ✅ |
+| scripts/test-engine-host.ts「百物語」4項目（本文から。FAQ に該当問答が無いので FAQ ケースにしていない。faq-id 以外のキーは gen-cases が受け付けなかった） | ①最初のバトルでは [16] の選択肢に出る／②使用されても used にならず場に残る／③一度挑んだキャラ HA は同ターン [16] の選択肢が空（選べない＝K4）／④別のキャラ HC は同ターンに選べる | ✅ |
+- **直す前 ❌（変異で確認）**: 百物語の `battle.reusable`・`oncePerCharPerTurn` を外し、ターン終了時の conditional を働かなくして実行 → `❌ faq-3974: bc の場所 = A:battle（期待 trash）`／`❌ 百物語: 使用されても使用済み状態にならない（本文）・ゴミ箱にも行かない`／`❌ 百物語: 別のキャラ（HC）は同じターンに挑める`。**③（同じキャラが選べない）は変異で ❌ にできていない**: 変異が reusable と oncePerChar を同時に外したため、used になって HA 自身が最初から選べず ③ は偶然通ったため。③ だけを単独で外した確認はしていない（正直に書く）。
+- 盤面: ③④は force を使わず、バトルを終えたあと HA／HC を ready に戻す所だけ盤面を直接書き換えた（別バトルのために待機に戻す用意。②〜④の主張の期待は本文）。種目は [15] から窓を見送って [16] の choice を見る本来の手順。
+
+### 2. 型・仕組みの変更（案A＋印）
+- `dsl.ts`: `battle.reusable?: true`／`battle.oncePerCharPerTurn?: true`（出典＝百物語の本文）。
+- `core/board.ts`: LayerState に `reusable: string[]`・`oncePerChar: string[]`（エンジンが導く控え。core はカード名を知らない）。ProcMeta に `marks: Record<battleCardIid, 挑んだキャラ iid[]>`。
+- `core/proc.ts`: [18] で reusable のバトルカードは used にしない／oncePerChar のカードは挑んだキャラを marks に積む。[16] の選択肢から「marks に今の挑むキャラが入っているバトルカード」を除く。ターン終了 [2] で marks を空に。procLayers に `reuse`。
+- `engine/layers.ts`: 場のバトルカードの定義から reusable／oncePerChar を導いて procLayers で置く（unusable と同じ流れ）。
+- 既存の動きが変わっていない根拠: reusable／oncePerChar は百物語だけが持つ。R2a〜R4b の既存ケースと test:engine-host の既存項目は全部 ✅。
+
+### 3. カード
+**百物語**: atk 感・def 賢・icons 感／賢・reusable・oncePerCharPerTurn。static＝暗闇バトルペナルティ（蛍狩りと同じ）。conditional＝《ターン終了時》に自分を trash（sourceActive は field/battle で真なので種目に使わなくても働く＝faq-3974 のケースで確認）。faqReview 1件＝case 1（3974）。
+
+### 4. 決めたこと・迷ったこと
+- 「挑んだ」の印は [18]（種目が決まって使用済みにする手順）の時点で、挑んだ側の参加キャラ全員に付ける（複数参加でも全員）。バトルチェンジで種目が変わった場合の印の扱いは未対応（バトルチェンジ未記述）。
+- 印は百物語の iid 単位（同名が2枚あれば別々）。
+- 画面は変えていない（[16] の候補から外れるだけ）。煙試験なし。
+- 穴の候補: なし。

@@ -337,6 +337,8 @@ export interface ProcMeta {
   answers: Record<string, string[]>
   /** 【１ターンにｎ回まで】の使用回数 */
   used: Record<string, number>
+  /** バトルカード iid → このターンにそのバトルカードで挑んだキャラ（oncePerChar。ターン終了で消える） */
+  marks: Record<string, string[]>
   /** ダウン[6] でフィールドから失われたリーダー（[7] で判定する） */
   leaderLost: Seat[]
   /** 立ち消え・中断した宣言の id と理由 */
@@ -1125,14 +1127,18 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 16: {
       // 【利用者の決定】バトル種目は挑んだ側が選ぶ（DESIGN §4.10）。カードの効果で先に決まっていたら選ばない（21）
       if (b.cardDecided) return setFrame(state, advance(frame))
-      const opts = Object.values(state.cards).filter((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid))
+      // 《百物語》: 一度このバトルを挑んだキャラ（このターン）は、このバトルカードを選べない
+      const challenging = b.participants[c]
+      const opts = Object.values(state.cards).filter((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid) && !(state.layers.oncePerChar.includes(x.iid) && (state.procMeta.marks[x.iid] ?? []).some((m) => challenging.includes(m))))
       if (opts.length === 0) return abortBattle(state, frame, 'バトルカードが選択できない（20-4[16]）', trace)
       return coreChoice(state, frame, { by: c, kind: 'select', purpose: 'battleCard', prompt: 'バトル種目（20-4[16]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
     case 18: {
       // [18] 1. バトル種目のバトルカードを使用済み状態にする（2.3. はエンジンの [23]）
       const bc = b.battleCard ? state.cards[b.battleCard] : undefined
-      const s = bc && bc.zone === 'battle' ? { ...state, cards: { ...state.cards, [bc.iid]: { ...bc, used: true } } } : state
+      // 使用されても使用済みにならないバトルカード（reusable）は used にしない。oncePerChar は挑んだキャラを印にする
+      let s = bc && bc.zone === 'battle' && !state.layers.reusable.includes(bc.iid) ? { ...state, cards: { ...state.cards, [bc.iid]: { ...bc, used: true } } } : state
+      if (bc && state.layers.oncePerChar.includes(bc.iid)) s = setMeta(s, { marks: { ...s.procMeta.marks, [bc.iid]: [...(s.procMeta.marks[bc.iid] ?? []), ...b.participants[c]] } })
       if (b.battleCard) trace.push({ kind: 'name', text: `バトル種目:${b.battleCard}` })
       return setFrame(s, advance(frame))
     }
@@ -1302,7 +1308,7 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
   if (frame.step === 2) {
     const list = state.layers.list.filter((m) => m.until !== 'turn' && !(m.kind === '能力値修正' && m.until !== 'whileSource'))
     trace.push({ kind: 'name', text: 'ターン終了の処理（10-8）' })
-    return setFrame(setMeta({ ...state, costs: { A: [], B: [] }, layers: { ...state.layers, list } }, { used: {} }), advance(frame))
+    return setFrame(setMeta({ ...state, costs: { A: [], B: [] }, layers: { ...state.layers, list } }, { used: {}, marks: {} }), advance(frame))
   }
   return setFrame(state, advance(frame))
 }
@@ -1985,6 +1991,7 @@ export type ProcAction =
       update?: { id: string; body: Record<string, unknown> }[]
       bound?: Record<string, string | null>
       unusable?: string[]
+      reuse?: { reusable: string[]; oncePerChar: string[] }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2045,7 +2052,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

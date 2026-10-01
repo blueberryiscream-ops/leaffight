@@ -104,9 +104,13 @@ export interface LayerState {
   bound: Record<string, string>
   /** 使用できないバトルカード（効果による。20-3・20-4[5][16] の「選択可能な」から除く） */
   unusable: string[]
+  /** 使用済みにならないバトルカード（battle.reusable。[18] で used にしない） */
+  reusable: string[]
+  /** 一度挑んだキャラはこのターン中挑めないバトルカード（battle.oncePerCharPerTurn。procMeta.marks に印を控える） */
+  oncePerChar: string[]
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [] }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [] }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
@@ -152,6 +156,7 @@ export const EMPTY_PROC_META: ProcMeta = {
   choice: null,
   answers: {},
   used: {},
+  marks: {},
   leaderLost: [],
   aborted: [],
   battles: [],

@@ -480,6 +480,10 @@ export interface CardDef {
     dmgCap?: number
     /** 結果ダメージを半分にする（《漫画》FAQ:3985）。'ceil'＝端数切り上げ。[24] で攻防を比べた直後・pendingEdits より前（0以下はそのまま） */
     dmgHalf?: 'ceil'
+    /** 使用されても使用済み状態にならない（《百物語》）。core の [18] が used にしない（エンジンが layers.reusable で渡す） */
+    reusable?: true
+    /** 一度このバトルを挑んだキャラは、このターン中このバトルを挑めない（《百物語》）。core が挑んだキャラを印として控え、[16] の候補から外す。ターン終了で消える */
+    oncePerCharPerTurn?: true
     /** 上から順に複数回計算し、その合計を結果とする（《鶴来屋温泉三本勝負》）。各回は 20-10 の結果ダメージ（0以下は0）を出して合計する。atk/def は表示用。FAQ:3967・3970 */
     rounds?: { atk: BattleExpr; def: BattleExpr }[]
   }

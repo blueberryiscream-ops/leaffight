@@ -22,6 +22,7 @@ import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalD
 import { def as kusuguriDef } from '../_local/rules/cards/b_くすぐりマシ-ン'
 import { def as misterDef } from '../_local/rules/cards/b_ミスタ-コンテスト'
 import { def as tsuruDef } from '../_local/rules/cards/b_鶴来屋温泉三本勝負'
+import { def as hyakuDef } from '../_local/rules/cards/b_百物語'
 import { def as kusuriDef } from '../_local/rules/cards/i_怪しい薬'
 
 let failures = 0
@@ -905,6 +906,57 @@ function battleStart(battleCard: string): History {
   eq([t.cards.TB.kiryoku, t.cards.TA.kiryoku], [3, 3], '鶴来屋: 3組それぞれ0以下は0にして合計（20-10・本文「上から順に3回計算をし、その合計」）。TBは2・TAは2のダメージ')
   // バトル後: 一度きりの効果（力+2・攻+3・感+5）は戻らない／常時の怪しい薬（−1）は導き直される
   eq([currentStat(tCtx, t, 'TA', '力'), currentStat(tCtx, t, 'TA', '感'), battleModOf(tCtx, t, 'TA', 'atk')], [2, 2, 0], '鶴来屋 バトル後: 効果の修正は戻らず（力+2・感+5・攻+3）、アイテム（怪しい薬 −1）はバトル後に導き直される（FAQ:606 と同じ線）。力 3−1=2・感 3−1=2')
+}
+
+// 百物語（b_百物語・R4b-3c-2 続き）: 本文「使用されても使用済み状態にならない」「一度このバトルを挑んだキャラは、このターン中、このバトルを挑むことができない」（本文から。FAQ に該当の問答は無い）。
+// 種目は [15] から選ぶ本来の手順（[16] の選択肢を見る）。実カードの記述 b_百物語 を使う
+{
+  const hInfo = (id: string): CardInfo => ({ id, name: id, kind: 'c', kiryoku: 5, stats: { 力: 2, 早: 2, 賢: 2, 根: 2, 感: 2 } as CardInfo['stats'], cost: '', attr: '', abilities: [] })
+  const hInfos: CardInfo[] = [hInfo('HA'), hInfo('HB'), hInfo('HC'), { id: 'b_百物語', name: '百物語', kind: 'b', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] }]
+  const hCtx = { cards: Object.fromEntries(hInfos.map((c) => [c.id, c])), defs: { 'b_百物語': hyakuDef } }
+  let t: BoardState = { ...EMPTY_BOARD, cards: { HA: card('HA', 'A', 'char', { kiryoku: 5 }), HC: card('HC', 'A', 'char', { kiryoku: 5 }), HB: card('HB', 'B', 'char', { kiryoku: 5 }), 'b_百物語': card('b_百物語', 'A', 'battle') } }
+  t = drive(t, hCtx).state
+  const finish = (s: BoardState): BoardState => {
+    for (let i = 0; i < 60 && !s.result && s.proc.length; i++) {
+      if (s.procMeta.choice) {
+        const ch = s.procMeta.choice
+        const pick = ch.options.some((o) => o.key === 'next') ? ['next'] : [ch.options[0].key]
+        s = drive(applyAction(s, { type: 'procChoose', id: ch.id, pick }).state, hCtx).state
+        continue
+      }
+      const seat = awaitingSeat(s)
+      if (!seat) break
+      s = drive(applyAction(s, { type: 'procPass', by: seat }).state, hCtx).state
+    }
+    return s
+  }
+  // [15] までの窓を見送って [16] の選択（バトルカード）まで進める
+  const toCardChoice = (s: BoardState): BoardState => {
+    for (let i = 0; i < 20 && s.proc.length && !s.procMeta.choice; i++) {
+      const seat = awaitingSeat(s)
+      if (!seat) break
+      s = drive(applyAction(s, { type: 'procPass', by: seat }).state, hCtx).state
+    }
+    return s
+  }
+  const cardOptions = (s: BoardState) => (s.procMeta.choice?.purpose === 'battleCard' ? s.procMeta.choice.options.map((o) => o.key) : [])
+  t = startBattleAt(t, { challenger: 'A', at: 15, participants: { A: ['HA'], B: ['HB'] } })
+  t = toCardChoice(drive(t, hCtx).state)
+  eq(cardOptions(t), ['b_百物語'], '百物語: 最初のバトルでは種目に選べる')
+  t = drive(applyAction(t, { type: 'procChoose', id: t.procMeta.choice!.id, pick: ['b_百物語'] }).state, hCtx).state
+  t = finish(t)
+  eq([!t.cards['b_百物語'].used, t.cards['b_百物語'].zone], [true, 'battle'], '百物語: 使用されても使用済み状態にならない（本文）・ゴミ箱にも行かない')
+  // 同じキャラ（HA）がもう一度挑む → 選べない（候補が無い＝バトルは中断）
+  t = { ...t, cards: { ...t.cards, HA: { ...t.cards.HA, orientation: 'ready' } } }
+  t = startBattleAt(t, { challenger: 'A', at: 15, participants: { A: ['HA'], B: ['HB'] } })
+  t = toCardChoice(drive(t, hCtx).state)
+  eq(cardOptions(t), [], '百物語: 一度挑んだキャラ（HA）は、このターン中、百物語を挑めない（種目に選べない）')
+  t = finish(t)
+  // 別のキャラ（HC）は同じターンに挑める
+  t = { ...t, cards: { ...t.cards, HC: { ...t.cards.HC, orientation: 'ready' } } }
+  t = startBattleAt(t, { challenger: 'A', at: 15, participants: { A: ['HC'], B: ['HB'] } })
+  t = toCardChoice(drive(t, hCtx).state)
+  eq(cardOptions(t), ['b_百物語'], '百物語: 別のキャラ（HC）は同じターンに挑める（使用済みにならないので）')
 }
 
 if (failures) {
