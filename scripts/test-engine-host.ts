@@ -21,6 +21,7 @@ import type { CardDef } from '../src/engine/dsl'
 import { applyEngineReq, buildEngineCtx, foldLog, isOwnMainDeclareWindow, legalDeclarations, paymentNeed, shouldAutoPass, type EngineReq } from '../src/ui/engine/host'
 import { def as kusuguriDef } from '../_local/rules/cards/b_くすぐりマシ-ン'
 import { def as misterDef } from '../_local/rules/cards/b_ミスタ-コンテスト'
+import { def as missDef } from '../_local/rules/cards/b_ミスコンテスト'
 import { def as tsuruDef } from '../_local/rules/cards/b_鶴来屋温泉三本勝負'
 import { def as hyakuDef } from '../_local/rules/cards/b_百物語'
 import { def as kusuriDef } from '../_local/rules/cards/i_怪しい薬'
@@ -957,6 +958,24 @@ function battleStart(battleCard: string): History {
   t = startBattleAt(t, { challenger: 'A', at: 15, participants: { A: ['HC'], B: ['HB'] } })
   t = toCardChoice(drive(t, hCtx).state)
   eq(cardOptions(t), ['b_百物語'], '百物語: 別のキャラ（HC）は同じターンに挑める（使用済みにならないので）')
+}
+
+// ミス・コンテスト／ミスター・コンテスト（R4b-3c-3）: 本文「バトルに参加しているキャラに対して効果を発揮している、特殊能力、イベントカードは効果を失う」＋FAQ:3829（スランプなどの能力値修正も失われる）。
+// スランプは未記述で宣言できないため、イベント由来（origin 'event'）の能力値修正の層を直接足して確かめる。種目が決まった時点（[16]）で外れ、バトル後も戻らない。
+{
+  const mInfo = (id: string): CardInfo => ({ id, name: id, kind: 'c', kiryoku: 5, stats: { 力: 3, 早: 2, 賢: 3, 根: 2, 感: 3 } as CardInfo['stats'], cost: '', attr: '', abilities: [] })
+  for (const [bcId, bcDef] of [['b_ミスコンテスト', missDef], ['b_ミスタ-コンテスト', misterDef]] as const) {
+    const mInfos: CardInfo[] = [mInfo('MA'), mInfo('MB'), { id: bcId, name: bcId, kind: 'b', kiryoku: null, stats: null, cost: '', attr: '', abilities: [] }]
+    const mCtx = { cards: Object.fromEntries(mInfos.map((c) => [c.id, c])), defs: { [bcId]: bcDef } }
+    const slump = { source: null, ability: null, by: 'A' as const, label: 'スランプ', kind: '能力値修正' as const, until: 'turn' as const, targets: ['MA'], host: null, body: { mod: { stat: '力', delta: -2 }, origin: 'event' } }
+    let t: BoardState = { ...EMPTY_BOARD, cards: { MA: card('MA', 'A', 'char', { kiryoku: 5 }), MB: card('MB', 'B', 'char', { kiryoku: 5 }), [bcId]: card(bcId, 'A', 'battle') }, turn: { active: 'A', phase: 'メイン' } }
+    t = applyAction(t, { type: 'procLayers', add: [slump] }).state
+    t = drive(t, mCtx).state
+    eq(currentStat(mCtx, t, 'MA', '力'), 1, bcId + ' 前提: バトルの外ではスランプ（力−2）が効く（3−2=1）')
+    t = startBattleAt(t, { challenger: 'A', at: 19, participants: { A: ['MA'], B: ['MB'] }, battleCard: bcId })
+    t = drive(t, mCtx).state
+    eq(currentStat(mCtx, t, 'MA', '力'), 3, bcId + ' FAQ:3829: 参加キャラのイベント由来の能力値修正（スランプ）は失われる。力は印刷値の3')
+  }
 }
 
 if (failures) {
