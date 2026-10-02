@@ -177,7 +177,7 @@ export function useEngineUI({
   const ring = (iid: string): { battleRing?: 'candidate' | 'selected'; battleRingLabel?: string } => {
     if (!on) return {}
     if (draft?.stage === 'target' && draft.specs.some((s) => s.options.includes(iid))) {
-      return draft.picked.includes(iid) ? { battleRing: 'selected', battleRingLabel: draft.specs[0].slot.slice(0, 4) } : { battleRing: 'candidate' }
+      return draft.picked.includes(iid) ? { battleRing: 'selected', battleRingLabel: '対象' } : { battleRing: 'candidate' }
     }
     if (draft?.stage === 'pay' && draft.need?.candidates.includes(iid)) {
       const c = board.cards[iid]

@@ -109,6 +109,18 @@ export interface DriveResult {
 // 宣言（宣言[1]〜[5]）
 // ───────────────────────────────────────────────────────────────
 
+/** 選択の問いの文言。DSL の枠の名前（s1・target 等）は画面に出さず、選ぶ物の種類で言う（統括20） */
+function pickPrompt(ch: Choice): string {
+  const p = ch.pick
+  const n = ch.count[0] === ch.count[1] ? `${ch.count[0]}` : `${ch.count[0]}〜${ch.count[1]}`
+  if ('stat' in p) return `能力値${n}つを選ぶ`
+  if ('cards' in p) return `カード${n}枚を選ぶ`
+  if ('ability' in p) return '特殊能力を選ぶ'
+  if ('number' in p) return '数を選ぶ'
+  if ('player' in p) return 'プレイヤーを選ぶ'
+  return '選ぶ'
+}
+
 export interface DeclareReq {
   by: Seat
   /** 発生源の iid（能力のキャラ・イベントカード・コスト発生の発生源） */
@@ -502,7 +514,7 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
     if (!ch) return [{ type: 'procDeclPatch', declId: d.id, eng: { later: later.slice(1) } }]
     const env: Env = { self: d.sourceIid, you: d.by, slots, trigger: d.trigger, declId: d.id, declared: {} }
     const options = choiceOptions(ctx, state, env, ch)
-    return [{ type: 'procChoice', choice: { id: cid, by: resolvePlayer(state, env, ch.chooser), kind: 'select', prompt: `${d.label}の対象（${slot}）`, options, min: ch.count[0], max: ch.count[1], frameId: null } }]
+    return [{ type: 'procChoice', choice: { id: cid, by: resolvePlayer(state, env, ch.chooser), kind: 'select', prompt: `${d.label}: ${pickPrompt(ch)}（対象）`, options, min: ch.count[0], max: ch.count[1], frameId: null } }]
   }
   return null
 }
@@ -1285,14 +1297,14 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         return {
           tasks: rest,
           patch: { awaiting: { id, kind: 'choose', slot: ch.slot } },
-          actions: [{ type: 'procChoice', choice: { id, by: chooser, kind: 'select', prompt: `${item.label}: ${ch.slot}（割り振り）`, options, min: n, max: Math.min(max, total), repeat: true, caps, frameId: frame.id } }],
+          actions: [{ type: 'procChoice', choice: { id, by: chooser, kind: 'select', prompt: `${item.label}: ${pickPrompt(ch)}（割り振り）`, options, min: n, max: Math.min(max, total), repeat: true, caps, frameId: frame.id } }],
         }
       }
       const min = task.optionalFirst ? 0 : Math.min(min0, options.length)
       return {
         tasks: rest,
         patch: { awaiting: { id, kind: 'choose', slot: ch.slot, optional: task.optionalFirst } },
-        actions: [{ type: 'procChoice', choice: { id, by: chooser, kind: 'select', prompt: `${item.label}: ${ch.slot}`, options, min, max, frameId: frame.id } }],
+        actions: [{ type: 'procChoice', choice: { id, by: chooser, kind: 'select', prompt: `${item.label}: ${pickPrompt(ch)}`, options, min, max, frameId: frame.id } }],
       }
     }
     case 'if':
