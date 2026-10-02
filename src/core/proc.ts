@@ -691,6 +691,11 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
 }
 
 /** バトルの宣言（20-4[1]）の形。宣言でなく効果で始まるバトル（《抜き打ち》）もこの形で持つ */
+/** 20-4[7] バトルを挑むキャラの候補（待機状態。効果で「バトルを挑むことができない／参加することができない」キャラを除く）。drive.ts の宣言の判定も同じ一か所を通す */
+export function challengeCandidates(state: BoardState, seat: Seat): CardInstance[] {
+  return fieldChars(state, seat).filter((x) => x.orientation === 'ready' && !state.layers.barChallenge.includes(x.iid) && !state.layers.barAny.includes(x.iid))
+}
+
 export function battleDecl(id: string, challenger: Seat): ProcDecl {
   return {
     id,
@@ -1089,7 +1094,7 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       // [5] バトルを行うための条件（20-3）: 選択可能なバトルカードが1枚以上・自分のフィールドに待機状態のキャラが1体以上
       // 使用できないバトルカード（効果による・R3）は「選択可能な」に入れない
       const card = Object.values(state.cards).some((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid))
-      const ready = fieldChars(state, c).some((x) => x.orientation === 'ready')
+      const ready = challengeCandidates(state, c).length > 0
       if (!card) return abortBattle(state, frame, '選択可能なバトルカードが無い（20-3・20-4[5]）', trace)
       if (!ready) return abortBattle(state, frame, '待機状態のキャラがいない（20-3・20-4[5]）', trace)
       return setFrame(state, advance(frame))
@@ -1097,7 +1102,7 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 7: {
       if (b.decided[c]) return setFrame(state, advance(frame))
       // 20-7: 待機状態のキャラから1体
-      const opts = fieldChars(state, c).filter((x) => x.orientation === 'ready')
+      const opts = challengeCandidates(state, c)
       if (opts.length === 0) return abortBattle(state, frame, 'バトル参加キャラを指定できない（20-4[7]）', trace)
       return coreChoice(state, frame, { by: c, kind: 'select', purpose: 'battleParticipant', prompt: 'バトルを挑むキャラ（20-4[7]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
@@ -1108,7 +1113,8 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       if (b.decided[d]) return setFrame(state, advance(frame))
       // 20-8: 待機状態のキャラか、リーダー（消耗状態でもよい）
       const chars = fieldChars(state, d)
-      const opts = [...chars.filter((x) => x.zone !== 'leader' && x.orientation === 'ready'), ...chars.filter((x) => x.zone === 'leader')]
+      // 効果で「バトルに参加することができない」キャラは候補から外す。候補が0なら[12]で自動的にリーダーが参加する（FAQ:1165）
+      const opts = [...chars.filter((x) => x.zone !== 'leader' && x.orientation === 'ready'), ...chars.filter((x) => x.zone === 'leader')].filter((x) => !state.layers.barAny.includes(x.iid))
       if (opts.length === 0) return setFrame(state, advance(frame))
       return coreChoice(state, frame, { by: d, kind: 'select', purpose: 'battleParticipant', prompt: 'バトルを受けるキャラ（20-4[11]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
@@ -1992,6 +1998,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
+      bar?: { challenge: string[]; any: string[] }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2052,7 +2059,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

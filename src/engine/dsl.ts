@@ -74,6 +74,8 @@ export type CardRef =
   | { ref: 'named'; name: string }    // 名前で指す（『HM-12』等）。コピーしても self にならない（FAQ oldfaq.txt:2172-2173）
   // ── R2b で足した（HANDOFF-R2b「決めたこと」）
   | { ref: 'participants'; side: PlayerRef }  // 進行中のバトルのそのプレイヤーのバトル参加キャラ
+  /** そのプレイヤーのリーダー（評価した時点。「味方リーダーの気力－２」ジェラシー・死中に活。R4c G1a-2） */
+  | { ref: 'leader'; side: PlayerRef }
   | { ref: 'opponentChar'; of: CardRef }      // 対戦キャラ（相手側のバトル参加キャラ）。参加していないキャラが身代わりで結果ダメージを受けたら元の受け手の対戦キャラ（H-13）
 
 /** 進行中の処理オブジェクトの役。ダメージ・ダウン・宣言・バトル種目選択など */
@@ -373,6 +375,12 @@ export type Continuous =
   | { ce: 'whenLost'; do: Op[] }
   /** 使用できないバトルカード（「使用できなくなる」《大雨》ではなく《大嵐》。使用済みにはしない FAQ:1499） */
   | { ce: 'battleCardUnusable'; who: CardRef | Selector }
+  /** バトルを挑めない・参加できないキャラ（R4c G1a-2）。
+   *  role 'challenge'＝「バトルを挑むことができない」（傍観者・詩集・小説・参加停止・VIP）: 20-4[7] の挑むキャラの候補から外す（挑める候補が0なら宣言できない）。
+   *  role 'any'＝「バトルに参加することができない」（穏形法）: [7] の挑むキャラ・[11] の受けるキャラの両方の候補から外す。
+   *  受ける側の候補が0なら[12]で自動的にリーダーが参加する（FAQ:1165。oldrule 20-4[11][12]）。
+   *  core はカードを知らない: エンジンが layers で外すキャラの iid を導き出して core の LayerState に置く（oncePerChar と同じ流れ） */
+  | { ce: 'barFromBattle'; who: CardRef | Selector; role: 'challenge' | 'any' }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）

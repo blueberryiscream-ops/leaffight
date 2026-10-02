@@ -23,6 +23,7 @@ import {
   currentWindow,
   findFrame,
   battleDecl,
+  challengeCandidates,
   nearestBattle,
   topFrame,
   type BattleState,
@@ -702,7 +703,7 @@ function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: s
   if (req.by !== activeSeat(state) || state.turn?.phase !== 'メイン') return { ok: false, reason: '自分のメインフェイズでない（20-2・20-3）' }
   if (state.turn?.n === 1) return { ok: false, reason: '先攻の1ターン目はバトルを行えない（10-2-4）' }
   if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used && !state.layers.unusable.includes(c.iid))) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
-  if (!Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === req.by && c.orientation === 'ready')) return { ok: false, reason: '待機状態のキャラがいない（20-3）' }
+  if (challengeCandidates(state, req.by).length === 0) return { ok: false, reason: '待機状態のキャラがいない、またはバトルを挑める（参加できる）キャラがいない（20-3・20-4[7]）' }
   void ctx
   const decl = battleDecl(id, req.by)
   return { ok: true, actions: [{ type: 'procDeclare', by: req.by, decl }], decl, warnings: [] }

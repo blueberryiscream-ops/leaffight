@@ -84,6 +84,11 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
       const b = nearestBattle(state)?.battle
       return b ? b.participants[resolvePlayer(state, env, r.side)] : []
     }
+    case 'leader': {
+      const seat = resolvePlayer(state, env, r.side)
+      const l = Object.values(state.cards).find((x) => x.zone === 'leader' && x.owner === seat)
+      return l ? [l.iid] : []
+    }
     case 'opponentChar':
       return opponentChars(state, env, resolveRef(state, env, r.of)[0])
     case 'named':

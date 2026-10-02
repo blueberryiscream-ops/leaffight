@@ -41,6 +41,12 @@ export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
       other.push({ kiryoku: toNum(mv[1]), of: { ref: 'slot', slot: 't' } })
       return
     }
+    // 「味方リーダーの気力－Ｎ」＝自分のリーダーの気力を減らす使用代償（ジェラシー・死中に活。R4c G1a-2。CardRef の leader）
+    const ml = /^味方リーダーの気力[－\-−ー]([0-9０-９]+)$/.exec(part)
+    if (ml) {
+      other.push({ kiryoku: toNum(ml[1]), of: { ref: 'leader', side: 'you' } })
+      return
+    }
     const m = /^気力[－\-−ー]([0-9０-９]+)$/.exec(part)
     if (m) {
       other.push({ kiryoku: toNum(m[1]) })
@@ -63,7 +69,7 @@ export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
     const iconPrefix = /^[WRGLT]+/.exec(part)
     if (iconPrefix && iconPrefix[0].length < part.length) {
       for (const ch of iconPrefix[0]) cost.icons.push(ch as CostIcon)
-      parsePart(part.slice(iconPrefix[0].length))
+      parsePart(part.slice(iconPrefix[0].length).trim())
       return
     }
     unknown.push(part)
@@ -78,7 +84,10 @@ export function cardCost(info: CardInfo): Cost {
   // キャラ・タッグの attr はそのキャラ自身の属性で、呼び出しの使用代償ではない（DESIGN §4.8「キャラ/タッグ札の「属性」はコストではない」
   // ユーザー校正 2026-07-18）。i/e/f/b の attr はコスト側の属性アイコン（8-2-1）。R2u で直した
   if (info.kind === 'c' || info.kind === 't') return parseCostText(info.cost).cost
-  return parseCostText(`${info.cost}${info.attr}`).cost
+  // 元表記の代償の文（「W 味方リーダーの気力－３」など）と属性アイコンは別に読んでから合わせる（属性を文字列の後ろに足すと文末が読めなくなる）
+  const r = parseCostText(info.cost).cost
+  for (const ch of info.attr) if (ATTRS.includes(ch)) r.attrs.push(ch as Attr)
+  return r
 }
 
 /** キャラの属性（コストが帯びる属性 7-1-2） */

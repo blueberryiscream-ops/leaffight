@@ -108,9 +108,13 @@ export interface LayerState {
   reusable: string[]
   /** 一度挑んだキャラはこのターン中挑めないバトルカード（battle.oncePerCharPerTurn。procMeta.marks に印を控える） */
   oncePerChar: string[]
+  /** バトルを挑めないキャラ（barFromBattle role challenge。20-4[7] の候補から外す。エンジンが導き出して置く控え。中身の意味は持たない） */
+  barChallenge: string[]
+  /** バトルに参加できないキャラ（barFromBattle role any。20-4[7][11] の候補から外す） */
+  barAny: string[]
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [] }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [] }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
