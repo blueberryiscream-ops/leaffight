@@ -469,7 +469,9 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     if (sh.size) {
       for (const t of [...allTargets, ...forEachReach(ctx, state, decl)]) {
         const e = (decl.kind === 'ability' ? d.srcA : d.srcE).get(t)
-        if (!sh.has(t)) continue
+        // srcA/srcE は shieldParticipants の対象だけ。ただの loseAbilities（《電波での復活》）で能力を失ったキャラは、
+        // 自分の能力が働かないだけで、他の能力の効果は受ける（FAQ:544 タックルで手札に戻る。統括19）
+        if (!e || !sh.has(t)) continue
         out.push({ kind: 'lostAbility', text: `${name(t)}はバトル参加キャラ（「${e?.layer.label ?? '特殊能力を失う'}」）なので、効果が及ぶ${kind}は使用できない`, source: e?.layer.label ?? '特殊能力を失う', sourceIid: e?.layer.source ?? null })
         break
       }
