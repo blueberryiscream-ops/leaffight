@@ -51,6 +51,14 @@ export function stepLine(board: BoardState, viewer: Seat, nameOf: (cardId: strin
   return [s.text, ...names].filter(Boolean).join(' ')
 }
 
+/** 対象の指定の帯の文言。DSL の枠の名前（target 等）は出さず、選ぶ物の種類と数で言う */
+function specText(s: { min: number; max: number; options: string[] }, board: { cards: Record<string, unknown> }): string {
+  const n = s.min === s.max ? `${s.min}` : `${s.min}〜${s.max}`
+  if (s.options.length > 0 && s.options.every((o) => board.cards[o])) return `盤面のカード${n}枚`
+  if (s.options.length > 0 && s.options.every((o) => ['力', '早', '賢', '根', '感'].includes(o))) return `能力値${n}つ`
+  return `下のボタンから${n}つ`
+}
+
 export function EngineBar({
   board,
   localSeat,
@@ -349,7 +357,7 @@ export function EngineBar({
       {engineOn && draft?.stage === 'target' && (
         <div className="flex flex-wrap items-center gap-1">
           <span className="font-bold">
-            {draft.label}: {draft.specs.map((s) => `${s.slot}（${s.min === s.max ? s.min : `${s.min}〜${s.max}`}）`).join('・')}を盤面で選ぶ
+            {draft.label}: {draft.specs.map((s) => specText(s, board)).join('・')}を選ぶ
           </span>
           {draft.specs
             .flatMap((s) => s.options)

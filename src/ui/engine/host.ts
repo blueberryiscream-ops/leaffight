@@ -219,8 +219,13 @@ export function applyEngineReq(history: History, ctx: EngineCtx, req: EngineReq,
   if (req.kind === 'choose') {
     // 選んだカードは iid のままログの文に入れない（画面が公開かどうかを見て名前か「＊」にする）。カードでない選択肢は文に書く
     const cardsPicked = req.pick.filter((k) => k in state.cards)
-    const others = req.pick.filter((k) => !(k in state.cards))
-    text = `${req.by} が選んだ（${req.pick.length}）${others.length ? `: ${others.join('・')}` : ''}`
+    // 選択肢の key（pay・next 等）は内部の名前なので、選ぶ前の問いにある label で書く。問いが無ければ key のまま
+    const opts = before.procMeta.choice?.id === req.id ? before.procMeta.choice.options : []
+    const others = req.pick.filter((k) => !(k in state.cards)).map((k) => opts.find((o) => o.key === k)?.label ?? k)
+    const prompt = before.procMeta.choice?.id === req.id ? before.procMeta.choice.purpose : undefined
+    text = req.pick.length === 0 && prompt === 'offer'
+      ? `${req.by} は払わない／しないを選んだ`
+      : `${req.by} が選んだ${others.length ? `: ${others.join('・')}` : `（${req.pick.length}）`}`
     log.text = text
     if (cardsPicked.length) log.steps = [{ text: '選んだ', iids: cardsPicked }, ...(log.steps ?? [])]
   }

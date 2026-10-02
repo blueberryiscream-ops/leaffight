@@ -169,7 +169,8 @@ export function BattlePanel({
             {b.values?.[s] &&
               Object.entries(b.values[s]!).map(([iid, v]) => (
                 <div key={iid} className="text-ink-muted">
-                  {name(iid)}: 攻{v.atk}・防{v.def}
+                  {/* 3回計算のバトル（《鶴来屋温泉三本勝負》rounds）は回ごとの攻防を並べる。結果ダメージは各回（0以下は0）の合計 */}
+                  {name(iid)}: {v.rounds ? `攻${v.rounds.map((r) => r.atk).join('／')}・防${v.rounds.map((r) => r.def).join('／')}（${v.rounds.length}回の合計）` : `攻${v.atk}・防${v.def}`}
                 </div>
               ))}
             {b.damage &&
