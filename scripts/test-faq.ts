@@ -41,11 +41,14 @@ const fail = (id: string, msg: string) => { failures++; console.error(`❌ ${id}
 const faqLines = existsSync(faqTxt) ? readFileSync(faqTxt, 'utf8').replace(/^﻿/, '').split(/\r\n|\n|\r/) : null
 if (!faqLines) console.warn('⚠ _local/oldfaq.txt が無いので確かめ1を飛ばす')
 let poolIds: Set<string> | null = null
+/** 本文ケース（faq: 'pool.json:<id>'）の逐語を確かめる材料: カード id → 能力の本文 */
+const poolTexts = new Map<string, string[]>()
 const cardInfos: Record<string, CardInfo> = {}
 if (existsSync(zipPath)) {
   const files = unzipSync(readFileSync(zipPath), { filter: (f) => f.name === 'pool.json' })
   const pool = JSON.parse(strFromU8(files['pool.json'])) as Parameters<typeof cardInfoOf>[0][]
   poolIds = new Set(pool.map((c) => c.id))
+  for (const p of pool as unknown as { id: string; abilities?: { text: string }[] }[]) poolTexts.set(p.id, (p.abilities ?? []).map((a) => a.text))
   for (const p of pool) cardInfos[p.id] = cardInfoOf(p)
 } else console.warn('⚠ dist-data/leaffight-data.zip が無いので確かめ2と実行を飛ばす')
 
@@ -120,7 +123,14 @@ for (const c of cases) {
   ids.add(c.id)
   // 1. 逐語
   const m = /^oldfaq\.txt:(\d+)-(\d+)$/.exec(c.faq)
-  if (!m) fail(id, `faq の形が違う: ${c.faq}`)
+  const mt = /^pool\.json:(.+)$/.exec(c.faq)
+  if (mt) {
+    // 本文ケース（R4c・id は text-<カードid>-<n>）: quote.a がそのカードの能力の本文と一致する
+    if (!/^text-/.test(c.id)) fail(id, 'pool.json: の faq は text- のケースだけ')
+    const texts = poolTexts.get(mt[1])
+    if (poolIds && !texts) fail(id, `本文ケースのカードが pool.json に無い: ${mt[1]}`)
+    else if (texts && !texts.some((t) => squash(t) === squash(c.quote?.a ?? ''))) fail(id, 'quote.a が pool.json のカードの能力の本文と一致しない')
+  } else if (!m) fail(id, `faq の形が違う: ${c.faq}`)
   else if (faqLines) {
     const span = squash(faqLines.slice(Number(m[1]) - 1, Number(m[2])).join(''))
     if (!c.quote?.q || !span.includes(squash(c.quote.q))) fail(id, 'quote.q が原文の行範囲に逐語で無い')
@@ -232,7 +242,9 @@ const scopeC = readScope('_r3-scope.json')
 const scopeD = readScope('_r4a-scope.json')
 // R4b（_r4b-scope.json）: R4b-3b-1 から束ごとに足す（PHASE-R4b §2(E)）。対象の ❌ は終了コード1
 const scopeE = readScope('_r4b-scope.json')
-const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC, ...scopeD, ...scopeE])
+// R4c（_r4c-scope.json）: 束ごとに足す（PHASE-R4c）。本文ケース（text-*）を含む。対象の ❌ は終了コード1
+const scopeF = readScope('_r4c-scope.json')
+const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC, ...scopeD, ...scopeE, ...scopeF])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
   const results: (CaseResult & { inScope: boolean })[] = []
@@ -248,7 +260,7 @@ if (Object.keys(cardInfos).length) {
   const count = (xs: typeof results) => ({ total: xs.length, ok: xs.filter((r) => r.verdict === '✅').length, hold: xs.filter((r) => r.verdict === '保留').length, ng: xs.filter((r) => r.verdict === '❌').length })
   // R2a・R2b の対象ごとに結果のファイルを書く（inScope はそのフェイズの対象か）
   let ng = 0
-  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB], ['R3', scopeC], ['R4a', scopeD], ['R4b', scopeE]] as const) {
+  for (const [name, sc] of [['R2a', scopeA], ['R2b', scopeB], ['R3', scopeC], ['R4a', scopeD], ['R4b', scopeE], ['R4c', scopeF]] as const) {
     const rs = results.map((r) => ({ ...r, inScope: sc.has(r.id) }))
     const inS = rs.filter((r) => r.inScope)
     const missing = [...sc].filter((id) => !rs.some((r) => r.id === id))
