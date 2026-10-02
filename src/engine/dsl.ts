@@ -208,7 +208,7 @@ export type Duration =
 // ───────────────────────────────────────────────────────────────
 
 export type Op =
-  | { op: 'statMod'; who: CardRef; stat: Attr | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration }
+  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration }  // 攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
   | { op: 'damage'; to: CardRef; amount: Expr }                  // 15-4-2 ダメージ処理を起動する（気力を直接いじらない）
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
