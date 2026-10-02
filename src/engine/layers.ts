@@ -477,6 +477,23 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
       }
     }
   }
+  // 「コストを発生することができない」（《ビンボー》《一文無し》FAQ:2754・223）: 単独のコスト発生（7-2）も、宣言の支払いで消耗させる発生源も断る。
+  // 統括20: R4a-2 の型だけで判定が無かった（雛山理緒が tested のまま素通りしていた）
+  const gens = [...(decl.sources ?? []), ...(decl.costGens ?? []).flat()].filter((s) => s.from === 'field').map((s) => s.iid)
+  if (gens.length) {
+    for (const e of d.effs) {
+      if (e.effect.ce !== 'cannotGenerateCost') continue
+      const hit = targetsOf(ctx, state, e).find((x) => gens.includes(x))
+      if (hit) out.push({ kind: 'prohibit', text: `${name(hit)}は「${e.layer.label}」によりコストを発生できない`, source: e.layer.label, sourceIid: e.layer.source })
+    }
+  }
+  // 「新たにアイテムを装備できなくなる」（《両手いっぱい》）: 装備の宣言の装備先として断る
+  if (decl.kind === 'equip' && decl.equipTo) {
+    for (const e of d.effs) {
+      if (e.effect.ce !== 'cannotEquip' || !targetsOf(ctx, state, e).includes(decl.equipTo)) continue
+      out.push({ kind: 'prohibit', text: `${name(decl.equipTo)}は「${e.layer.label}」によりアイテムを装備できない`, source: e.layer.label, sourceIid: e.layer.source })
+    }
+  }
   if (decl.kind === 'equip' && decl.sourceIid && decl.equipTo) {
     const why = equipProblem(ctx, state, state.cards[decl.sourceIid], decl.equipTo, decl.by)
     if (why) out.push({ kind: 'equipTarget', text: `${name(decl.sourceIid)}は${name(decl.equipTo)}に装備できない（${why}・17-1）`, source: name(decl.sourceIid), sourceIid: decl.sourceIid })
