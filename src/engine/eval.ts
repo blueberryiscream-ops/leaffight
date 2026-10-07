@@ -168,6 +168,14 @@ export function select(ctx: EngineCtx, state: BoardState, env: Env, sel: Selecto
     .map((c) => c.iid)
 }
 
+/**
+ * バトルカードの今の場所（屋内・屋外・水中・暗闇）。場所を読む所はここだけ（NH-27②: 《屋内競技場》《水中戦》《シーサイド》《ダークネス》の上書き＝G8b は、後でここだけ直す）。
+ * 今は印刷の place を返す
+ */
+export function battlePlaceOf(ctx: EngineCtx, state: BoardState, battleIid: string): string | undefined {
+  return ctx.cards[state.cards[battleIid]?.cardId ?? '']?.place
+}
+
 export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): boolean {
   if ('all' in c) return c.all.every((x) => evalCond(ctx, state, env, x))
   if ('any' in c) return c.any.some((x) => evalCond(ctx, state, env, x))
@@ -249,7 +257,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   if ('activeIs' in c) return activeSeat(state) === resolvePlayer(state, env, c.activeIs)
   if ('battlePlace' in c) {
     const xs = resolveRef(state, env, c.battlePlace[0])
-    return xs.length > 0 && xs.every((x) => ctx.cards[state.cards[x]?.cardId ?? '']?.place === c.battlePlace[1])
+    return xs.length > 0 && xs.every((x) => battlePlaceOf(ctx, state, x) === c.battlePlace[1])
   }
   if ('joinedReady' in c) {
     const b = nearestBattle(state)?.battle

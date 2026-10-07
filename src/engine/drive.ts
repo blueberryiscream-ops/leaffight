@@ -34,6 +34,7 @@ import {
   type ProcTrace,
   type SimulItem,
 } from '../core/proc'
+import type { LayerSeed } from '../core/proc'
 import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
@@ -858,7 +859,18 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
           return { key: x.key, label: x.label, by: x.by, sourceIid: x.sourceIid, eng: eng as unknown as Record<string, unknown> }
         })
       : []
-  return [...atEnd, ...conditionalHits(ctx, state, frame)
+  // 《ターン終了時》に処理される遅延（atTurnEnd で預けた層）
+  const atTurn: Omit<SimulItem, 'status' | 'type'>[] =
+    frame.kind === 'turnEnd' && frame.step === 1
+      ? state.layers.list.flatMap((l) => {
+          const x = (l.body as { delayed?: { ops: Op[]; env: { self: string | null; you: Seat; slots: Record<string, string[]> } } }).delayed
+          if (!x) return []
+          const env: Env = { ...x.env, trigger: null, declId: null, declared: {} }
+          const eng: ItemEng = { tasks: x.ops.map((op) => ({ op })), env, started: false, optional: false, recheck: null, awaiting: null, seq: 0 }
+          return [{ key: `${l.id}:turnEnd`, label: l.label, by: x.env.you, sourceIid: x.env.self, eng: eng as unknown as Record<string, unknown> }]
+        })
+      : []
+  return [...atEnd, ...atTurn, ...conditionalHits(ctx, state, frame)
     .filter((h) => !applied.includes(h.key))
     // H-2: 処理条件がある常時効果による受け渡しは、ダメージ1件につき1回
     .filter((h) => !(condRedirected && h.ab.effect.some((op) => op.op === 'redirectDamage')))
@@ -1435,7 +1447,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const until = op.duration === 'endOfBattle' || op.kind === '攻防修正' ? 'battle' : 'turn'
       if (op.duration !== 'endOfBattle' && op.duration !== 'endOfTurn' && op.duration !== 'instant') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い`)
       const origin = originOf(state, env)
-      const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, op.mode === 'set' ? `${item.label} ${stat}=${delta}` : `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin, op.mode === 'set'))
+      const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, op.mode === 'set' ? `${item.label} ${stat}=${delta}` : `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin, op.mode === 'set', op.immune))
       return { tasks: rest, actions: add.length ? [{ type: 'procLayers', add }] : [] }
     }
     case 'addContinuous': {
@@ -1490,6 +1502,11 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'putBattleCard':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'battle', owner: env.you }) as BoardAction) }
+    case 'atTurnEnd': {
+      // 処理した効果の続き: 《ターン終了時》(10-8) に処理する遅延（発生源が能力を失っていても処理する）。層に預け、turnEnd [1] の timingItems が拾う
+      const seed: LayerSeed = { source: env.self, ability: null, by: env.you, label: `${item.label}（ターン終了時）`, kind: null, until: 'turn', targets: [], host: null, body: { delayed: { ops: op.do, env: { self: env.self, you: env.you, slots: env.slots } } } }
+      return { tasks: rest, actions: [{ type: 'procLayers', add: [seed] }] }
+    }
     case 'atBattleEnd': {
       const bf = nearestBattle(state)
       if (!bf) return manual('バトル中でない')

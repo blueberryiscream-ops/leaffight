@@ -130,7 +130,7 @@ export type Cond =
   | { joined: CardRef }                        // いまの段（20-4[8]・[13]）でバトルに参加したキャラ（「バトルに参加したとき」）
   | { battleResult: true }                     // 進行中のダメージ（・ダウン）がバトルの結果ダメージ（20-10。FAQ:3978「攻と防から計算されたもの」）
   | { activeIs: PlayerRef }                    // そのプレイヤーのターン（「自分のターンの終了時」）
-  | { battlePlace: [CardRef, '屋内' | '屋外'] } // バトルカードの分類
+  | { battlePlace: [CardRef, '屋内' | '屋外' | '水中' | '暗闇'] } // バトルカードの分類
   | { joinedReady: CardRef }                   // 待機状態でバトルに参加したキャラ（《エキサイト》）
   | { attachedTo: [CardRef, CardRef] }        // アイテムがそのキャラに装備されている（「このキャラが装備しているアイテム」）
   // ── R3 で足した
@@ -216,7 +216,7 @@ export type Duration =
 // ───────────────────────────────────────────────────────────────
 
 export type Op =
-  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set' }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
+  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set'; immune?: ('イベント' | '特殊能力')[] }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
   | { op: 'damage'; to: CardRef; amount: Expr }                  // 15-4-2 ダメージ処理を起動する（気力を直接いじらない）
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
@@ -306,6 +306,7 @@ export type Op =
   | { op: 'startBattle' }                                                           // 相手にバトルを挑む（《抜き打ち》）。20-4[3] から
   | { op: 'setBattleCard'; card: CardRef }                                          // バトル種目をこのバトルカードにする（《虎の子バトル》）
   | { op: 'putBattleCard'; what: CardRef }                                          // 手札のバトルカードを自分のフィールドに出す（配置のアクション 19-2 ではない）
+  | { op: 'atTurnEnd'; do: Op[] }                                                 // 《ターン終了時》(10-8) に処理する（処理した効果の続き。発生源が能力を失っていても処理。R4c G2b-2b スーパー御堂）
   | { op: 'atBattleEnd'; do: Op[] }                                                 // [28]《バトル終了時》に処理する
   | { op: 'moveItem'; item: CardRef; to: CardRef }                                  // アイテムを移し替える（装備と同じ扱い 17-3[11] から FAQ:804・2874）
   | { op: 'down'; who: CardRef }                                                    // キャラをダウンさせる（15-5 のダウン処理。《サクリファイス》）
@@ -339,6 +340,8 @@ export type Continuous =
   | { ce: 'statMod'; who: CardRef | Selector; stat: Attr | 'atk' | 'def'; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
   /** 最高値と最低値を入れ替える。入れ替えるのは**印刷値（元の能力値）**で常に同じ（H-6・統括12 2026-09-26 D1: 元 力5・感1＋力+2 → 力1・感5）。
    *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
+  /** [水中バトルペナルティ] 等、名前（能力の name）で指したペナルティの効果が who に及ばない（強化兵のさらなる修正も同じ能力の中なので丸ごと。R4c G2b-2b 水着・岩切） */
+  | { ce: 'ignorePenalty'; who: CardRef | Selector; name: string; when?: Cond }
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }
   | { ce: 'battleAttrSwap'; battleCard: CardRef; requires: 'pureAttrs' }                 // [攻]と[防]の入れ替え
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }

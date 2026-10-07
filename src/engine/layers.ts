@@ -31,7 +31,7 @@ export interface EnvLite {
 /** 層の中身（engine の持ち物） */
 interface LayerBody {
   /** 効果で足した修正（statMod の Op） */
-  mod?: { stat: string; delta: number; set?: true }
+  mod?: { stat: string; delta: number; set?: true; immune?: ('イベント' | '特殊能力')[] }
   /** 継続効果 */
   effect?: Continuous
   /** 効果で足した継続効果の評価の環境（常時効果は毎回 self＝発生源・you＝その使用者） */
@@ -47,9 +47,9 @@ interface LayerBody {
 const bodyOf = (l: Layer) => l.body as LayerBody
 
 /** 効果で足した修正の層（statMod の Op・12-1）。期限: バトル終了時まで・攻防修正→ battle、それ以外→ turn */
-export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin'], set = false): LayerSeed {
+export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin'], set = false, immune?: ('イベント' | '特殊能力')[]): LayerSeed {
   // set＝その能力値を delta に置き換える層（《お手本》のコピー FAQ:2601。currentStats が連番の順に重ねる。R4c G2b-1b）
-  return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: set ? { stat, delta, set: true } : { stat, delta }, origin } }
+  return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: set ? { stat, delta, set: true, ...(immune ? { immune } : {}) } : { stat, delta }, origin } }
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -140,7 +140,14 @@ function effectOn(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): boole
   if (e.effect.ce !== 'prohibit' && when && !evalCond(ctx, state, e.env, when)) return false
   // 【～の対象にならない】特殊能力: 特殊能力の常時効果（キャラの能力）の影響も受けない（《魔法のサークレット》FAQ:697・709）
   if (e.layer.ability !== null && e.effect.ce !== 'untargetable' && e.effect.ce !== 'loseAbilities' && isCharSource(ctx, state, e.layer.source) && untargetableBy(ctx, state, iid, '特殊能力', e)) return false
+  // [水中バトルペナルティ] 等を受けない（ignorePenalty。同じ能力の中の修正は丸ごと及ばない。R4c G2b-2b）
+  if (e.layer.ability !== null && e.effect.ce !== 'ignorePenalty' && penaltyIgnored(ctx, state, e, iid)) return false
   return true
+}
+
+function penaltyIgnored(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): boolean {
+  for (const g of derived(ctx, state).effs) if (g.effect.ce === 'ignorePenalty' && g.effect.name === e.layer.label && effectOn(ctx, state, g, iid)) return true
+  return false
 }
 
 export function isCharSource(ctx: EngineCtx, state: BoardState, iid: string | null): boolean {
@@ -170,18 +177,29 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   if (!c) return v
   const d = derived(ctx, state)
   // 層を連番の順に（効果で足した修正と継続効果を混ぜて並べる）
+  // 「あらゆるイベント・特殊能力の影響を受けない」印つきの set（スーパー御堂。NH-29・NH-27⑦）: 能力値 = set の値 + アイテム・フィールド・バトルカードの修正（層の前後を問わず）。
+  // 発生源がイベント／特殊能力（キャラ・タッグ）の修正・入れ替えはその能力値に当たらない
+  const imm = new Map<string, Set<string>>()
+  for (const l of [...state.layers.list].sort((a, b) => a.seq - b.seq)) {
+    const m = bodyOf(l).mod
+    if (m?.set && m.immune && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) {
+      v[m.stat] = m.delta
+      imm.set(m.stat, new Set(m.immune.flatMap((x) => (x === 'イベント' ? ['e'] : ['c', 't']))))
+    }
+  }
+  const blocked = (stat: string, src: string | null) => !!imm.get(stat)?.has(ctx.cards[src ? state.cards[src]?.cardId ?? '' : '']?.kind ?? '')
   const items: { seq: number; run: () => void }[] = []
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
-    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => (m.set ? (v[m.stat] = m.delta) : (v[m.stat] += m.delta)) }) // set＝置き換え: この層より前の修正は上書き・後の層は足される（swapStats と同じ考え方 H-6。FAQ:2601）
+    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => { if (imm.has(m.stat) && (m.immune || blocked(m.stat, l.source))) return; if (m.set) v[m.stat] = m.delta; else v[m.stat] += m.delta } }) // set＝置き換え: この層より前の修正は上書き・後の層は足される（swapStats と同じ考え方 H-6。FAQ:2601）
   }
   for (const e of d.effs) {
     const f = e.effect
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
       if (d.modLost.has(iid)) continue
-      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
+      items.push({ seq: e.layer.seq, run: () => !(imm.has(f.stat) && blocked(f.stat, e.layer.source)) && effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
     } else if (f.ce === 'statSwap') {
-      items.push({ seq: e.layer.seq, run: () => effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v) })
+      items.push({ seq: e.layer.seq, run: () => { const keep = { ...v }; if (effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v)) for (const st of imm.keys()) if (blocked(st, e.layer.source)) v[st] = keep[st] } })
     }
   }
   items.sort((a, b) => a.seq - b.seq).forEach((x) => x.run())
@@ -919,7 +937,7 @@ export function continuousSeed(ctx: EngineCtx, state: BoardState, env: Env, effe
 
 /** 看護（clearMods）: そのカードに効果で足した修正の層（12-1）の id */
 export function clearableMods(state: BoardState, iid: string, kind: '能力値修正' | '攻防修正'): string[] {
-  return state.layers.list.filter((l) => l.ability === null && l.kind === kind && l.targets.includes(iid)).map((l) => l.id)
+  return state.layers.list.filter((l) => l.ability === null && l.kind === kind && l.targets.includes(iid) && !bodyOf(l).mod?.immune).map((l) => l.id) // 「影響を受けない」印つきの set は消えない（スーパー御堂×看護 FAQ:2498）
 }
 
 
