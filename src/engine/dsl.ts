@@ -366,6 +366,12 @@ export type Continuous =
   | { ce: 'extraW' }
   /** 《エンプティ》（R4c G3b-1）: W は発生しない（効果の W・手札のキャラを捨てた W。G/R/L/T は発生する FAQ:4073） */
   | { ce: 'noW' }
+  /** 《分厚い財布》《衣装・メイド服》（R4c G3b-2）: who が消耗して 7-2 でコストを発生するとき、発生源1つにつき属性無しの W を1つ多く発生する（NH-15 で常に。ブースト・エンプティの対象） */
+  | { ce: 'extraWOnGen'; who: CardRef }
+  /** 《集魔の鏡》（R4c G3b-2）: who の 7-2 の発生源のコストを、選んだ1属性の G にできる（任意・7-2[7] で選ぶ。財布・メイド服の W も G になる） */
+  | { ce: 'genAsG'; who: CardRef }
+  /** 《背後霊》（R4c G3b-2）: who が 7-2 の発生源として消耗するたびに気力－1（recover でない負） */
+  | { ce: 'restDrain'; who: CardRef }
   | { ce: 'ignoreRecover'; who: CardRef }                                                 // 気力を回復させる効果（kiryoku recover:true）の影響を受けない（《腹ぺこ》NH-31②。対象には選べる）
   /** 常時の「以下の特殊能力を得る」（《釘バット》NH-31⑤・R4c G11b-2）。who（装備先）が、この効果がある間だけその能力を持つ。能力の名前は能力の name（FAQ:3327）。使用代償・宣言はそのキャラの特殊能力と同じ（15-13-1） */
   | { ce: 'grantAbility'; who: CardRef; ability: Extract<Ability, { kind: 'activated' }> }

@@ -329,6 +329,38 @@ export function adjustGenerated<T extends { icon: string; attrs: string[] }>(ctx
   return tokens.flatMap((t) => (t.icon !== 'W' ? [t] : m === 'none' ? [] : [t, { ...t, attrs: [] }]))
 }
 
+/** 7-2 の発生源（field）になったキャラ iid に掛かる常時効果（R4c G3b-2）: extra＝財布・メイド服の枚数／mirror＝集魔の鏡／drain＝背後霊 */
+export function costGenFx(ctx: EngineCtx, state: BoardState, iid: string): { extra: number; mirror: boolean; drain: boolean } {
+  const r = { extra: 0, mirror: false, drain: false }
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce === 'extraWOnGen' && effectOn(ctx, state, e, iid)) r.extra++
+    else if (f.ce === 'genAsG' && effectOn(ctx, state, e, iid)) r.mirror = true
+    else if (f.ce === 'restDrain' && effectOn(ctx, state, e, iid)) r.drain = true
+  }
+  return r
+}
+
+/** 7-2[7]《コストを発生する場合》（R4c G3b-2）: 発生源を直す。順＝財布・メイド服の W を足す → adjustGenerated（ブースト・エンプティ）→ 鏡（選んだ属性の G にする。ブーストの増分は変えない）。drain＝気力－1 するキャラ（背後霊） */
+export function editCostGen<T extends { iid: string; from: string; icon: string; attrs: string[] }>(ctx: EngineCtx, state: BoardState, frameId: string, sources: T[]): { sources: T[]; drain: string[] } {
+  const drain: string[] = []
+  const out: T[] = []
+  for (const s of sources) {
+    const fx = s.from === 'field' ? costGenFx(ctx, state, s.iid) : null
+    const group = fx ? [{ ...s, own: true }, ...Array.from({ length: fx.extra }, () => ({ ...s, icon: 'W', attrs: [] as string[], own: true }))] : [{ ...s, own: false }]
+    if (fx?.drain) drain.push(s.iid)
+    const pick = fx?.mirror ? state.procMeta.answers[`mirror:${frameId}:${s.iid}`]?.[0] : undefined
+    for (const t of group) {
+      // adjustGenerated は [元, 増分] を返す（エンプティなら空）。増分は発生源のコストではない＝鏡で変えない
+      adjustGenerated(ctx, state, [t]).forEach((u, i) => {
+        const { own, ...rest } = u as typeof u & { own: boolean }
+        out.push(own && i === 0 && pick && pick !== '使わない' ? ({ ...rest, icon: 'G', attrs: [pick] } as unknown as T) : (rest as unknown as T))
+      })
+    }
+  }
+  return { sources: out, drain }
+}
+
 /** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
 export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): number | null {
   const c = state.cards[iid]

@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, adjustGenerated, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, adjustGenerated, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -455,6 +455,17 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
       }
       continue
     }
+    // R4c G3b-2: 集魔の鏡を装備したキャラが 7-2 の発生源のとき、[7] の前に使うか・どの属性かを選ぶ（任意 A-30・FAQ:413）
+    const mirror = genMirrorChoice(ctx, s)
+    if (mirror) {
+      const before = out.state
+      apply(mirror)
+      if (out.state === before) {
+        out.warnings.push('集魔の鏡の選択が受け付けられない')
+        break
+      }
+      continue
+    }
     // 「ダメージを受けない」（15-4-2[5] の前＝身代わりの後 FAQ:1706）。[5] の窓で誰も宣言していないうちに当てる
     const top0 = topFrame(s)
     if (top0?.kind === 'damage' && top0.step === 5 && top0.status === 'window' && top0.window?.state === 'awaitActive' && !top0.window.active && !top0.eng.receiveChecked) {
@@ -546,11 +557,31 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
   return null
 }
 
+/** R4c G3b-2: 7-2[7]《コストを発生する場合》の前に、集魔の鏡の装備先ごとに「使う属性（または使わない）」を装備先の使用者に1回選ばせる */
+function genMirrorChoice(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  if (state.result || state.procMeta.choice) return null
+  const top = topFrame(state)
+  if (!top || top.kind !== 'costGen' || top.step !== 7 || top.status !== 'engine' || top.engineWhat !== 'timing' || !top.decl) return null
+  for (const s of top.decl.sources) {
+    if (s.from !== 'field' || !costGenFx(ctx, state, s.iid).mirror) continue
+    const key = `mirror:${top.id}:${s.iid}`
+    if (state.procMeta.answers[key]) continue
+    const opts = [{ key: '使わない', label: '使わない（元のコストのまま）' }, ...ATTRS.map((a) => ({ key: a as string, label: `${a}属性の[G]にする` }))]
+    return { type: 'procChoice', choice: { id: key, by: top.by, kind: 'select', prompt: `《集魔の鏡》: 発生するコストを好きな属性の[G]にするか（1種類の属性 FAQ:413）`, options: opts, min: 1, max: 1, frameId: null } }
+  }
+  return null
+}
+
 function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings: string[]): BoardAction[] {
   switch (top.engineWhat) {
     case 'timing': {
       // 7-2[7]《コストを発生する場合》: 発生するコストを直す（ブースト・エンプティ。W の発生を1か所＝adjustGenerated に集める）。W 以外（キャラを消耗させて発生した G など）はそのまま
-      const edit: BoardAction[] = top.kind === 'costGen' && top.step === 7 && top.decl ? [{ type: 'procCostGenEdit', frameId: top.id, sources: adjustGenerated(ctx, state, top.decl.sources) }] : []
+      // R4c G3b-2: 財布・メイド服の W・鏡の属性・背後霊の気力－1 も同じ段（editCostGen）
+      let edit: BoardAction[] = []
+      if (top.kind === 'costGen' && top.step === 7 && top.decl) {
+        const r = editCostGen(ctx, state, top.id, top.decl.sources)
+        edit = [{ type: 'procCostGenEdit', frameId: top.id, sources: r.sources }, ...r.drain.map((iid) => ({ type: 'procKiryoku', iid, delta: -1, max: null }) as BoardAction)]
+      }
       return [...edit, { type: 'procTimingDone', frameId: top.id, items: timingItems(ctx, state, top) }]
     }
     case 'pay': {

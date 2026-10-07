@@ -504,6 +504,12 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const hit = attr === null ? toks.length > 0 && toks.every((t) => t.icon === icon && t.attrs.length === 0) : attr === 'なし' ? toks.some((t) => t.icon === icon && t.attrs.length === 0) : toks.some((t) => t.icon === icon && (!attr || t.attrs.includes(attr)))
     return { ok: hit, msg: `発生済みのコスト ${side} に ${icon}${attr ?? ''} が無い（今: ${toks.map((t) => `${t.icon}${t.attrs.join('')}`).join('・') || '無し'}）` }
   }
+  if ('costN' in e) {
+    const [side, icon, attr, n] = e.costN
+    const toks = s.costs[seatOf(side)]
+    const got = toks.filter((t) => t.icon === icon && (attr === 'なし' ? t.attrs.length === 0 : t.attrs.length === 1 && t.attrs[0] === attr)).length
+    return { ok: got === n, msg: `発生済みのコスト ${side} の ${icon}${attr} = ${got}個（期待 ${n}個。今: ${toks.map((t) => `${t.icon}${t.attrs.join('')}`).join('・') || '無し'}）` }
+  }
   if ('result' in e) {
     const r = s.result
     const got = !r ? 'continues' : r.winner === null ? 'draw' : r.winner === 'A' ? 'youWin' : 'opponentWins'
