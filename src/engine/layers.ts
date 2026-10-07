@@ -312,7 +312,6 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
   return null
 }
 
-/** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
 /** W の発生を変える常時効果（R4c G3b-1・NH-33⑥）: 'none'＝《エンプティ》／'extra'＝《ブースト》／null＝なし。両方のプレイヤーに効く。18-2 で同時には場に無い */
 export function wGenMode(ctx: EngineCtx, state: BoardState): 'none' | 'extra' | null {
   let m: 'none' | 'extra' | null = null
@@ -330,6 +329,7 @@ export function adjustGenerated<T extends { icon: string; attrs: string[] }>(ctx
   return tokens.flatMap((t) => (t.icon !== 'W' ? [t] : m === 'none' ? [] : [t, { ...t, attrs: [] }]))
 }
 
+/** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
 export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): number | null {
   const c = state.cards[iid]
   const info = c ? ctx.cards[c.cardId] : undefined

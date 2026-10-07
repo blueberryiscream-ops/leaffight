@@ -500,7 +500,8 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const [side, icon, attr] = e.costToken
     const toks = s.costs[seatOf(side)]
     // attr が null＝属性なしのトークンだけ（その side のコストが全部属性なしで1つ以上ある。R4c G11a-1: 8-2・NH-30⑥）
-    const hit = attr === null ? toks.length > 0 && toks.every((t) => t.icon === icon && t.attrs.length === 0) : toks.some((t) => t.icon === icon && (!attr || t.attrs.includes(attr)))
+    // attr が 'なし'＝属性なしのトークンが1つ以上ある（ほかに属性つきがあってもよい。統括25: ブーストの増分は属性無し）
+    const hit = attr === null ? toks.length > 0 && toks.every((t) => t.icon === icon && t.attrs.length === 0) : attr === 'なし' ? toks.some((t) => t.icon === icon && t.attrs.length === 0) : toks.some((t) => t.icon === icon && (!attr || t.attrs.includes(attr)))
     return { ok: hit, msg: `発生済みのコスト ${side} に ${icon}${attr ?? ''} が無い（今: ${toks.map((t) => `${t.icon}${t.attrs.join('')}`).join('・') || '無し'}）` }
   }
   if ('result' in e) {

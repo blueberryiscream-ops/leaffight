@@ -224,7 +224,8 @@ export function planPayment(
     const poolIds = (payPool ?? []).filter((id) => have.has(id))
     return { ok: true, costGens: srcs.length || hasEventPay ? [srcs] : [], usePool: false, poolIds, warn }
   }
-  if (cost.icons.length === 0) return { ok: true, costGens: [], usePool: true, poolIds: [], warn }
+  // 8-2-1・FAQ:3399（統括25）: 属性アイコンだけの使用代償は、その属性の待機キャラが自分のフィールドにいなければ宣言できない（コストアイコンがあるときの assignments と同じ判定）
+  if (cost.icons.length === 0) return readyAttrsOk(ctx, state, by, cost.attrs) ? { ok: true, costGens: [], usePool: true, poolIds: [], warn } : { ok: false, costGens: [], usePool: true, poolIds: [], warn }
   const pool = state.costs[by].map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })) // 他のアクションで発生したコストはその他のコスト（7-3）
   for (const asg of assignments(cost)) {
     // 発生済みのコストで払えない分を、コストを発生させて払う（いちばん厳しい要求から）
