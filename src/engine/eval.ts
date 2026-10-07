@@ -288,7 +288,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     // 種目が決まった [18]〜[28]（20-5）。バトルカードの名前で見る（FAQ:4042）。種目が変われば（バトルチェンジ）今の種目で読み直す（FAQ:1028）
     const bf = nearestBattle(state)
     const bc = bf?.battle?.battleCard
-    return !!bf && !!bc && bf.step >= 18 && ctx.cards[state.cards[bc]?.cardId ?? '']?.name === c.battleNamed
+    return !!bf && !!bc && bf.step >= 18 && bf.step <= 28 && ctx.cards[state.cards[bc]?.cardId ?? '']?.name === c.battleNamed
   }
   if ('sexIs' in c) {
     const xs = resolveRef(state, env, c.sexIs[0])
