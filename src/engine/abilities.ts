@@ -8,18 +8,51 @@ import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
 import { evalCond, resolveRef } from './eval'
-import { abilitiesLost } from './layers'
+import { abilitiesLost, grantedAbilities } from './layers'
 
 export type Activated = Extract<Ability, { kind: 'activated' }>
 export type Play = Extract<Ability, { kind: 'play' }>
 export type Conditional = Extract<Ability, { kind: 'conditional' }>
+
+/** 得た能力（ce grantAbility。《釘バット》NH-31⑤）の番号の始まり。index = GRANT_BASE + 静的能力の番号*100 + その中の効果の番号。cardId は「得させるカード」（アイテム）の id */
+export const GRANT_BASE = 1000
+
+/** カード id と番号から能力を引く（得た能力の番号も引ける） */
+export function abilityAt(ctx: EngineCtx, cardId: string, idx: number): Ability | undefined {
+  const def = ctx.defs[cardId]
+  if (!def) return undefined
+  if (idx < GRANT_BASE) return def.abilities[idx]
+  const a = def.abilities[Math.floor((idx - GRANT_BASE) / 100)]
+  const f = a?.kind === 'static' ? a.effects[(idx - GRANT_BASE) % 100] : undefined
+  return f?.ce === 'grantAbility' ? f.ability : undefined
+}
+
+/** そのカードの記述が「得させる」能力の一覧（番号つき） */
+export function grantedOfDef(ctx: EngineCtx, cardId: string): { ab: Activated; index: number }[] {
+  const out: { ab: Activated; index: number }[] = []
+  ctx.defs[cardId]?.abilities.forEach((a, ai) => {
+    if (a.kind === 'static') a.effects.forEach((f, ei) => { if (f.ce === 'grantAbility') out.push({ ab: f.ability, index: GRANT_BASE + ai * 100 + ei }) })
+  })
+  return out
+}
+
+/** キャラの特殊能力を名前で探す: そのキャラ自身の記述 → 今そのキャラが得ている能力（装備している間だけ）。cardId は能力の記述があるカード */
+export function findAbilityOn(ctx: EngineCtx, state: BoardState, card: { iid: string; cardId: string }, name: string | null | undefined, option?: string): { ab: Ability; index: number; cardId: string } | null {
+  const own = findAbility(ctx, card.cardId, name, option)
+  if (own) return { ...own, cardId: card.cardId }
+  if (name) {
+    const g = grantedAbilities(ctx, state, card.iid).find((x) => x.ab.name === name)
+    if (g) return { ab: g.ab, index: g.index, cardId: g.cardId }
+  }
+  return null
+}
 
 /** 能力（または本体のプレイ）を名前で探す。play は name（選択肢）で、無ければ最初のもの */
 export function findAbility(ctx: EngineCtx, cardId: string, name: string | null | undefined, option?: string): { ab: Ability; index: number } | null {
   const def = ctx.defs[cardId]
   if (!def) return null
   const list = def.abilities.map((ab, index) => ({ ab, index }))
-  if (name) return list.find(({ ab }) => (ab.kind === 'activated' || ab.kind === 'manual' || ab.kind === 'conditional' || ab.kind === 'static') && ab.name === name) ?? null
+  if (name) return list.find(({ ab }) => (ab.kind === 'activated' || ab.kind === 'manual' || ab.kind === 'conditional' || ab.kind === 'static') && ab.name === name) ?? grantedOfDef(ctx, cardId).find((g) => g.ab.name === name) ?? null
   const plays = list.filter(({ ab }) => ab.kind === 'play')
   if (option) return plays.find(({ ab }) => (ab as Play).name === option) ?? null
   return plays[0] ?? list.find(({ ab }) => ab.kind === 'manual') ?? null

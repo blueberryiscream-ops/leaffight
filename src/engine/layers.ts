@@ -15,7 +15,8 @@
 import type { BoardAction } from '../core/actions'
 import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
 import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
-import type { ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
+import { GRANT_BASE, abilityAt } from './abilities'
+import type { Ability, ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 
@@ -326,6 +327,27 @@ export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): nu
   return v
 }
 
+export interface Granted {
+  ab: Extract<Ability, { kind: 'activated' }>
+  /** 得させているカード（アイテム）の id・iid と、そこでの能力の番号（abilities.ts GRANT_BASE） */
+  cardId: string
+  itemIid: string
+  index: number
+}
+
+/** そのキャラが今得ている特殊能力（ce grantAbility。装備している間だけ・特殊能力を失っていなければ）。《釘バット》NH-31⑤ */
+export function grantedAbilities(ctx: EngineCtx, state: BoardState, iid: string): Granted[] {
+  const d = derived(ctx, state)
+  if (d.lost.has(iid)) return []
+  const out: Granted[] = []
+  for (const e of d.effs) {
+    if (e.effect.ce !== 'grantAbility' || e.layer.ability === null || !e.layer.source || !effectOn(ctx, state, e, iid)) continue
+    const item = state.cards[e.layer.source]
+    if (item) out.push({ ab: e.effect.ability, cardId: item.cardId, itemIid: item.iid, index: GRANT_BASE + e.layer.ability * 100 + (bodyOf(e.layer).ei ?? 0) })
+  }
+  return out
+}
+
 /** 特殊能力を失っているか（《能力禁止》など） */
 export function abilitiesLost(ctx: EngineCtx, state: BoardState, iid: string): boolean {
   return derived(ctx, state).lost.has(iid)
@@ -405,7 +427,7 @@ function implicitTargetsOf(ctx: EngineCtx, state: BoardState, decl: ProcDecl): s
   const cardId = decl.eng.cardId as string | undefined
   const idx = decl.eng.index as number | undefined
   if (cardId === undefined || idx === undefined) return []
-  const ab = ctx.defs[cardId]?.abilities[idx]
+  const ab = abilityAt(ctx, cardId, idx)
   if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play')) return []
   const env: Env = { self: decl.sourceIid, you: decl.by, slots: (decl.eng.slots as Record<string, string[]>) ?? {}, trigger: decl.trigger, declId: decl.id, declared: (decl.eng.declared as Env['declared']) ?? {} }
   return collectEffectTargets(ctx, state, env, ab.effect)
@@ -464,7 +486,7 @@ function forEachReach(ctx: EngineCtx, state: BoardState, decl: ProcDecl): string
   const cardId = decl.eng.cardId as string | undefined
   const idx = decl.eng.index as number | undefined
   if (cardId === undefined || idx === undefined) return []
-  const ab = ctx.defs[cardId]?.abilities[idx]
+  const ab = abilityAt(ctx, cardId, idx)
   if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play')) return []
   const env: Env = { self: decl.sourceIid, you: decl.by, slots: (decl.eng.slots as Record<string, string[]>) ?? {}, trigger: decl.trigger, declId: decl.id, declared: (decl.eng.declared as Env['declared']) ?? {} }
   const out: string[] = []

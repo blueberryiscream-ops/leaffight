@@ -357,6 +357,8 @@ export type Continuous =
   | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }
   | { ce: 'cannotGenerateCost'; who: CardRef }
   | { ce: 'ignoreRecover'; who: CardRef }                                                 // 気力を回復させる効果（kiryoku recover:true）の影響を受けない（《腹ぺこ》NH-31②。対象には選べる）
+  /** 常時の「以下の特殊能力を得る」（《釘バット》NH-31⑤・R4c G11b-2）。who（装備先）が、この効果がある間だけその能力を持つ。能力の名前は能力の name（FAQ:3327）。使用代償・宣言はそのキャラの特殊能力と同じ（15-13-1） */
+  | { ce: 'grantAbility'; who: CardRef; ability: Extract<Ability, { kind: 'activated' }> }
   | { ce: 'cannotEquip'; who: CardRef }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }

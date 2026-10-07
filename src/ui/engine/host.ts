@@ -12,7 +12,7 @@ import type { History, LogEntry } from '../../core/history'
 import { activeSeat, awaitingSeat, canDeclarePhaseEnd, currentWindow, phaseEndPending, type ProcTrace } from '../../core/proc'
 import type { CardInfo, EngineCtx } from '../../engine/ctx'
 import { declare, declareTargets, drive, validPick, type DeclareReq, type TargetSpec } from '../../engine/drive'
-import type { Violation } from '../../engine/layers'
+import { grantedAbilities, type Violation } from '../../engine/layers'
 import { costOfAbility, paymentCovers, poolOnlyPayment } from '../../engine/cost'
 import type { CardDef } from '../../engine/dsl'
 import type { EngineReq, PublicStep } from '../../net/session'
@@ -320,6 +320,8 @@ export function legalDeclarations(state: BoardState, ctx: EngineCtx, seat: Seat,
       for (const ab of ctx.defs[c.cardId]?.abilities ?? []) {
         if (ab.kind === 'activated' && ab.name) tryReq({ by: seat, source: c.iid, ability: ab.name }, `${info.name}《${ab.name}》`)
       }
+      // 装備している間だけ得ている特殊能力（《釘バット》ce grantAbility）
+      for (const g of grantedAbilities(ctx, state, c.iid)) tryReq({ by: seat, source: c.iid, ability: g.ab.name }, `${info.name}《${g.ab.name}》`)
     }
   }
   return out

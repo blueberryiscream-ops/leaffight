@@ -11,6 +11,7 @@ import type { BoardState, Seat } from '../core/board'
 import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
+import { grantedOfDef } from './abilities'
 import { ACTION_KIND, applyCostMod, costModOf } from './layers'
 import { evalExpr, resolveRef } from './eval'
 
@@ -152,6 +153,9 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
     // 17-7-1 アクションアイテム: 印刷の見出しも使用代償の表記も無い。使用代償は「このアイテムをゴミ箱送りにする」（記述の cost。R4c G11a-1）
     const ab = ctx.defs[cardId]?.abilities.find((x) => x.kind === 'activated' && x.name === abilityName)
     if (ab && ab.kind === 'activated') return { cost: ab.cost, unknown: [] }
+    // 得させる能力（《釘バット》ce grantAbility）の使用代償
+    const g = grantedOfDef(ctx, cardId).find((x) => x.ab.name === abilityName)
+    if (g) return { cost: g.ab.cost, unknown: [] }
   }
   return parseCostText(a?.cost ?? '')
 }

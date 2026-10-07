@@ -35,14 +35,14 @@ import {
   type SimulItem,
 } from '../core/proc'
 import type { LayerSeed } from '../core/proc'
-import { conditionalHits, findAbility, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
+import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -222,7 +222,9 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   if (!req.ability && src.zone === 'hand' && info && ['c', 't', 'i', 'f', 'b'].includes(info.kind)) return declareCardUse(ctx, state, req, id)
 
   if (!ctx.defs[src.cardId]) return { ok: false, reason: `カードの記述が無い: ${nameOf(ctx, state, src.iid)}`, missingDef: true }
-  const found = findAbility(ctx, src.cardId, req.ability ?? null, req.option)
+  const found = findAbilityOn(ctx, state, src, req.ability ?? null, req.option)
+  // 得る能力（ce grantAbility）は装備している間だけある: その名前の特殊能力が印刷されてもいないキャラは、持っていないだけで断る（記述の欠けではない）
+  if (!found && req.ability && !(info?.abilities ?? []).some((a) => a.header === req.ability)) return { ok: false, reason: `その特殊能力を持っていない（得る能力は装備している間だけ）: ${req.ability}` }
   if (!found) return { ok: false, reason: `能力が無い: ${req.ability ?? req.option ?? '（本体）'}`, missingDef: true }
   const { ab, index } = found
   if (ab.kind === 'manual') return { ok: false, reason: `manual の能力: ${ab.reason}`, manual: true }
@@ -290,7 +292,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   }
 
   // 宣言[4] 支払い方法の宣言（コストを発生させるアクションの宣言を含む）
-  const { cost: printedCost, unknown } = isEvent ? costOfAbility(ctx, src.cardId, null) : costOfAbility(ctx, src.cardId, (ab as Activated).name)
+  const { cost: printedCost, unknown } = isEvent ? costOfAbility(ctx, found.cardId, null) : costOfAbility(ctx, found.cardId, (ab as Activated).name)
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
   // K6（D3）: costMod（増減）を今の状態でまとめて適用したもので支払い方法を宣言する（払う段 [9] でも同じ一か所を通す＝engineStep 'pay'）
@@ -315,7 +317,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: src.cardId, index, slots, ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: found.cardId, index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
@@ -346,7 +348,7 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
     }
     if (info.kind !== 'e') return []
   }
-  const found = findAbility(ctx, src.cardId, req.ability ?? null, req.option)
+  const found = findAbilityOn(ctx, state, src, req.ability ?? null, req.option)
   if (!found || (found.ab.kind !== 'activated' && found.ab.kind !== 'play')) return []
   const ab = found.ab as Activated | Play
   const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: currentWindow(state)?.frame?.id ?? null, declId: null, declared: {} }
@@ -818,7 +820,7 @@ export { currentStat }
 
 function optionOf(ctx: EngineCtx, d: ProcDecl): string | undefined {
   const idx = d.eng.index as number
-  const ab = ctx.defs[d.eng.cardId as string]?.abilities[idx]
+  const ab = abilityAt(ctx, d.eng.cardId as string, idx)
   return ab && ab.kind === 'play' ? ab.name : undefined
 }
 
@@ -836,7 +838,7 @@ function abNameOf(d: ProcDecl): string | null {
 function abilityOf(ctx: EngineCtx, d: ProcDecl): { ab: Ability; index: number } | null {
   const idx = d.eng.index as number | undefined
   if (idx !== undefined) {
-    const ab = ctx.defs[d.eng.cardId as string]?.abilities[idx]
+    const ab = abilityAt(ctx, d.eng.cardId as string, idx)
     if (ab && ab.kind === 'conditional') return { ab, index: idx }
   }
   return findAbility(ctx, d.eng.cardId as string, abNameOf(d), d.kind === 'event' && !d.eng.actionItem ? optionOf(ctx, d) : undefined)
@@ -846,6 +848,8 @@ function abilityOf(ctx: EngineCtx, d: ProcDecl): { ab: Ability; index: number } 
 function checkTargets(ctx: EngineCtx, state: BoardState, frame: ProcFrame): string | null {
   const d = frame.decl!
   if (d.kind === 'costGen') return null
+  // 得た能力（《釘バット》）: 再提示のとき（15-13-1 [10][12]）その能力がもうキャラに無ければ（アイテムが外れた・特殊能力を失った）中断
+  if (d.eng.granted && !grantedAbilities(ctx, state, d.sourceIid!).some((g) => g.cardId === d.eng.cardId && g.index === d.eng.index)) return '特殊能力を再提示できない（得た能力が失われた 15-13-1 [10]）'
   const found = abilityOf(ctx, d)
   const ab = found?.ab as Activated | Play | Conditional | undefined
   if (!ab || ab.kind === 'conditional') return null // NH-17: 合成の宣言は対象を declare 時にとらない（choices が無い）

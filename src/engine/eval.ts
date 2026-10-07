@@ -7,6 +7,7 @@ import type { BoardState, CardInstance, Seat } from '../core/board'
 import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
 import type { Ability, CardRef, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
+import { abilityAt } from './abilities'
 import { battleMod, currentStat } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
@@ -329,7 +330,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const d = f?.decl
     const cardId = d?.eng.cardId as string | undefined
     const idx = d?.eng.index as number | undefined
-    const ab = cardId !== undefined && idx !== undefined ? ctx.defs[cardId]?.abilities[idx] : undefined
+    const ab = cardId !== undefined && idx !== undefined ? abilityAt(ctx, cardId, idx) : undefined
     if (!ab) return false
     return hasOpDeep(opsOf(ab), c.declaredHasOp)
   }
