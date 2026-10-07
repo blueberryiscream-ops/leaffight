@@ -313,6 +313,23 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
 }
 
 /** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
+/** W の発生を変える常時効果（R4c G3b-1・NH-33⑥）: 'none'＝《エンプティ》／'extra'＝《ブースト》／null＝なし。両方のプレイヤーに効く。18-2 で同時には場に無い */
+export function wGenMode(ctx: EngineCtx, state: BoardState): 'none' | 'extra' | null {
+  let m: 'none' | 'extra' | null = null
+  for (const e of derived(ctx, state).effs) {
+    if (e.effect.ce === 'noW') return 'none'
+    if (e.effect.ce === 'extraW') m = 'extra'
+  }
+  return m
+}
+
+/** 発生するコストを直す（W の発生を1か所に集める。効果の generateCost と 7-2[7] の両方が通る）。エンプティ＝W を消す／ブースト＝W ごとに属性無しの W を足す。W 以外はそのまま */
+export function adjustGenerated<T extends { icon: string; attrs: string[] }>(ctx: EngineCtx, state: BoardState, tokens: T[]): T[] {
+  const m = wGenMode(ctx, state)
+  if (!m) return tokens
+  return tokens.flatMap((t) => (t.icon !== 'W' ? [t] : m === 'none' ? [] : [t, { ...t, attrs: [] }]))
+}
+
 export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): number | null {
   const c = state.cards[iid]
   const info = c ? ctx.cards[c.cardId] : undefined

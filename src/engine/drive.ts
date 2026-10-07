@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, adjustGenerated, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -548,8 +548,11 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
 
 function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings: string[]): BoardAction[] {
   switch (top.engineWhat) {
-    case 'timing':
-      return [{ type: 'procTimingDone', frameId: top.id, items: timingItems(ctx, state, top) }]
+    case 'timing': {
+      // 7-2[7]《コストを発生する場合》: 発生するコストを直す（ブースト・エンプティ。W の発生を1か所＝adjustGenerated に集める）。W 以外（キャラを消耗させて発生した G など）はそのまま
+      const edit: BoardAction[] = top.kind === 'costGen' && top.step === 7 && top.decl ? [{ type: 'procCostGenEdit', frameId: top.id, sources: adjustGenerated(ctx, state, top.decl.sources) }] : []
+      return [...edit, { type: 'procTimingDone', frameId: top.id, items: timingItems(ctx, state, top) }]
+    }
     case 'pay': {
       const d = top.decl!
       const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, abNameOf(d))
@@ -1197,7 +1200,19 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // R4c G11b-3（命の香炉・NH-31①）: 部分の打ち消し(kiryokuDown)＝この宣言の効果のうち only のカードへの気力減（recover でない負の delta）だけ及ばない。他のカードへの気力減・他の op は通る
       const cf = env.declId ? findFrame(state, env.declId) : undefined
       const kiryokuCut = cf?.counterPart === 'kiryokuDown' && !op.recover && delta < 0 ? cf.counterOnly : undefined
-      return { tasks: rest, actions: refs(op.who).filter((iid) => iid !== kiryokuCut && !(op.recover && recoverIgnored(ctx, state, iid))).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
+      const hit = refs(op.who).filter((iid) => iid !== kiryokuCut && !(op.recover && recoverIgnored(ctx, state, iid)))
+      // countTo（R4c G3b-1・おもてなし）: 実際に増えた点数（上限で切れた分は数えない。規 1172）を枠に足す
+      let patch: Partial<ItemEng> | undefined
+      if (op.countTo) {
+        const got = hit.reduce((n, iid) => {
+          const card = state.cards[iid]
+          const max = maxKiryokuOf(ctx, state, iid)
+          if (!card || card.kiryoku === null || delta <= 0) return n
+          return n + (max === null ? delta : Math.max(0, Math.min(delta, max - card.kiryoku)))
+        }, 0)
+        patch = { env: { ...eng.env, slots: { ...eng.env.slots, [op.countTo]: [String(Number(eng.env.slots[op.countTo]?.[0] ?? '0') + got)] } } }
+      }
+      return { tasks: rest, ...(patch ? { patch } : {}), actions: hit.map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
     }
     case 'setKiryoku':
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procSetKiryoku', iid, value: op.value }) as BoardAction) }
@@ -1250,7 +1265,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (icons.length === 0 || times <= 0) return { tasks: rest, actions: [] }
       // D20: useAs があれば、発生させたコストは useAs（借金取りの使用者）の発生済みのコストになる
       const useAsSeat = op.useAs ? resolvePlayer(state, env, op.useAs) : undefined
-      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: costAttrs }))).flat(), useAsSeat }] }
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: adjustGenerated(ctx, state, Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: costAttrs }))).flat()), useAsSeat }] }
     }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない

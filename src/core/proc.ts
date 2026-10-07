@@ -1966,6 +1966,8 @@ export type ProcAction =
    * 判定（findFrame）に使う
    */
   | { type: 'procStartCostGen'; by: Seat; sources: CostSource[]; declId: string }
+  /** 7-2[7]《コストを発生する場合》: 発生するコスト（decl.sources）を engine が直した並びに置き換える（R4c G3b-1） */
+  | { type: 'procCostGenEdit'; frameId: string; sources: CostSource[] }
   | { type: 'procCancelDown'; frameId: string }
   /**
    * 効果の乗っ取り（hijack・D11）が「適切な対象が無い」等で失敗したとき、乗っ取りの効果自身（いただきます等）を
@@ -2483,6 +2485,13 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       trace.push({ kind: 'name', text: `コストを払う:${action.seat}${action.giveTo ? `→${action.giveTo}` : '（消費）'}` })
       return { state: s, log: `${action.seat} が発生済みのコストを払う` }
+    }
+    case 'procCostGenEdit': {
+      // 7-2[7]《コストを発生する場合》（段の処理＝engineWhat 'timing' の中。procTimingDone の前に engine が置く）。core は何を直すか知らない（procDamageEdit と同じ形）
+      const f = findFrame(state, action.frameId)
+      if (!f || f.kind !== 'costGen' || f.step !== 7 || f.status !== 'engine' || !f.decl) return null
+      if (action.sources.length !== f.decl.sources.length) trace.push({ kind: 'name', text: `発生するコストの修正:${f.decl.sources.map((x) => x.icon).join('')}→${action.sources.map((x) => x.icon).join('')}` })
+      return { state: setFrame(state, { ...f, decl: { ...f.decl, sources: action.sources } }), log: '' }
     }
     case 'procStartCostGen': {
       // 統括17の直し: 単独の 7-2 のコスト発生の宣言と同じ経路（applyDeclare の tail・windowEnd の frame=null

@@ -71,7 +71,7 @@ const WINDOW_STEPS: Record<string, number[]> = {
 const LAST_STEPS: Record<string, number> = { ability: 14, event: 14, damage: 6, down: 7, item: 13, field: 13, battleCard: 12, battle: 29, phase: 5 }
 
 const squash = (s: string) => s.replace(/\s+/g, '')
-const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(s) && s !== 'you' && s !== 'opponent'
+const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(s) && s !== 'you' && s !== 'opponent' && !/^[WRGLT]$/.test(s)
 
 function setupRefs(b: BoardSpec): Set<string> {
   const refs = new Set<string>()

@@ -221,7 +221,7 @@ export type Duration =
 export type Op =
   | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set'; immune?: ('イベント' | '特殊能力')[] }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
   | { op: 'damage'; to: CardRef; amount: Expr }                  // 15-4-2 ダメージ処理を起動する（気力を直接いじらない）
-  | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
+  | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true; /** 実際に増えた点数（上限で切れた分・回復の影響を受けないキャラは数えない）をこの名前の枠に足す（《おもてなし》R4c G3b-1。{ chosen: 名前 } で読む） */ countTo?: string }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
   | { op: 'trash'; what: CardRef }
   | { op: 'setBattleUsed'; what: Selector; used: boolean }       // バトルカードを使用済み／未使用にする（19-3。《猫寄せドラ》R4c G11a-2。reusable でも使用済みにする）
@@ -362,6 +362,10 @@ export type Continuous =
   /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
   | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }
   | { ce: 'cannotGenerateCost'; who: CardRef }
+  /** 《ブースト》（R4c G3b-1）: W（その他のコスト）が1つ発生するごとに、属性無しの W が1つ多く発生する（両方のプレイヤー・G/R/L/T は増えない FAQ:4186） */
+  | { ce: 'extraW' }
+  /** 《エンプティ》（R4c G3b-1）: W は発生しない（効果の W・手札のキャラを捨てた W。G/R/L/T は発生する FAQ:4073） */
+  | { ce: 'noW' }
   | { ce: 'ignoreRecover'; who: CardRef }                                                 // 気力を回復させる効果（kiryoku recover:true）の影響を受けない（《腹ぺこ》NH-31②。対象には選べる）
   /** 常時の「以下の特殊能力を得る」（《釘バット》NH-31⑤・R4c G11b-2）。who（装備先）が、この効果がある間だけその能力を持つ。能力の名前は能力の name（FAQ:3327）。使用代償・宣言はそのキャラの特殊能力と同じ（15-13-1） */
   | { ce: 'grantAbility'; who: CardRef; ability: Extract<Ability, { kind: 'activated' }> }
