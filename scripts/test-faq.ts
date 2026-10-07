@@ -63,7 +63,7 @@ for (const f of files) {
 
 /** 原典の「アクション宣言の機会」がある段（15-13-1・16-1・15-4-2・15-5-1・17-3・18-2・19-2・20-4・10-4・10-7）。phase の空配列＝段の確かめをしない */
 const WINDOW_STEPS: Record<string, number[]> = {
-  ability: [8, 11, 13], event: [8, 11, 13], damage: [1, 3, 4, 5], down: [2, 4],
+  ability: [8, 11, 13], event: [8, 11, 13], costGen: [3], damage: [1, 3, 4, 5], down: [2, 4],
   item: [8, 13], field: [8, 13], battleCard: [8, 12],
   battle: [2, 4, 6, 8, 10, 13, 15, 17, 19, 20, 22, 25, 27, 29], phase: [],
 }
@@ -223,6 +223,9 @@ if (existsSync(cardsDir)) {
     for (const ab of mod.def.abilities) {
       if (ab.kind !== 'activated') continue
       const printed = info.abilities.find((a) => a.header === ab.name)
+      // 17-7-1 アクションアイテム（見出しも使用代償の表記も無い）: 使用代償が「このアイテムをゴミ箱送りにする」だけのアイテムの起動型は印刷との突き合わせの対象外
+      const o = ab.cost.other
+      if (!printed && info.kind === 'i' && ab.cost.icons.length === 0 && o?.length === 1 && 'trash' in o[0]) continue
       if (!printed) { defProblems.push(`${f}: 能力「${ab.name}」が pool.json に無い`); continue }
       const { cost, unknown } = parseCostText(printed.cost)
       if (unknown.length || JSON.stringify(cost) !== JSON.stringify(ab.cost)) defProblems.push(`${f}: 「${ab.name}」の cost が元表記「${printed.cost}」の読み取りと違う`)

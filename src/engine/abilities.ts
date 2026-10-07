@@ -3,7 +3,7 @@
  */
 
 import type { BoardState } from '../core/board'
-import { STEP_TIMINGS, activeSeat, findFrame, type ProcFrame } from '../core/proc'
+import { stepNames, activeSeat, findFrame, type ProcFrame } from '../core/proc'
 import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
@@ -27,7 +27,7 @@ export function findAbility(ctx: EngineCtx, cardId: string, name: string | null 
 
 /** そのフレームの今の段で、この《〜とき》が来ているか（行為者・当事者・条件も見る） */
 export function triggerMatches(ctx: EngineCtx, state: BoardState, env: Env, trig: Trigger, frame: ProcFrame): boolean {
-  const names = STEP_TIMINGS[frame.kind][frame.step]?.names ?? []
+  const names = stepNames(frame)
   if (!names.includes(trig.timing)) return false
   const e: Env = { ...env, trigger: frame.id }
   if (trig.actor && trig.actor !== 'any') {

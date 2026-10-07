@@ -228,9 +228,15 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   if (ab.kind === 'manual') return { ok: false, reason: `manual の能力: ${ab.reason}`, manual: true }
   if (ab.kind !== 'activated' && ab.kind !== 'play') return { ok: false, reason: '宣言して使う能力ではない（常時効果は「使用」しない 12-2・FAQ:3257）' }
   const isEvent = ab.kind === 'play'
+  // 17-7・17-7-1: キャラに装備されたアイテムの起動型＝アクションアイテム。手順は16-1（イベント）と同じ段（decl.kind 'event'）。
+  // 発生源はフィールドのアイテム（手札のカードは宣言できない）、宣言できるのは装備先のキャラの使用者（FAQ:405）
+  const holder = src.attachedTo ? state.cards[src.attachedTo] : undefined
+  const isAI = ab.kind === 'activated' && info?.kind === 'i' && isCharOnField(holder)
   // 発生源の場所: 特殊能力はそのキャラの使用者がフィールドで（15-13-1）、イベントは自分の手札から（16-1）
   if (isEvent) {
     if (src.zone !== 'hand' || src.owner !== req.by) return { ok: false, reason: '自分の手札のカードでない（16-1）' }
+  } else if (isAI) {
+    if (controllerOf(state, src.iid) !== req.by) return { ok: false, reason: '装備先のキャラを使用しているプレイヤーでない（17-7-1・FAQ:405）' }
   } else if (!isCharOnField(src) || controllerOf(state, src.iid) !== req.by) return { ok: false, reason: '自分のフィールドのキャラでない（15-13-1）' }
 
   const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: frame?.id ?? null, declId: id, declared: { [src.iid]: src.orientation === 'ready' ? 'ready' : 'rested' } }
@@ -238,7 +244,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const speed = ab.speed
   // 20-4[19][20][22]: バトル中のアクションの機会（特殊能力は決まった側が1回・イベントは両者が複数回。その他のアクションは行えない FAQ:318・3318）
   const battleAct = frame?.kind === 'battle' && [19, 20, 22].includes(frame.step)
-  if (speed === '通常型' && battleAct) {
+  if (speed === '通常型' && battleAct && !isAI) {
     const b = frame!.battle!
     if (!isEvent) {
       const who = frame!.step === 20 ? other(b.challenger) : b.challenger
@@ -246,7 +252,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       if (b.abilityUsed) return { ok: false, reason: 'この機会の特殊能力は1回（20-4[19][20][22]）' }
     }
   } else if (speed === '通常型') {
-    if (frame) return { ok: false, reason: '通常型は処理の途中に宣言できない（11-1）' }
+    // アクションアイテムは『その他のアクション』＝バトル中（[4]〜[28]）や処理の途中（《コストを発生するとき》など）には宣言できない（FAQ:314・317・3431）
+    if (frame) return { ok: false, reason: isAI ? 'アクションアイテムはメイン・終了フェイズの手順の外でだけ宣言できる（FAQ:314・317・3431）' : '通常型は処理の途中に宣言できない（11-1）' }
   } else {
     if (!frame) return { ok: false, reason: '割込型の使用タイミングでない（手順の外）' }
     if (ab.trigger && !triggerMatches(ctx, state, env, ab.trigger, frame)) {
@@ -287,17 +294,17 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
   // K6（D3）: costMod（増減）を今の状態でまとめて適用したもので支払い方法を宣言する（払う段 [9] でも同じ一か所を通す＝engineStep 'pay'）
-  const cost = effectiveCost(ctx, state, isEvent ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
-  const plan = planPayment(ctx, state, req.by, isEvent ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
+  const cost = effectiveCost(ctx, state, isEvent || isAI ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
+  const plan = planPayment(ctx, state, req.by, isEvent || isAI ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
   warnings.push(...plan.warn)
 
-  const label = isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name
+  const label = isAI ? `${info?.name ?? src.cardId}（${(ab as Activated).name}）` : isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name
   const decl: ProcDecl = {
     id,
     by: req.by,
-    kind: isEvent ? 'event' : 'ability',
+    kind: isEvent || isAI ? 'event' : 'ability',
     actionType: speed,
     label,
     sourceIid: src.iid,
@@ -306,7 +313,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: src.cardId, index, slots, usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: src.cardId, index, slots, ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
@@ -507,7 +514,7 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
     const later = (d.eng.later as string[] | undefined) ?? []
     if (later.length === 0) continue
     const slot = later[0]
-    const found = findAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null)
+    const found = findAbility(ctx, d.eng.cardId as string, abNameOf(d))
     const ab = found?.ab as Activated | Play | undefined
     const ch = ab?.choices.find((c) => c.slot === slot)
     const cid = `${d.id}:${slot}`
@@ -531,7 +538,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       return [{ type: 'procTimingDone', frameId: top.id, items: timingItems(ctx, state, top) }]
     case 'pay': {
       const d = top.decl!
-      const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null)
+      const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, abNameOf(d))
       // K6（D3）: 払う段で改めて評価する（declareOne と同じ effectiveCost）
       const cost = effectiveCost(ctx, state, d.kind, d.by, d.sourceIid, d.targets, printedCost)
       const r = payNow(ctx, state, top.id, d, cost)
@@ -550,7 +557,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       // NH-17（D15・R4a-2）: 処理条件がある常時効果（回復を含むもの）を decl 化した合成の宣言（timingItems 参照）は
       // ab.kind==='conditional'。choices を持たない（対象は元から取らない・宣言時の選択も無い）
       if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play' && ab.kind !== 'conditional')) return [{ type: 'procEffect', frameId: top.id, items: [] }]
-      const env: Env = { self: d.sourceIid, you: d.by, slots: (d.eng.slots as Record<string, string[]>) ?? {}, trigger: d.trigger, declId: d.id, declared: (d.eng.declared as Env['declared']) ?? {} }
+      const env: Env = { self: d.sourceIid, you: d.by, slots: (d.eng.slots as Record<string, string[]>) ?? {}, trigger: d.trigger, declId: d.id, declared: (d.eng.declared as Env['declared']) ?? {}, ...(d.eng.host ? { host: d.eng.host as string } : {}) }
       const resolveChoices: Task[] = ab.kind === 'conditional' ? [] : ab.choices.filter((c) => c.when !== 'declare').map((choice) => ({ op: { op: 'choose', choice } as Op }))
       // D23: 部分的な打ち消し（おあずけ）。counterPart:'draw' なら、この効果の中の op:'draw' だけ実行しない（他は今までどおり）
       const dropDraw = (ops: Op[]): Op[] => ops.filter((o) => o.op !== 'draw')
@@ -819,13 +826,18 @@ function optionOf(ctx: EngineCtx, d: ProcDecl): string | undefined {
  * 再び見つけられないことがある。d.eng.index（decl 化したときに控えた元の能力の番号）が指す先が conditional
  * ならそれを直接使う（1枚のカードで conditional は複数あり得るので index を優先する）
  */
+/** 宣言から能力を引く名前（特殊能力・アクションアイテムは見出しの名前。イベントは null） */
+function abNameOf(d: ProcDecl): string | null {
+  return d.kind === 'ability' ? d.label : d.eng.actionItem ? (d.eng.abName as string) : null
+}
+
 function abilityOf(ctx: EngineCtx, d: ProcDecl): { ab: Ability; index: number } | null {
   const idx = d.eng.index as number | undefined
   if (idx !== undefined) {
     const ab = ctx.defs[d.eng.cardId as string]?.abilities[idx]
     if (ab && ab.kind === 'conditional') return { ab, index: idx }
   }
-  return findAbility(ctx, d.eng.cardId as string, d.kind === 'ability' ? d.label : null, d.kind === 'event' ? optionOf(ctx, d) : undefined)
+  return findAbility(ctx, d.eng.cardId as string, abNameOf(d), d.kind === 'event' && !d.eng.actionItem ? optionOf(ctx, d) : undefined)
 }
 
 /** [10][12] 構成要素: 対象が失われていないか（11-4 立ち消え） */

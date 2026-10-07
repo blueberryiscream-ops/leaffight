@@ -51,7 +51,7 @@ export interface BoardSpec {
 
 /** どの手順のどの段の窓か（原典の段番号）。省略時は「その宣言が合法になる最初の窓」（R1 の約束） */
 export interface WindowRef {
-  proc: 'ability' | 'event' | 'item' | 'field' | 'battleCard' | 'damage' | 'down' | 'battle' | 'phase'
+  proc: 'ability' | 'event' | 'costGen' | 'item' | 'field' | 'battleCard' | 'damage' | 'down' | 'battle' | 'phase'
   step: number   // ability=15-13-1・event=16-1・item=17-3・field=18-2・battleCard=19-2・damage=15-4-2・down=15-5-1・battle=20-4 の [n]
 }
 
@@ -79,7 +79,7 @@ export type Expect = (
   /** 発生済みのコストの数（その側） */
   | { costs: [side: Side, count: number] }
   /** 発生済みのコストに、そのアイコン・属性（省略可）を持つものがあるか（PHASE-R4b §2(D)・payByPlayer が W・属性そのままで移すことの確認。FAQ:1341・1344） */
-  | { costToken: [side: Side, icon: 'W' | 'R' | 'G' | 'L' | 'T', attr?: Attr] }
+  | { costToken: [side: Side, icon: 'W' | 'R' | 'G' | 'L' | 'T', attr?: Attr | null] }
   /** バトル種目になったバトルカード */
   | { battleCard: string }
   | { ready: [ref: string, ready: boolean] }

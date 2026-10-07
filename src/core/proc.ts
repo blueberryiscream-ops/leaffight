@@ -466,6 +466,18 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
   },
 }
 
+/**
+ * その段の《タイミング名》。アクションアイテムの宣言（17-7・17-7-1。decl.eng.actionItem・kind は 'event' と同じ手順）は
+ * 《イベントカードを使用する／したとき》《アイテムカードを使用したとき》《特殊能力を使用したとき》には当たらない
+ * （FAQ:1080＝アイテムの効果を使用する行為は『アイテムカードを使用したとき』でない）。窓は他のアクションと同じく開く。
+ * 'ability'/'event' 以外と、アクションアイテムでない宣言は STEP_TIMINGS のまま
+ */
+export function stepNames(frame: ProcFrame): string[] {
+  const names = STEP_TIMINGS[frame.kind]?.[frame.step]?.names ?? []
+  if (frame.decl?.eng.actionItem && frame.kind === 'event' && (frame.step === 8 || frame.step === 11)) return []
+  return names
+}
+
 const LAST_STEP: Record<ProcKind, number> = {
   ability: 14,
   event: 14,
@@ -1388,7 +1400,10 @@ function enterAction(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       const src = decl.sourceIid ? state.cards[decl.sourceIid] : undefined
       let s = state
       let represented = false
-      if (frame.kind === 'event') {
+      if (decl.eng.actionItem) {
+        // 17-7: アクションアイテムは手札から出さない。再提示＝装備されたまま場にあること（ゴミ箱送りは使用代償として [9] で払う）
+        represented = !!src && src.attachedTo !== null && onField(state.cards[src.attachedTo])
+      } else if (frame.kind === 'event') {
         if (src && src.zone === 'pending') {
           s = moveTo(s, src.iid, 'trash')
           represented = true
@@ -2164,7 +2179,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const items: SimulItem[] = [...decls.map(declItem), ...action.items.map((it) => ({ ...it, type: (it.decl ? 'action' : 'effect') as SimulItem['type'], status: 'pending' as const }))]
       if (items.length === 0) return { state: setFrame(s0, { ...advance({ ...g, battle }), window: null }), log: '' }
       const s1 = setFrame(s0, { ...g, battle, status: 'resume', resume: 'afterTiming' })
-      const label = `《${STEP_TIMINGS[f.kind][f.step]?.names.join('》《')}》の処理`
+      const label = `《${stepNames(f).join('》《')}》の処理`
       return { state: pushSimul(s1, items, label, f.id, items.length > 1)[0], log: label }
     }
     case 'procPay': {

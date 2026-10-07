@@ -148,6 +148,11 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
   if (!info) return { cost: { icons: [], attrs: [] }, unknown: [] }
   if (abilityName === null) return { cost: cardCost(info), unknown: [] }
   const a = info.abilities.find((x) => x.header === abilityName)
+  if (!a && info.kind === 'i') {
+    // 17-7-1 アクションアイテム: 印刷の見出しも使用代償の表記も無い。使用代償は「このアイテムをゴミ箱送りにする」（記述の cost。R4c G11a-1）
+    const ab = ctx.defs[cardId]?.abilities.find((x) => x.kind === 'activated' && x.name === abilityName)
+    if (ab && ab.kind === 'activated') return { cost: ab.cost, unknown: [] }
+  }
   return parseCostText(a?.cost ?? '')
 }
 
@@ -351,7 +356,10 @@ export function payNow(
       const amount = typeof o.kiryoku === 'number' ? o.kiryoku : evalExpr(ctx, state, env, o.kiryoku)
       kiryoku.push({ iid: c.iid, delta: -amount })
     } else if ('trash' in o) {
-      if (!self || !isCharOnField(state.cards[self])) return fail('ゴミ箱送りにするキャラがいない')
+      // 17-7-1: アクションアイテム（装備先がフィールドにいる装備中のアイテム）も「このアイテムをゴミ箱送りにする」を払える
+      const sc = self ? state.cards[self] : undefined
+      const onFieldItem = !!sc && sc.attachedTo !== null && isCharOnField(state.cards[sc.attachedTo])
+      if (!self || !(isCharOnField(sc) || onFieldItem)) return fail('ゴミ箱送りにするキャラがいない')
       trash.push(self)
     } else if ('down' in o) {
       if (!self || !isCharOnField(state.cards[self])) return fail('ダウンさせるキャラがいない')
