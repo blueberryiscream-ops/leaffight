@@ -1182,7 +1182,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'adjustDamage':
       if (!trigger?.damage) return manual('増減するダメージが無い')
-      return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: op.delta, all: op.scope === 'allSimultaneous' }] }
+      return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: op.delta, all: op.scope === 'allSimultaneous', ...(op.halve ? { halve: true } : {}) }] }
     case 'generateCost': {
       // D21: 効果でコストを発生させる。icons が配列なら固定の並び、{ callCostOf } ならそのカードの印刷された呼び出しコスト＋extra
       const seat = op.who ? resolvePlayer(state, env, op.who) : env.you

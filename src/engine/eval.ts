@@ -294,6 +294,17 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.sexIs[0])
     return xs.length > 0 && xs.every((x) => { const s = ctx.cards[state.cards[x]?.cardId ?? '']?.sex; return s === c.sexIs[1] || s === '両方' })
   }
+  if ('oppositeSex' in c) {
+    // NH-24: 「両方」は誰とでも異性（無しを除く）。無しはどれとも異性でない
+    const sx = (x: string) => ctx.cards[state.cards[x]?.cardId ?? '']?.sex ?? ''
+    const xs = resolveRef(state, env, c.oppositeSex[0])
+    const ys = resolveRef(state, env, c.oppositeSex[1])
+    return xs.length > 0 && ys.length > 0 && xs.every((x) => ys.every((y) => { const a = sx(x), b = sx(y); return a !== '' && b !== '' && (a === '両方' || b === '両方' || a !== b) }))
+  }
+  if ('nameStarts' in c) {
+    const xs = resolveRef(state, env, c.nameStarts[0])
+    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.name ?? '').startsWith(c.nameStarts[1]))
+  }
   if ('some' in c) {
     return resolveRef(state, env, c.some).some((x) => evalCond(ctx, state, { ...env, it: x }, c.cond))
   }

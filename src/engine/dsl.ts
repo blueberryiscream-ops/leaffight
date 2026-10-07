@@ -142,6 +142,8 @@ export type Cond =
   // ── R4c G2a で足した（NH-23・NH-27）
   | { battleNamed: string }                    // 進行中のバトルの種目（バトルカード）のカード名が一致し、種目が決まっている（[18]〜[28]・oldrule 20-5。インファイトで攻防・テキストが変わっても名前のまま FAQ:4042）
   | { sexIs: [CardRef, '男性' | '女性'] }      // その性別か「両方」なら真。性別無しはどちらにも偽（FAQ:2939）
+  | { oppositeSex: [CardRef, CardRef] }       // 異性（NH-24）: 男性⇔女性。「両方」は男性・女性・両方の誰とでも異性。性別無しはどれとも異性でない（どちらが無しでも偽）。R4c G2b-2a《衣装・きわどい服》
+  | { nameStarts: [CardRef, string] }          // カード名が prefix で始まる（「衣装」で始まるアイテム。R4c G2b-2a。equipsNamed と同じ prefix の考え方）
   | { some: CardRef; cond: Cond }              // 参照が指す複数のうち1つでも cond（it＝その1枚）を満たせば真。「対戦キャラが〜なら」の複数参加（NH-23）。既存の every の Cond は変えない
   | { sameName: [CardRef, CardRef] }           // 2枚の名前が一致する（動的な相手。D18「同名キャラがいる」・R4a-2）
   /** 今の窓を開いた宣言（env.trigger）の元の能力・イベントの効果が、その op を含むか（再帰。forEach・if・simul・offer の中も見る）。
@@ -222,7 +224,7 @@ export type Op =
   | { op: 'draw'; player: PlayerRef; n: number | Expr }        // n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）
   // ── 進行中の処理を書き換える（MTG の置換効果の代わり。原典には置換効果という概念が無い）
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
-  | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous' }
+  | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous'; halve?: true }  // halve＝今のダメージを半分・端数切り上げ（《衣装・純白のドレス》。1以上のときだけ。delta は 0 にする。R4c G2b-2a）
   /**
    * 打ち消し（原典に定義が無い ❓）。part が無ければ全体（H-8: 範囲は「その効果」だけ）。
    * part: 'draw'（D23・おあずけ・R4a-2）＝その効果のうち「ドロー」の操作（op:'draw'）だけを打ち消す（他は処理する）。
@@ -487,7 +489,7 @@ export interface CardDef {
    * 装備対象（17-1）。notLeader＝リーダーには装備できない／leaderOnly＝リーダーのみ／friendlyOnly＝味方キャラのみ（持ち主の味方。使用権の移動 K8 は後）／
    * bound＝装備対象がそのアイテムを使って選んだ1枚に決まる（《電波での復活》「ゴミ箱のキャラクター」。付け替え・タッグの引き継ぎで満たさなくなる FAQ:550・559）。R3 で足した
    */
-  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean; leaderOnly?: boolean; friendlyOnly?: boolean; bound?: boolean }
+  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean; leaderOnly?: boolean; friendlyOnly?: boolean; bound?: boolean; sex?: '男性' | '女性' }
   battle?: {
     atk: BattleExpr
     def: BattleExpr

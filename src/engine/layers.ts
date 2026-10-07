@@ -571,6 +571,8 @@ function equipProblem(ctx: EngineCtx, state: BoardState, item: CardInstance | un
     if (eq.leaderOnly && host.zone !== 'leader') return 'リーダーのみ装備できる'
     // 味方キャラのみ: 装備させるプレイヤー（宣言のとき）／アイテムの持ち主（付け替えのあと。使用権の移動 K8 は後）の味方【決めたこと】
     if (eq.friendlyOnly && (by ?? item.owner) !== (controllerOf(state, hostIid) ?? host.owner)) return '味方キャラのみ装備できる'
+    // 性別の装備対象（《衣装・純白のドレス》は女性キャラのみ。「両方」は装備できる FAQ:2622・NH-24。R4c G2b-2a）。性別無し・別の性別は断る
+    if (eq.sex) { const sx = ctx.cards[host.cardId]?.sex; if (sx !== eq.sex && sx !== '両方') return `${eq.sex}キャラしか装備できない` }
     const bound = state.layers.bound[item.iid]
     if (eq.bound && bound && bound !== hostIid) return '装備対象はこのアイテムで選んだキャラ'
   }

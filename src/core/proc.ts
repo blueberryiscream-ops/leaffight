@@ -1948,6 +1948,8 @@ export type ProcAction =
       recipient?: string
       delta?: number
       all?: boolean
+      /** 今のダメージを半分にする（端数切り上げ。《衣装・純白のドレス》R4c G2b-2a） */
+      halve?: boolean
       /** 受け手がこのダメージを受けない（継続効果「ダメージを受けない」。15-4-2[5] の前＝身代わりの後 FAQ:1706）。値は理由 */
       prevent?: string
     }
@@ -2490,6 +2492,14 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (action.recipient && action.recipient !== d.recipient) {
         trace.push({ kind: 'name', text: `受け手の差し替え:${d.recipient}→${action.recipient}` })
         s = setFrame(s, { ...f, damage: { ...d, recipient: action.recipient, rerun: true, origRecipient: d.origRecipient ?? d.recipient } })
+      }
+      if (action.halve) {
+        // 半減（端数切り上げ。0以下は増減しない 20-10）。《衣装・純白のドレス》R4c G2b-2a
+        const g = findFrame(s, f.id)!
+        if (g.damage!.value > 0) {
+          s = setFrame(s, { ...g, damage: { ...g.damage!, value: Math.ceil(g.damage!.value / 2) } })
+          trace.push({ kind: 'name', text: 'ダメージ半減' })
+        }
       }
       if (action.delta) {
         const g = findFrame(s, f.id)!
