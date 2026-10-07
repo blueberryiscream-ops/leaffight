@@ -294,7 +294,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
   // K6（D3）: costMod（増減）を今の状態でまとめて適用したもので支払い方法を宣言する（払う段 [9] でも同じ一か所を通す＝engineStep 'pay'）
-  const cost = effectiveCost(ctx, state, isEvent || isAI ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
+  const cost = effectiveCost(ctx, state, isAI ? 'actionItem' : isEvent ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
   const plan = planPayment(ctx, state, req.by, isEvent || isAI ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
@@ -540,7 +540,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       const d = top.decl!
       const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, abNameOf(d))
       // K6（D3）: 払う段で改めて評価する（declareOne と同じ effectiveCost）
-      const cost = effectiveCost(ctx, state, d.kind, d.by, d.sourceIid, d.targets, printedCost)
+      const cost = effectiveCost(ctx, state, d.eng.actionItem ? 'actionItem' : d.kind, d.by, d.sourceIid, d.targets, printedCost)
       const r = payNow(ctx, state, top.id, d, cost)
       if (!r.ok) warnings.push(`${d.label}: ${r.reason}`)
       return [{ type: 'procPay', frameId: top.id, ok: r.ok, consume: r.consume, kiryoku: r.kiryoku, trash: r.trash, down: r.down }]

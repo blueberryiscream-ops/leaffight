@@ -372,6 +372,11 @@ export interface Violation {
   sourceIid: string | null
 }
 
+/** 宣言の種類（禁止・対象にならない・使用代償の増減が見る）。アクションアイテム（decl.kind は 'event' と同じ手順）は 'その他'（17-7・FAQ:1080・3428。統括24） */
+export function declActionKind(decl: ProcDecl): ActionPattern['kinds'][number] {
+  return (decl.eng as { actionItem?: boolean } | undefined)?.actionItem ? 'その他' : ACTION_KIND[decl.kind]
+}
+
 export const ACTION_KIND: Record<ProcDecl['kind'], ActionPattern['kinds'][number]> = {
   ability: '特殊能力',
   event: 'イベント',
@@ -471,7 +476,7 @@ function forEachReach(ctx: EngineCtx, state: BoardState, decl: ProcDecl): string
 /** 宣言が層の「禁止・対象にならない・特殊能力を失っている」に当たるか（宣言[1]〜[5] を済ませた ProcDecl で調べる） */
 export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): Violation[] {
   const out: Violation[] = []
-  const kind = ACTION_KIND[decl.kind]
+  const kind = declActionKind(decl)
   const d = derived(ctx, state)
   const name = (iid: string) => ctx.cards[state.cards[iid]?.cardId ?? '']?.name ?? iid
   for (const e of d.effs) {

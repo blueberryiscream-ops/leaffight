@@ -160,8 +160,8 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
  * K6（D3・D4）: 払うとき（15-13-1[9]・16-1[9]・17-3 の同じ段）の状態で、印刷値の使用代償へ costMod をまとめて適用したもの。
  * declareOne の支払い方法の宣言・payNow の支払いの両方が、この一か所を通る（統括「使用代償の構造の算出を一か所に」PHASE §3-7）
  */
-export function effectiveCost(ctx: EngineCtx, state: BoardState, actionKind: ProcDecl['kind'], by: Seat, sourceIid: string | null, targets: string[], cost: Cost): Cost {
-  const mod = costModOf(ctx, state, ACTION_KIND[actionKind], by, sourceIid, targets, cost)
+export function effectiveCost(ctx: EngineCtx, state: BoardState, actionKind: ProcDecl['kind'] | 'actionItem', by: Seat, sourceIid: string | null, targets: string[], cost: Cost): Cost {
+  const mod = costModOf(ctx, state, actionKind === 'actionItem' ? 'その他' : ACTION_KIND[actionKind], by, sourceIid, targets, cost) // actionItem＝アクションアイテムの宣言（17-7。イベントの増減は掛からない）
   return applyCostMod(cost, mod)
 }
 
