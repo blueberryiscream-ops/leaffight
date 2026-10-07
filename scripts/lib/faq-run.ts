@@ -589,7 +589,7 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
         run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
         doDeclare(run, i, { by: step.challenge.by, source: step.challenge.participant, battle: true })
         run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
-      } else if ('generateCost' in step) doDeclare(run, i, { by: step.generateCost.by, source: step.generateCost.source, at: step.generateCost.at, costGen: true })
+      } else if ('generateCost' in step) doDeclare(run, i, { by: step.generateCost.by, source: step.generateCost.source, at: step.generateCost.at, costGen: true, ...(step.generateCost.also ? { payWith: step.generateCost.also } : {}) })
       else if ('advancePhase' in step) {
         // フェイズを進める（10-2-2）。今の手順を終えてから
         for (let g = 0; g < 600 && (run.state.proc.length || baseOpen(run.state)) && !run.state.result; g++) if (!autoStep(run)) break

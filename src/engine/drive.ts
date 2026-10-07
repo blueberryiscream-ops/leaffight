@@ -201,6 +201,13 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       return { ok: false, reason: 'コストの発生源にできない（7-2）' }
     }
     const icon = fromHand ? 'W' : src.zone === 'leader' ? 'L' : info?.kind === 't' ? 'T' : 'G'
+    // 1回のコスト発生で複数のキャラを消耗させる宣言（FAQ:3384。ケースの also＝payWith で渡す。場の待機状態の自分のキャラだけ）
+    const moreSources: ProcDecl['sources'] = fromHand ? [] : (req.payWith ?? []).flatMap((iid) => {
+      const m = state.cards[iid]
+      const mi = m ? ctx.cards[m.cardId] : undefined
+      if (!m || !mi || !isCharOnField(m) || m.orientation !== 'ready' || controllerOf(state, m.iid) !== req.by) return []
+      return [{ iid, from: 'field' as const, icon: (m.zone === 'leader' ? 'L' : mi.kind === 't' ? 'T' : 'G') as CostIcon, attrs: attrsOf(mi) }]
+    })
     const decl: ProcDecl = {
       id,
       by: req.by,
@@ -210,7 +217,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       sourceIid: src.iid,
       targets: [],
       costGens: [],
-      sources: [{ iid: src.iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }],
+      sources: [{ iid: src.iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }, ...moreSources],
       trigger: frame?.id ?? null,
       usageKey: null,
       eng: {},
@@ -255,7 +262,9 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     }
   } else if (speed === '通常型') {
     // アクションアイテムは『その他のアクション』＝バトル中（[4]〜[28]）や処理の途中（《コストを発生するとき》など）には宣言できない（FAQ:314・317・3431）
-    if (frame) return { ok: false, reason: isAI ? 'アクションアイテムはメイン・終了フェイズの手順の外でだけ宣言できる（FAQ:314・317・3431）' : '通常型は処理の途中に宣言できない（11-1）' }
+    // R4c G3a: alsoInterrupt を持つ特殊能力は、その窓（《コストを発生するとき》）でも宣言できる
+    const alsoOk = !isEvent && !isAI && !!frame && !!(ab as Activated).alsoInterrupt && triggerMatches(ctx, state, env, (ab as Activated).alsoInterrupt!, frame)
+    if (frame && !alsoOk) return { ok: false, reason: isAI ? 'アクションアイテムはメイン・終了フェイズの手順の外でだけ宣言できる（FAQ:314・317・3431）' : '通常型は処理の途中に宣言できない（11-1）' }
   } else {
     if (!frame) return { ok: false, reason: '割込型の使用タイミングでない（手順の外）' }
     if (ab.trigger && !triggerMatches(ctx, state, env, ab.trigger, frame)) {
@@ -317,7 +326,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: found.cardId, index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: found.cardId, index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
@@ -794,6 +803,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   const plan = planPayment(ctx, state, req.by, null, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]）' }
   eng.usePool = plan.usePool
+  if (!plan.usePool) eng.preIds = state.costs[req.by].map((t) => t.id)
   eng.poolIds = plan.poolIds
   const label = kind === 'call' ? `呼び出し:${info.name}` : kind === 'tag' ? `タッグ化:${info.name}` : kind === 'equip' ? `装備:${info.name}` : kind === 'field' ? `フィールド配置:${info.name}` : `バトルカード配置:${info.name}`
   const decl: ProcDecl = {
@@ -1221,6 +1231,15 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: op.delta, all: op.scope === 'allSimultaneous', ...(op.halve ? { halve: true } : {}) }] }
     case 'generateCost': {
       // D21: 効果でコストを発生させる。icons が配列なら固定の並び、{ callCostOf } ならそのカードの印刷された呼び出しコスト＋extra
+      // R4c G3a（NH-33⑦）: 属性 'choose' は処理時に使用者が5属性から1つ選ぶ（選択の枠を前に積み、選び終えてからこの Op を { slot } の形で実行する）
+      if (op.attr === 'choose') {
+        const attrSlot = `costAttr${eng.seq}`
+        const pick: Choice = { slot: attrSlot, chooser: 'you', pick: { option: ['力', '早', '賢', '根', '感'] }, count: [1, 1], mode: 'select', when: 'resolve' }
+        return { tasks: [{ op: { op: 'choose', choice: pick }, bind: task.bind }, { op: { ...op, attr: { slot: attrSlot } }, bind: task.bind }, ...rest], actions: [] }
+      }
+      const costAttrs: string[] = typeof op.attr === 'string' ? [op.attr] : op.attr ? (env.slots[op.attr.slot] ?? []).filter((a) => ['力', '早', '賢', '根', '感'].includes(a)).slice(0, 1) : []
+      // 属性を選べなかった（5属性以外）なら発生しない＝属性無しの G は出せない（FAQ:1392）
+      if (op.attr && typeof op.attr === 'object' && costAttrs.length === 0) return { tasks: rest, actions: [] }
       const seat = op.who ? resolvePlayer(state, env, op.who) : env.you
       const icons = Array.isArray(op.icons)
         ? op.icons
@@ -1230,7 +1249,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (icons.length === 0 || times <= 0) return { tasks: rest, actions: [] }
       // D20: useAs があれば、発生させたコストは useAs（借金取りの使用者）の発生済みのコストになる
       const useAsSeat = op.useAs ? resolvePlayer(state, env, op.useAs) : undefined
-      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: [] }))).flat(), useAsSeat }] }
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: costAttrs }))).flat(), useAsSeat }] }
     }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない

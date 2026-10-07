@@ -329,8 +329,12 @@ export function payNow(
   const usePool = decl.eng.usePool !== false
   // payPool（R2u）: 宣言で指定した発生済みのコストだけを使う
   const poolIds = (decl.eng.poolIds as string[] | undefined) ?? []
+  // 7-2[6]: 発生源を再提示できず中断したコスト発生は、窓で発生したコストも含めて全部失われる（FAQ:3384・照合表 A-11）
+  const lostGen = state.procMeta.aborted.some((a) => a.declId.startsWith(`${decl.id}.cg`))
+  const preIds = lostGen ? undefined : (decl.eng.preIds as string[] | undefined)
   const tokens = state.costs[by]
-    .filter((t: CostToken) => usePool || t.frameId === frameId || poolIds.includes(t.id))
+    // R4c G3a: 支払い方法を指定した宣言（usePool:false）でも、宣言した**後**に [3] の窓で発生したコスト（助太刀・お手伝い・お店番）は払える（7-3）。宣言の前からあったコストは使えない（FAQ:2959）
+    .filter((t: CostToken) => usePool || t.frameId === frameId || poolIds.includes(t.id) || (preIds !== undefined && !preIds.includes(t.id)))
     .map((t) => ({ id: t.id, icon: t.frameId === frameId ? t.icon : ('W' as CostIcon), attrs: t.attrs }))
   const fail = (reason: string) => ({ ok: false, reason, consume: [], kiryoku: [], trash: [], down: [] })
   let consume: string[] | null = null

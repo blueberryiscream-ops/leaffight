@@ -1458,16 +1458,25 @@ function enterCostGen(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): 
     case 4: {
       // [4] 再提示できた発生源を消耗・ゴミ箱送り（[6] 再提示できなければ中断）
       let s = state
+      // 再提示できた発生源はすべて消耗・ゴミ箱送りにする（先に見つかった再提示できない発生源で止めない）。1つでも再提示できなければ [6] で中断（FAQ:3384・規 258: 再提示できたもう1体は消耗したまま）
+      let unrepresented = false
       for (const src of decl.sources) {
         const c = s.cards[src.iid]
         if (src.from === 'field') {
-          if (!onField(c) || c.orientation !== 'ready') return abortFrame(s, frame, '発生源を再提示できない', trace)
+          if (!onField(c) || c.orientation !== 'ready') {
+            unrepresented = true
+            continue
+          }
           s = { ...s, cards: { ...s.cards, [c.iid]: { ...c, orientation: 'rested' } } }
         } else {
-          if (!c || c.zone !== 'hand' || c.owner !== decl.by) return abortFrame(s, frame, '発生源を再提示できない', trace)
+          if (!c || c.zone !== 'hand' || c.owner !== decl.by) {
+            unrepresented = true
+            continue
+          }
           s = moveTo(s, c.iid, 'trash')
         }
       }
+      if (unrepresented) return abortFrame(s, frame, '発生源を再提示できない', trace)
       return setFrame(s, { ...advance(frame) })
     }
     case 5: {

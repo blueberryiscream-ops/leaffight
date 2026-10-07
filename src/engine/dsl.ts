@@ -249,7 +249,9 @@ export type Op =
   // 効果でコストを発生させる（D21・R4a-2）。得たコストは「その他の代償」（7-3）としてすぐ使える（frameId 無し）。
   // icons が配列＝固定の並び（臨時収入の[WWW]等）／{ callCostOf }＝そのカードの印刷された呼び出しコスト＋extra（サクリファイス）
   // useAs（D20・R4a-2）＝発生させたコストは who ではなく useAs の発生済みのコストになる（《借金取り》「支払ったコストは相手プレイヤーが使用する」）
-  | { op: 'generateCost'; who?: PlayerRef; times?: Expr; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] }; useAs?: PlayerRef }
+  | { op: 'generateCost'; who?: PlayerRef; times?: Expr; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] }; useAs?: PlayerRef;
+      /** 発生するコストの属性（R4c G3a・NH-33⑦）。Attr＝固定（お手伝い「[力]属性の[GG]」）／'choose'＝処理時に効果の使用者が5属性から1つ選ぶ（助太刀・お店番「好きな属性の」。属性無しは選べない FAQ:1392）／{ slot }＝選び終えた枠（'choose' が内部で展開した形）。省略＝属性なし */
+      attr?: Attr | 'choose' | { slot: string } }
   /**
    * 宣言時に選んだ数など、処理の途中で計算した値を後で参照できるように控える（D23「記憶喪失」の『同じ枚数』・R4a-2）。
    * { chosen: slot } で読む（Pick { number } の答えと同じしくみを流用）
@@ -434,6 +436,8 @@ export type Ability =
       trigger?: Trigger              // 割込型の「〜とき」
       usableIf?: Cond                // 宣言時の制限（満たさないと宣言できない＝空打ち 11-3）
       perTurn?: number               // 【１ターンにｎ回まで】oldrule.txt:1173-1175。能力インスタンスごとに数える
+      /** 通常型に**加えて**割込型でも使える（「コストを発生するときに使うこともできる」＝お手伝い・お店番。R4c G3a）。speed は '通常型' のまま、ここに書いた窓でも宣言できる */
+      alsoInterrupt?: Trigger
       choices: Choice[]
       effect: Op[]
     }

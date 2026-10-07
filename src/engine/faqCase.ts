@@ -62,7 +62,7 @@ export type Step =
       payWith?: string[]
       /** 宣言時に選ぶ選択肢（バニッシュのどれか・回復する数など） */
       option?: string } }
-  | { generateCost: { by: Side; source: string; icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr; at?: WindowRef } }
+  | { generateCost: { by: Side; source: string; icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr; at?: WindowRef; also?: string[] } }
   | { advancePhase: { to: 'エントリー' | 'メイン' | '終了' | '手札調整' | 'ターン終了' } }
   | { pass: Side | { side: Side; at?: WindowRef } }
   | { choose: { by: Side; pick: string[] | string } }
