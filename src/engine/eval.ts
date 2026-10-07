@@ -284,6 +284,19 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const xs = resolveRef(state, env, c.downed)
     return xs.length > 0 && xs.every((x) => state.cards[x]?.zone === 'trash')
   }
+  if ('battleNamed' in c) {
+    // 種目が決まった [18]〜[28]（20-5）。バトルカードの名前で見る（FAQ:4042）。種目が変われば（バトルチェンジ）今の種目で読み直す（FAQ:1028）
+    const bf = nearestBattle(state)
+    const bc = bf?.battle?.battleCard
+    return !!bf && !!bc && bf.step >= 18 && ctx.cards[state.cards[bc]?.cardId ?? '']?.name === c.battleNamed
+  }
+  if ('sexIs' in c) {
+    const xs = resolveRef(state, env, c.sexIs[0])
+    return xs.length > 0 && xs.every((x) => { const s = ctx.cards[state.cards[x]?.cardId ?? '']?.sex; return s === c.sexIs[1] || s === '両方' })
+  }
+  if ('some' in c) {
+    return resolveRef(state, env, c.some).some((x) => evalCond(ctx, state, { ...env, it: x }, c.cond))
+  }
   if ('sameName' in c) {
     const a = resolveRef(state, env, c.sameName[0])[0]
     const b = resolveRef(state, env, c.sameName[1])[0]

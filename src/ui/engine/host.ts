@@ -34,6 +34,7 @@ export interface PoolCardLike {
   battleDef?: string
   cells?: string[]
   charTypes?: string[]
+  sex?: string
 }
 
 export function cardInfoFromPool(p: PoolCardLike): CardInfo {
@@ -47,6 +48,7 @@ export function cardInfoFromPool(p: PoolCardLike): CardInfo {
     attr: p.attr,
     abilities: (p.abilities ?? []).map((a) => ({ header: a.header, cost: a.cost })),
     charTypes: p.charTypes ?? [],
+    sex: (p.sex || (p.cells?.some((x) => x.includes('男性・女性')) ? '両方' : '')) as CardInfo['sex'],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),
   }
 }

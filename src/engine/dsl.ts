@@ -139,6 +139,10 @@ export type Cond =
   | { hasAbility: [CardRef, string] }          // 印刷された特殊能力の見出しがちょうどその名前のものを持つか（「「アイドル」を持っているキャラ」。FAQ:3762 アイドル声優は該当しない。R4b-3b-1）
   | { isKind: [CardRef, CardKind] }            // カードの種別（c・t・b・i・e・f）が一致するか（《パーティ》の分岐・D19・R4a-2）
   | { downed: CardRef }                        // そのカードが今ゴミ箱にある＝ダウン処理が打ち消されずに終わった近似（D22・D16・R4a-2）
+  // ── R4c G2a で足した（NH-23・NH-27）
+  | { battleNamed: string }                    // 進行中のバトルの種目（バトルカード）のカード名が一致し、種目が決まっている（[18]〜[28]・oldrule 20-5。インファイトで攻防・テキストが変わっても名前のまま FAQ:4042）
+  | { sexIs: [CardRef, '男性' | '女性'] }      // その性別か「両方」なら真。性別無しはどちらにも偽（FAQ:2939）
+  | { some: CardRef; cond: Cond }              // 参照が指す複数のうち1つでも cond（it＝その1枚）を満たせば真。「対戦キャラが〜なら」の複数参加（NH-23）。既存の every の Cond は変えない
   | { sameName: [CardRef, CardRef] }           // 2枚の名前が一致する（動的な相手。D18「同名キャラがいる」・R4a-2）
   /** 今の窓を開いた宣言（env.trigger）の元の能力・イベントの効果が、その op を含むか（再帰。forEach・if・simul・offer の中も見る）。
    *  「ドローする効果をもつ」（D23・おあずけ）の宣言時の制限に使う。カード構造の検査なので board 状態ではない */
@@ -328,7 +332,7 @@ export interface ActionPattern {
 
 export type Continuous =
   /** when: この条件を満たしている間だけ（《柏木千鶴》恐怖「このキャラが挑んだバトルに参加している間」。R3） */
-  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
+  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr | 'atk' | 'def'; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
   /** 最高値と最低値を入れ替える。入れ替えるのは**印刷値（元の能力値）**で常に同じ（H-6・統括12 2026-09-26 D1: 元 力5・感1＋力+2 → 力1・感5）。
    *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }

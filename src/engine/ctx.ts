@@ -27,6 +27,8 @@ export interface CardInfo {
   battleAtk?: string
   battleDef?: string
   place?: string
+  /** 性別（pool の sex。タッグの「男性・女性」は '両方'。無ければ ''。R4c G2a） */
+  sex?: '男性' | '女性' | '両方' | ''
 }
 
 export interface EngineCtx {

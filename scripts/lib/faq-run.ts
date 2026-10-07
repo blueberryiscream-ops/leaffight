@@ -648,6 +648,7 @@ export function cardInfoOf(p: {
   battleDef?: string
   cells?: string[]
   charTypes?: string[]
+  sex?: string
 }): CardInfo {
   return {
     id: p.id,
@@ -659,6 +660,7 @@ export function cardInfoOf(p: {
     attr: p.attr,
     abilities: p.abilities.map((a) => ({ header: a.header, cost: a.cost })),
     charTypes: p.charTypes ?? [],
+    sex: (p.sex || (p.cells?.some((x) => x.includes('男性・女性')) ? '両方' : '')) as CardInfo['sex'],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),
   }
 }

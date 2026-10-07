@@ -277,6 +277,11 @@ export function battleMod(ctx: EngineCtx, state: BoardState, iid: string, side: 
     const m = bodyOf(l).mod
     if (m && l.kind === '攻防修正' && m.stat === side && l.targets.includes(iid)) n += m.delta
   }
+  // 常時効果（ce statMod の攻防修正）。《エリート》「[攻]＋２できる」（R4c G2a・FAQ:1281）
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce === 'statMod' && f.kind === '攻防修正' && f.stat === side && effectOn(ctx, state, e, iid)) n += evalExpr(ctx, state, e.env, f.delta)
+  }
   for (const m of manualMods(state, iid)) if (m.kind === '攻防修正' && m.battleStat === side && m.delta !== undefined) n += m.delta
   return n
 }
