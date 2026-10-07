@@ -1183,7 +1183,10 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'kiryoku': {
       const delta = evalExpr(ctx, state, env, op.delta)
       // NH-31②: 《腹ぺこ》のキャラには回復効果（recover:true）が及ばない（対象には選べる・回復数がマイナスでも及ばない）
-      return { tasks: rest, actions: refs(op.who).filter((iid) => !(op.recover && recoverIgnored(ctx, state, iid))).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
+      // R4c G11b-3（命の香炉・NH-31①）: 部分の打ち消し(kiryokuDown)＝この宣言の効果のうち only のカードへの気力減（recover でない負の delta）だけ及ばない。他のカードへの気力減・他の op は通る
+      const cf = env.declId ? findFrame(state, env.declId) : undefined
+      const kiryokuCut = cf?.counterPart === 'kiryokuDown' && !op.recover && delta < 0 ? cf.counterOnly : undefined
+      return { tasks: rest, actions: refs(op.who).filter((iid) => iid !== kiryokuCut && !(op.recover && recoverIgnored(ctx, state, iid))).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
     }
     case 'setKiryoku':
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procSetKiryoku', iid, value: op.value }) as BoardAction) }
@@ -1244,7 +1247,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       }
       if (!targetId) return manual('打ち消す宣言が見つからない')
       // D23: part があれば全体ではなく、その部分（draw の操作）だけを打ち消す
-      if (op.part) return { tasks: rest, actions: [{ type: 'procCounterPart', frameId: targetId, part: op.part }] }
+      if (op.part) return { tasks: rest, actions: [{ type: 'procCounterPart', frameId: targetId, part: op.part, ...(op.only ? { only: refs(op.only)[0] } : {}) }] }
       return { tasks: rest, actions: [{ type: 'procCounter', frameId: targetId }] }
     }
     case 'hijack': {

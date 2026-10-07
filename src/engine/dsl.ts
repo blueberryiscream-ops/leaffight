@@ -149,6 +149,9 @@ export type Cond =
   /** 今の窓を開いた宣言（env.trigger）の元の能力・イベントの効果が、その op を含むか（再帰。forEach・if・simul・offer の中も見る）。
    *  「ドローする効果をもつ」（D23・おあずけ）の宣言時の制限に使う。カード構造の検査なので board 状態ではない */
   | { declaredHasOp: string }
+  /** 今の窓を開いた宣言の効果に、そのカードの気力を直接減らす op（op:kiryoku・recover でない・delta が負）があり、宣言の時点でそのカードに及ぶ（対象に選んだ・全体の効果に含まれる）。
+   *  ダメージ・使用代償の気力－・回復数マイナスの回復（recover:true）は含まない（規 1195-1199・NH-31②④）。《命の香炉》R4c G11b-3 */
+  | { declaredReducesKiryoku: CardRef }
 
 // ───────────────────────────────────────────────────────────────
 // §3 選択 — 「対象にとる」と「とらない」を分ける
@@ -229,9 +232,10 @@ export type Op =
   /**
    * 打ち消し（原典に定義が無い ❓）。part が無ければ全体（H-8: 範囲は「その効果」だけ）。
    * part: 'draw'（D23・おあずけ・R4a-2）＝その効果のうち「ドロー」の操作（op:'draw'）だけを打ち消す（他は処理する）。
+   * part: 'kiryokuDown'（R4c G11b-3・命の香炉 NH-31①）＝その効果のうち、only のカードへの気力を減らす操作（op:kiryoku・recover でない負の delta）だけを打ち消す（他のキャラへの気力減・他の op は処理する）。
    * 'thisEffect' はこの効果自身（env.declId のフレーム）を指す。残りの Op（rest）は実行しない
    */
-  | { op: 'counter'; what: 'thisEffect' | { declared: CardRef }; part?: 'draw' }
+  | { op: 'counter'; what: 'thisEffect' | { declared: CardRef }; part?: 'draw' | 'kiryokuDown'; only?: CardRef }
   /**
    * 効果の乗っ取り（D11〜D15・R4a-2）。what.declared が指す宣言（いただきます＝相手のイベント／幸せ泥棒＝
    * 処理条件がある常時効果の《効果が発生したとき》の機会 NH-17）の効果を、乗っ取った側（you）が使う。

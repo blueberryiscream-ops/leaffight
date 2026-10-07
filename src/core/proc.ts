@@ -248,7 +248,9 @@ export interface ProcFrame {
   /** ability/event: 効果が打ち消された（H-8: 範囲は「その効果」だけ） */
   countered?: boolean
   /** ability/event: 部分的な打ち消し（D23・おあずけ）。'draw'＝ドローの操作（op:'draw'）だけ実行しない。他は今までどおり処理する */
-  counterPart?: 'draw'
+  counterPart?: 'draw' | 'kiryokuDown'
+  /** counterPart:'kiryokuDown' のとき、気力減を打ち消す相手のカード（このキャラへの気力減だけ。NH-31①） */
+  counterOnly?: string
   cgIndex?: number
   /** costGen: 種類が有効なアクションのフレーム（7-3） */
   bindTo?: string | null
@@ -1974,7 +1976,7 @@ export type ProcAction =
       prevent?: string
     }
   | { type: 'procCounter'; frameId: string }
-  | { type: 'procCounterPart'; frameId: string; part: 'draw' }
+  | { type: 'procCounterPart'; frameId: string; part: 'draw' | 'kiryokuDown'; only?: string }
   | { type: 'procTrace'; entry: ProcTrace }
   /** 状況を作る（FAQ テストの force・画面の手動）: 同時処理の効果を1つ積む */
   | { type: 'procStart'; item: Omit<SimulItem, 'status' | 'type'> }
@@ -2567,7 +2569,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const f = findFrame(state, action.frameId)
       if (!f || (f.kind !== 'ability' && f.kind !== 'event')) return null
       trace.push({ kind: 'name', text: `部分的に打ち消す（${action.part}）:${f.label}` })
-      return { state: setFrame(state, { ...f, counterPart: action.part }), log: `「${f.label}」の一部（${action.part}）を打ち消した` }
+      return { state: setFrame(state, { ...f, counterPart: action.part, ...(action.only ? { counterOnly: action.only } : {}) }), log: `「${f.label}」の一部（${action.part}）を打ち消した` }
     }
     case 'procTrace':
       trace.push(action.entry)

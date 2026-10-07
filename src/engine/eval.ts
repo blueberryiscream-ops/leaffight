@@ -334,6 +334,19 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     if (!ab) return false
     return hasOpDeep(opsOf(ab), c.declaredHasOp)
   }
+  if ('declaredReducesKiryoku' in c) {
+    const f = triggerFrame(state, env)
+    const d = f?.decl
+    const cardId = d?.eng.cardId as string | undefined
+    const idx = d?.eng.index as number | undefined
+    const ab = cardId !== undefined && idx !== undefined ? abilityAt(ctx, cardId, idx) : undefined
+    if (!ab || !d) return false
+    const targets = resolveRef(state, env, c.declaredReducesKiryoku)
+    if (targets.length === 0) return false
+    // 宣言した行動の側から見る（self＝宣言したカード・you＝宣言したプレイヤー・slots＝宣言時に決めた対象）
+    const denv: Env = { self: d.sourceIid, you: d.by, slots: (d.eng.slots as Record<string, string[]>) ?? {}, trigger: env.trigger, declId: d.id, declared: (d.eng.declared as Env['declared']) ?? {}, ...(d.eng.host ? { host: d.eng.host as string } : {}) }
+    return reducesKiryokuOf(ctx, state, denv, opsOf(ab), targets)
+  }
   // pureAttrs は R4 以降
   return false
 }
@@ -341,6 +354,18 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
 /** その能力・イベントの効果の Op の列（choices を持たない conditional もそのまま） */
 function opsOf(ab: Ability): Op[] {
   return ab.kind === 'activated' || ab.kind === 'play' || ab.kind === 'conditional' ? ab.effect : []
+}
+
+/** ops（forEach・if・simul・offer の中も）に、targets のどれかの気力を直接減らす op（kiryoku・recover でない・負の delta）があるか（《命の香炉》R4c G11b-3） */
+function reducesKiryokuOf(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[], targets: string[]): boolean {
+  return ops.some((o) => {
+    if (o.op === 'kiryoku') return !o.recover && evalExpr(ctx, state, env, o.delta) < 0 && resolveRef(state, env, o.who).some((x) => targets.includes(x))
+    if (o.op === 'forEach') return select(ctx, state, env, o.in).some((x) => reducesKiryokuOf(ctx, state, { ...env, slots: { ...env.slots, [o.as]: [x] } }, o.do, targets))
+    if (o.op === 'simul') return reducesKiryokuOf(ctx, state, env, o.do, targets)
+    if (o.op === 'if') return reducesKiryokuOf(ctx, state, env, evalCond(ctx, state, env, o.cond) ? o.then : (o.else ?? []), targets)
+    if (o.op === 'offer') return reducesKiryokuOf(ctx, state, env, [...o.pay, ...o.ifPaid, ...o.ifDeclined], targets)
+    return false
+  })
 }
 
 /** Op の列に、name の op が（forEach・if・simul・offer の中も含めて）含まれるか（D23「ドローする効果をもつ」の判定） */
