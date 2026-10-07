@@ -245,7 +245,7 @@ export type Op =
   // 効果でコストを発生させる（D21・R4a-2）。得たコストは「その他の代償」（7-3）としてすぐ使える（frameId 無し）。
   // icons が配列＝固定の並び（臨時収入の[WWW]等）／{ callCostOf }＝そのカードの印刷された呼び出しコスト＋extra（サクリファイス）
   // useAs（D20・R4a-2）＝発生させたコストは who ではなく useAs の発生済みのコストになる（《借金取り》「支払ったコストは相手プレイヤーが使用する」）
-  | { op: 'generateCost'; who?: PlayerRef; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] }; useAs?: PlayerRef }
+  | { op: 'generateCost'; who?: PlayerRef; times?: Expr; icons: CostIcon[] | { callCostOf: CardRef; extra?: CostIcon[] }; useAs?: PlayerRef }
   /**
    * 宣言時に選んだ数など、処理の途中で計算した値を後で参照できるように控える（D23「記憶喪失」の『同じ枚数』・R4a-2）。
    * { chosen: slot } で読む（Pick { number } の答えと同じしくみを流用）
@@ -356,6 +356,7 @@ export type Continuous =
   /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
   | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }
   | { ce: 'cannotGenerateCost'; who: CardRef }
+  | { ce: 'ignoreRecover'; who: CardRef }                                                 // 気力を回復させる効果（kiryoku recover:true）の影響を受けない（《腹ぺこ》NH-31②。対象には選べる）
   | { ce: 'cannotEquip'; who: CardRef }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
@@ -434,6 +435,8 @@ export type Ability =
   | { kind: 'static'; name?: string; effects: Continuous[] }
   /** 処理条件がある常時効果（12-2-1）。宣言しない・割り込み型アクションでもない。該当タイミングで自動で処理される */
   | { kind: 'conditional'; name?: string; trigger: Trigger; optional: boolean; effect: Op[]
+      /** 同じタイミングの他の処理（軽減など）が済んだ後で処理する（《ダメージ保険》NH-31③。同時処理の順の最後に回す） */
+      late?: true
       /** フィールドカードの効果を両プレイヤーそれぞれのものとして処理する（18-1「お互いのプレイヤーや場に及ぼします」・FAQ:4105。R2b で足した）。AP→NAP */
       eachPlayer?: boolean }
   /** カード本体のプレイ（イベントの効果など）。16-1 の14段を通る。name は「次のうち１つ」の選択肢の名前（declare.option で選ぶ・R2a で足した） */

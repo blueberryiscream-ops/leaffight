@@ -305,6 +305,12 @@ export function battleMod(ctx: EngineCtx, state: BoardState, iid: string, side: 
   return n
 }
 
+/** 《腹ぺこ》: 気力を回復させる効果（kiryoku recover:true）の影響を受けないキャラか（NH-31②）。受けないなら効果の名前 */
+export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): string | null {
+  for (const e of derived(ctx, state).effs) if (e.effect.ce === 'ignoreRecover' && effectOn(ctx, state, e, iid)) return e.layer.label
+  return null
+}
+
 /** 気力の上限（15-4）: 元の上限（リーダーは×2）に maxKiryoku の層を連番の順で重ねる */
 export function maxKiryokuOf(ctx: EngineCtx, state: BoardState, iid: string): number | null {
   const c = state.cards[iid]

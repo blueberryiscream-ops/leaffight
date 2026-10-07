@@ -213,6 +213,8 @@ export interface SimulItem {
   damage?: DamageSeed
   /** effect のときエンジンの持ち物（処理の残り・選択など） */
   eng: Record<string, unknown>
+  /** 同じ同時処理の他の項目が済んだ後で処理する（conditional の late。《ダメージ保険》） */
+  late?: boolean
   status: 'pending' | 'running' | 'done' | 'skipped'
 }
 
@@ -1700,7 +1702,8 @@ function applyOrder(state: BoardState, frame: ProcFrame, pick: string[]): BoardS
     const i = sim.items.findIndex((it, j) => it.key === k && !picked.includes(j))
     if (i >= 0) picked.push(i)
   }
-  const order = [...picked, ...sim.items.map((_, i) => i).filter((i) => !picked.includes(i))]
+  const order0 = [...picked, ...sim.items.map((_, i) => i).filter((i) => !picked.includes(i))]
+  const order = [...order0.filter((i) => !sim.items[i].late), ...order0.filter((i) => sim.items[i].late)]
   const apPos = order.findIndex((i) => sim.items[i].type === 'action' && sim.items[i].by === ap)
   const napPos = order.findIndex((i) => sim.items[i].type === 'action' && sim.items[i].by !== ap)
   if (apPos >= 0 && napPos >= 0 && napPos < apPos) [order[apPos], order[napPos]] = [order[napPos], order[apPos]]

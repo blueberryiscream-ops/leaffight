@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -920,7 +920,7 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
         awaiting: null,
         seq: 0,
       }
-      return { key: h.key, label: h.ab.name ?? nameOf(ctx, state, h.iid), by: h.env.you, sourceIid: h.iid, eng: eng as unknown as Record<string, unknown> }
+      return { key: h.key, label: h.ab.name ?? nameOf(ctx, state, h.iid), by: h.env.you, sourceIid: h.iid, eng: eng as unknown as Record<string, unknown>, ...(h.ab.late ? { late: true } : {}) }
     })]
 }
 
@@ -1178,7 +1178,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'kiryoku': {
       const delta = evalExpr(ctx, state, env, op.delta)
-      return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
+      // NH-31②: 《腹ぺこ》のキャラには回復効果（recover:true）が及ばない（対象には選べる・回復数がマイナスでも及ばない）
+      return { tasks: rest, actions: refs(op.who).filter((iid) => !(op.recover && recoverIgnored(ctx, state, iid))).map((iid) => ({ type: 'procKiryoku', iid, delta, max: maxKiryokuOf(ctx, state, iid) }) as BoardAction) }
     }
     case 'setKiryoku':
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procSetKiryoku', iid, value: op.value }) as BoardAction) }
@@ -1217,10 +1218,12 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const icons = Array.isArray(op.icons)
         ? op.icons
         : [...parseCost(refs(op.icons.callCostOf).map((iid) => infoOf(ctx, state, iid)?.cost ?? '').join('')), ...(op.icons.extra ?? [])]
-      if (icons.length === 0) return { tasks: rest, actions: [] }
+      // times: 発生させる回数（《ダメージ保険》＝受けたダメージの数。0以下なら発生しない）
+      const times = op.times === undefined ? 1 : evalExpr(ctx, state, env, op.times)
+      if (icons.length === 0 || times <= 0) return { tasks: rest, actions: [] }
       // D20: useAs があれば、発生させたコストは useAs（借金取りの使用者）の発生済みのコストになる
       const useAsSeat = op.useAs ? resolvePlayer(state, env, op.useAs) : undefined
-      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: icons.map((icon) => ({ icon, attrs: [] })), useAsSeat }] }
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: [] }))).flat(), useAsSeat }] }
     }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない
