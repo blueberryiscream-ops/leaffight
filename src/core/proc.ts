@@ -1294,7 +1294,7 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
     switch (frame.step) {
       case 2: {
         // [2] AP は任意に消耗状態の自分のキャラを待機状態にする
-        const opts = fieldChars(state, ap).filter((x) => x.orientation === 'rested')
+        const opts = fieldChars(state, ap).filter((x) => x.orientation === 'rested' && !state.layers.noEntryReady.includes(x.iid))
         if (opts.length === 0) return setFrame(state, advance(frame))
         return coreChoice(state, frame, { by: ap, kind: 'select', purpose: 'entryReady', prompt: '待機状態に戻すキャラ（10-4[2]・任意）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 0, max: opts.length })
       }
@@ -1933,6 +1933,8 @@ export type ProcAction =
   | { type: 'procKiryoku'; iid: string; delta: number; max: number | null }
   | { type: 'procSetKiryoku'; iid: string; value: number }
   | { type: 'procOrient'; iid: string; to: 'ready' | 'rested' }
+  /** バトルカードの使用済み／未使用（効果。《猫寄せドラ》） */
+  | { type: 'procBattleUsed'; iids: string[]; used: boolean }
   | { type: 'procMove'; iid: string; to: 'trash' | 'hand' | 'deckTop' | 'deckBottom' | 'field' | 'battle'; orientation?: 'ready' | 'rested'; kiryoku?: number; attachItemsFrom?: string; owner?: Seat }
   | { type: 'procSwapZones'; seat: Seat; order: string[] }
   | { type: 'procDraw'; seat: Seat; n: number }
@@ -2017,7 +2019,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
-      bar?: { challenge: string[]; any: string[]; receiveRested: string[] }
+      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[] }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2078,7 +2080,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {
@@ -2376,6 +2378,12 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!c || c.kiryoku === null) return { state, log: '' }
       trace.push({ kind: 'name', text: `気力を${action.value}にする:${action.iid}` })
       return { state: changeKiryoku(state, action.iid, action.value), log: `気力を ${action.value} にした` }
+    }
+    case 'procBattleUsed': {
+      const cards = { ...state.cards }
+      for (const iid of action.iids) if (cards[iid]?.zone === 'battle') cards[iid] = { ...cards[iid], used: action.used }
+      trace.push({ kind: 'name', text: action.used ? '使用済み' : '未使用' })
+      return { state: { ...state, cards }, log: action.used ? 'バトルカードを使用済みにした' : 'バトルカードを未使用にした' }
     }
     case 'procOrient': {
       const c = state.cards[action.iid]

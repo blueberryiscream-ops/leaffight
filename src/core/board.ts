@@ -114,9 +114,11 @@ export interface LayerState {
   barAny: string[]
   /** 消耗状態でもバトルを受けるキャラに選べるキャラ（receiveWhenRested。20-4[11] の候補に足す。《坂神蝉丸》守る者 R4c G2b-1a。エンジンが導き出して置く控え。中身の意味は持たない） */
   receiveRested: string[]
+  /** 10-4[2] の規定の待機戻しの候補から外すキャラ（noEntryReady。《病気》R4c G11a-2。エンジンが導き出して置く控え。中身の意味は持たない） */
+  noEntryReady: string[]
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [] }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [] }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。

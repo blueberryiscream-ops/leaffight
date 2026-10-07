@@ -483,6 +483,10 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const x = card(e.ready[0])
     return { ok: !!x && (x.orientation === 'ready') === e.ready[1], msg: `${e.ready[0]} の状態 = ${x?.orientation}（期待 ${e.ready[1] ? '待機' : '消耗'}）` }
   }
+  if ('used' in e) {
+    const x = card(e.used[0])
+    return { ok: !!x && !!x.used === e.used[1], msg: `${e.used[0]} の使用済み = ${x?.used}（期待 ${e.used[1]}）` }
+  }
   if ('downs' in e) {
     const v = s.downs[seatOf(e.downs[0])]
     return { ok: v === e.downs[1], msg: `ダウン数 ${e.downs[0]} = ${v}（期待 ${e.downs[1]}）` }

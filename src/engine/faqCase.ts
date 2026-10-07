@@ -83,6 +83,7 @@ export type Expect = (
   /** バトル種目になったバトルカード */
   | { battleCard: string }
   | { ready: [ref: string, ready: boolean] }
+  | { used: [ref: string, used: boolean] }   // バトルカードの使用済み／未使用（R4c G11a-2）
   | { stat: [ref: string, attr: Attr, value: number] }
   | { downs: [side: Side, value: number] }
   | { result: 'youWin' | 'opponentWins' | 'draw' | 'continues' }

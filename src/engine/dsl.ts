@@ -221,6 +221,7 @@ export type Op =
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
   | { op: 'trash'; what: CardRef }
+  | { op: 'setBattleUsed'; what: Selector; used: boolean }       // バトルカードを使用済み／未使用にする（19-3。《猫寄せドラ》R4c G11a-2。reusable でも使用済みにする）
   | { op: 'draw'; player: PlayerRef; n: number | Expr }        // n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）
   // ── 進行中の処理を書き換える（MTG の置換効果の代わり。原典には置換効果という概念が無い）
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
@@ -395,6 +396,9 @@ export type Continuous =
   /** 「消耗状態でもこのバトルを受けることができる」（《坂神蝉丸》守る者 R4c G2b-1a）: 20-4[11] の受けるキャラの候補に、消耗状態のこのキャラを足す（待機状態の他のキャラ・リーダーも今どおり選べる）。
    *  core はカードを知らない: barFromBattle と同じ流れでエンジンが layers で iid を導き出して core の LayerState.receiveRested に置く。addContinuous・duration endOfBattle で使う */
   | { ce: 'receiveWhenRested'; who: CardRef | Selector }
+  /** 「エントリー時に待機状態に戻すことができなくなる」（《病気》R4c G11a-2・FAQ:631）: 10-4[2] の規定の待機戻しの候補から外す（効果で待機にするのは可 FAQ:628）。
+   *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.noEntryReady に置く（reusable と同じ流れ） */
+  | { ce: 'noEntryReady'; who: CardRef | Selector }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）

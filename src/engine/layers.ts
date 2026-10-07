@@ -717,10 +717,16 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     if (e.effect.ce !== 'receiveWhenRested') continue
     for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !barNow.receiveRested.includes(x)) barNow.receiveRested.push(x)
   }
+  const noEntryReady: string[] = []
+  for (const e of d.effs) {
+    if (e.effect.ce !== 'noEntryReady') continue
+    for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !noEntryReady.includes(x)) noEntryReady.push(x)
+  }
+  noEntryReady.sort()
   barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
+  const barChanged = noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -769,7 +775,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
-      ...(barChanged ? { bar: barNow } : {}),
+      ...(barChanged ? { bar: { ...barNow, noEntryReady } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
     })

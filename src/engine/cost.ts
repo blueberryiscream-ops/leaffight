@@ -357,10 +357,13 @@ export function payNow(
       kiryoku.push({ iid: c.iid, delta: -amount })
     } else if ('trash' in o) {
       // 17-7-1: アクションアイテム（装備先がフィールドにいる装備中のアイテム）も「このアイテムをゴミ箱送りにする」を払える
-      const sc = self ? state.cards[self] : undefined
+      // NH-30①（《猫寄せドラ》）: trash の対象は CardRef（既定 self。equipped＝宣言時の装備先 decl.eng.host）
+      const tenv = { self, you: by, slots: (decl.eng.slots as Record<string, string[]> | undefined) ?? {}, trigger: null, declId: null, declared: {}, ...(decl.eng.host ? { host: decl.eng.host as string } : {}) }
+      const tgt = resolveRef(state, tenv, o.trash)[0]
+      const sc = tgt ? state.cards[tgt] : undefined
       const onFieldItem = !!sc && sc.attachedTo !== null && isCharOnField(state.cards[sc.attachedTo])
-      if (!self || !(isCharOnField(sc) || onFieldItem)) return fail('ゴミ箱送りにするキャラがいない')
-      trash.push(self)
+      if (!tgt || !(isCharOnField(sc) || onFieldItem)) return fail('ゴミ箱送りにするキャラがいない')
+      trash.push(tgt)
     } else if ('down' in o) {
       if (!self || !isCharOnField(state.cards[self])) return fail('ダウンさせるキャラがいない')
       down.push(self)

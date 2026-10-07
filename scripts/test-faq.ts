@@ -226,6 +226,8 @@ if (existsSync(cardsDir)) {
       // 17-7-1 アクションアイテム（見出しも使用代償の表記も無い）: 使用代償が「このアイテムをゴミ箱送りにする」だけのアイテムの起動型は印刷との突き合わせの対象外
       const o = ab.cost.other
       if (!printed && info.kind === 'i' && ab.cost.icons.length === 0 && o?.length === 1 && 'trash' in o[0]) continue
+      // 《病気》のように使用代償が [W] だけ（解除。FAQ:625。R4c G11a-2）も同じ（印刷に見出しが無い）
+      if (!printed && info.kind === 'i' && ab.cost.icons.length > 0 && ab.cost.icons.every((i) => i === 'W') && !o?.length) continue
       if (!printed) { defProblems.push(`${f}: 能力「${ab.name}」が pool.json に無い`); continue }
       const { cost, unknown } = parseCostText(printed.cost)
       if (unknown.length || JSON.stringify(cost) !== JSON.stringify(ab.cost)) defProblems.push(`${f}: 「${ab.name}」の cost が元表記「${printed.cost}」の読み取りと違う`)

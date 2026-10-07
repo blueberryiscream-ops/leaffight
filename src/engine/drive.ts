@@ -298,6 +298,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const plan = planPayment(ctx, state, req.by, isEvent || isAI ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
+  // FAQ:3396: 『その他（カードの効果によるアクション）』の途中ではコストを発生させられない＝アクションアイテムは発生済みのコストからだけ払える（7-2・16-1[4]）
+  if (isAI && plan.costGens.length) return { ok: false, reason: 'アクションアイテムの宣言ではコストを発生させられない＝発生済みのコストからだけ払える（FAQ:3396）' }
   warnings.push(...plan.warn)
 
   const label = isAI ? `${info?.name ?? src.cardId}（${(ab as Activated).name}）` : isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name
@@ -1182,6 +1184,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: refs(op.who).map((iid) => ({ type: 'procSetKiryoku', iid, value: op.value }) as BoardAction) }
     case 'orient':
       return { tasks: rest, actions: refs(op.who).filter((iid) => isCharOnField(state.cards[iid])).map((iid) => ({ type: 'procOrient', iid, to: op.to }) as BoardAction) }
+    case 'setBattleUsed':
+      return { tasks: rest, actions: [{ type: 'procBattleUsed', iids: select(ctx, state, env, op.what), used: op.used }] }
     case 'trash':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
