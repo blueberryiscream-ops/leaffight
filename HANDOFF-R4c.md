@@ -798,3 +798,36 @@ FAQ ケース: faq-4179（パワー: 複数属性の来栖川綾香 力4→6・�
 - ❌ の取り直し（サブとは別の箇所・1つずつ）: ①drive.ts のアクションアイテムの「処理の途中は不可」を外す→ `❌ faq-314・317・321・324` ②core/proc.ts の stepNames の例外を外す→ **どのケースも ❌ にならなかった**→ 統括が `text-i_香水-10`（相手の《ガセネタ》＝「相手がイベントカードを使用したとき」は使えない）を足して `❌ text-i_香水-10` を確認
 - 🚨 **統括が直した**: アクションアイテムの宣言が禁止・対象にならない・使用代償の増減で「イベント」として扱われていた（decl.kind 'event' → ACTION_KIND）。原典 17-7 は手順をイベントと同じにするだけで、FAQ:1080・3428 のとおりイベントでも特殊能力でもない → ActionPattern の kinds に **'その他'** を足し、`layers.ts declActionKind`・`effectiveCost(…'actionItem')` で 'その他' に。《穏形法》「すべてのアクションの対象にならない」の kinds に 'その他' を足した（`text-i_手作りクッキ--9`＝穏形法の掛かった味方はクッキーで選べない。'その他' を足す前 ❌ を確認）。`text-i_香水-9`＝《ライジング・コスト》の追加[W]は掛からない（今は costIsZero でも外れるので見張りのケース）
 - 🔸 持ち越し: originOf（drive.ts:1558）はキャラ以外の発生源の効果を全部 'event' origin にしている（アクションアイテムに限らず既存のアイテムの効果も）＝「イベントの効果を失う」キャラ（lostEv）でアイテムの修正まで消える恐れ。該当カードを書く束（G6b 等）で確かめる／宣言に割り込んで [9] の前にアイテムを外すケースは、割り込める窓の名前が無いのでプールでは作れない（16-1 と同じ中断の経路）／G4 で「その他」に掛かる使用代償の増減のカードがあれば kinds に足す
+
+## G11a-2（猫寄せドラ・病気・実装セッション 2026-10-07）
+
+**完了。** 親 `0f0270e`（エンジン・実行器）／`_local/rules` `1299243`（記述2枚・ケース13件・tested）。tested 183→185（+2＝2枚とも tested。draft 5・manual 50 は変わらず）。`npm run verify` 緑（終了コード0）。test:faq: R2a ✅57・保留1／R2b ✅37／R3 ✅18／R4a ✅30／R4b ✅21／R4c ✅354（341→+13。❌0）。この節を足した HANDOFF のコミットは別（親）。ツール呼び出しは約37回。
+
+### §5 自己点検
+1. **T ケース（13件・`authored/R4c-G11a2.mjs`）。全て ✅**
+   - 猫寄せドラ: text-1 宣言→装備先 x とドラがゴミ箱・ダウン数0（両者）・**両方の場**のバトルカード（you の bcY・opponent の bcO）が使用済み・結果は続行／text-2（断る側）相手の y にこちらが装備させたドラはこちらは宣言できず、相手は宣言できる（y とドラがゴミ箱・両方使用済み）／text-3 リーダーに装備→宣言でリーダーがゴミ箱・opponentWins（9-1）／text-4（断る側）バトル中[19]は宣言できない（x・ドラは場に残る）
+   - 病気: text-1 待機の x に装備→消耗する／text-2 エントリー[2]で、病気の x を戻す選択は通らない（x・w とも消耗のまま）／text-7 同じ盤面で w を戻す選択は通る（w 待機・x 消耗のまま）／faq-628 応援で x を待機に→病気は場に残り、ターン終了の後も x は待機のまま（再び消耗しない。NH-30③）／faq-625 メインで発生済みの W を払って解除→病気がゴミ箱・発生済みのコスト0・x は消耗しない／text-3 解除したあと2回ターンを進めた自分のエントリー[2]で x を戻せる／text-4（断る側 FAQ:3396）発生済みのコスト0・待機のセリオ z がいても解除は宣言できない（z も x も待機のまま）／text-5（断る側）バトル中[19]は解除できない（W は払われない）／text-6 相手の y にこちらが装備させた病気は、こちらの解除は不可（こちらの W は残る）・相手の解除は可（相手の W は0）
+   - 期待は印刷値・本文から手計算（使用済み／消耗・待機／コストの個数／結果）。実装の出力を写していない。盤面: 使用代償 [W] は発生済みのコスト（setup の costs）から払う前提。バトル中のケースは参加キャラを消耗（x・y）。ドラの text-1〜3 の使用代償は装備先のゴミ箱送りだけ。text-i_猫寄せドラ-4 の期待に最初「bcY は未使用」と書いたが、[18] で挑んだ時点で使用済み（19-3）だったので外した（実装の誤りではなく私の期待の誤り）。
+   - **直す前 ❌（1か所ずつ外して取った。取った後は戻し、全体を回し直して R4c ✅354／❌0）**
+     - noEntryReady の判定1か所（proc.ts entry [2] の候補から `!state.layers.noEntryReady.includes(x.iid)` を外す）: `❌ text-i_病気-2: steps[0] が合法でない: いいえ（通った） / x の状態 = ready（期待 消耗）`（R4c ✅353／❌1）
+     - ドラのキャラのゴミ箱送り（使用代償）1か所（カードの cost を `{ trash: equipped }` → `{ trash: self }`＝アイテム自身だけ）: `❌ text-i_猫寄せドラ-1: x の場所 = A:char（期待 trash）`（他に -2・-3。R4c ✅351／❌3）
+     - （ここは実装を先に書いてから外して取った。仕様どおりの順＝先に ❌ を取ってから実装、にはなっていない。✅ は取り直し済み）
+2. **カードごと**
+   - 猫寄せドラ: 起動型 `任意にゴミ箱送り`・通常型・`cost.other: [{ trash: equipped }]`（装備先）・effect `setBattleUsed`（zone battleCards・side both・used true）。faqReview は関係 FAQ 0件で空。
+   - 病気: static `ce noEntryReady who equipped`／conditional（《アイテムカードを装備したとき》= i_怪しい薬と同じ形）`orient equipped rested`（装備したときの1回だけ）／起動型 `解除`（通常型・cost `[W]`・effect `trash self`）。faqReview: faq-625 case・faq-628 case・faq-631 ok（why: 規定の処理だけ止める。f_バ-ニングサン は未記述＝cards/ に無いのを ls で確認。G10 で T ケース）。manual なし。
+   - 似たカード: 起動型の名前は印刷に見出しが無いので内部名（G11a-1 と同じ）。《怪しい薬》の conditional と同じ形。
+3. **足した・変えた仕組み**
+   - `src/engine/dsl.ts`: `ce: 'noEntryReady'`・`op: 'setBattleUsed'`（Selector＋used）。
+   - `src/core/board.ts` LayerState に `noEntryReady: string[]`／`src/core/proc.ts`: entry [2] の候補から外す（`entryReady` の options）・`procLayers.bar.noEntryReady`・`procBattleUsed` アクション（battle ゾーンのカードの used を変える）。core はカード知識ゼロのまま（iid の一覧を engine が渡す。reusable と同じ形）。
+   - `src/engine/layers.ts`: `noEntryReady` を d.effs から導き出し、`bar` に載せて渡す（変化検出も barChanged に入れた）。`src/engine/drive.ts`: `setBattleUsed` の実行・**FAQ:3396 の塞ぎ**（下の6）。
+   - `src/engine/cost.ts` payNow: `trash` の対象を CardRef で解く（env に host＝宣言時の装備先。既定の self は従来どおり）。
+   - 実行器: `faqCase.ts` に expect `used`、`faq-run.ts` で判定、`test-faq.ts` の「見出しの無いアイテムの起動型」の除外に「icons が [W] だけ・other 無し」を足した（病気の解除）。
+   - 既存の動きが変わらない根拠: 追加は `isAI` の宣言と noEntryReady／setBattleUsed を持つカードだけに掛かる。R2a〜R4b と R4c 既存 341 件が同じ件数で ✅。`trash` は self を解く従来の動き（self がキャラ／場の装備アイテム）と同じ条件のまま。
+4. **盤面の状態**: 上の1のとおり。
+5. tested 183→185／test:faq・verify は冒頭。
+6. **決めたこと・迷ったこと**
+   - **FAQ:3396 をどこで塞ぐか**: 原典 7-2・16-1[4] の「支払い方法の宣言」の段（`declareOne` の `planPayment` の直後）で、`isAI` かつ `plan.costGens.length > 0`（キャラを消耗させてコストを発生させる道）なら宣言を断る。払う段 [9] は従来どおり発生済みのコスト（usePool）から。手札からの W（7-1-2）も同じ「発生」なので断る。G11a-1 の5枚はアイコンの代償が無いので影響なし。
+   - 迷った: ドラの使用代償を trash の `CardRef` 化（`equipped`）にした。他の起動型（trash self）は変わらない。
+   - 迷った: 効果「すべてのバトルカードを使用済みにする」は reusable（百物語）も使用済みにする（本文に除外なし）。百物語を場に出すケースは作っていない（`setBattleUsed` は select の全バトルカードに掛ける）。
+   - 穴の候補: 病気 text-3 の「相手のターンの間」に病気のキャラの待機戻しは起きない前提（相手のエントリーでは自分のキャラは動かない）。ほかになし。FAQ:631（バーニング・サン）は G10 で。
+7. ツール呼び出し: 約37回。
