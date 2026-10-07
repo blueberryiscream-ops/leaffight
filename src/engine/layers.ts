@@ -31,7 +31,7 @@ export interface EnvLite {
 /** 層の中身（engine の持ち物） */
 interface LayerBody {
   /** 効果で足した修正（statMod の Op） */
-  mod?: { stat: string; delta: number }
+  mod?: { stat: string; delta: number; set?: true }
   /** 継続効果 */
   effect?: Continuous
   /** 効果で足した継続効果の評価の環境（常時効果は毎回 self＝発生源・you＝その使用者） */
@@ -47,8 +47,9 @@ interface LayerBody {
 const bodyOf = (l: Layer) => l.body as LayerBody
 
 /** 効果で足した修正の層（statMod の Op・12-1）。期限: バトル終了時まで・攻防修正→ battle、それ以外→ turn */
-export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin']): LayerSeed {
-  return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: { stat, delta }, origin } }
+export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin'], set = false): LayerSeed {
+  // set＝その能力値を delta に置き換える層（《お手本》のコピー FAQ:2601。currentStats が連番の順に重ねる。R4c G2b-1b）
+  return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: set ? { stat, delta, set: true } : { stat, delta }, origin } }
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   const items: { seq: number; run: () => void }[] = []
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
-    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => (v[m.stat] += m.delta) })
+    if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => (m.set ? (v[m.stat] = m.delta) : (v[m.stat] += m.delta)) }) // set＝置き換え: この層より前の修正は上書き・後の層は足される（swapStats と同じ考え方 H-6。FAQ:2601）
   }
   for (const e of d.effs) {
     const f = e.effect

@@ -160,6 +160,8 @@ export type Pick =
   | { cards: Selector }
   | { ability: Selector; excludeNames?: string[] }    // キャラの特殊能力を1つ選ぶ（模写）
   | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase'; excludeSlot?: string }  // excludeSlot＝その枠で選んだ能力値は選べない（《選り取りバトル》「[攻]／[防]は同じ能力値を使ってはならない」）
+  /** 候補をあるキャラの属性に絞る（《アドバイス》「消耗させたキャラの属性と同じ能力値１つ」NH-27⑤。of＝そのキャラ・印刷の属性。R4c G2b-1b）。属性が1つなら選択を出さず、属性なしなら候補0＝選ばない */
+  | { stat: CardRef; rule: 'attrOf'; of: CardRef }
   | { option: string[] }
   | { number: { min: number } }  // 数を選ぶ（可変の使用代償・D16「世話焼き」。答えは数の文字列。1以上・上限は無いが候補は実装で有限に区切る）
   | { player: true }             // プレイヤーを選ぶ（候補は chooser の相手だけ。D20「借金取り」・NH-20。答えは席の文字）
@@ -212,7 +214,7 @@ export type Duration =
 // ───────────────────────────────────────────────────────────────
 
 export type Op =
-  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration }  // 攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
+  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set' }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
   | { op: 'damage'; to: CardRef; amount: Expr }                  // 15-4-2 ダメージ処理を起動する（気力を直接いじらない）
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }

@@ -368,6 +368,11 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     const banned = p.excludeSlot ? env.slots[p.excludeSlot]?.[0] : undefined
     return ['力', '早', '賢', '根', '感'].filter((a) => a !== banned).map((a) => ({ key: a, label: a }))
   }
+  // 候補をあるキャラの属性に絞る（《アドバイス》NH-27⑤）。印刷の属性（attrsOf）。属性なしなら候補0
+  if ('stat' in p && p.rule === 'attrOf') {
+    const c = state.cards[resolveRef(state, env, p.of)[0] ?? '']
+    return attrsOf(c ? ctx.cards[c.cardId] : undefined).map((a) => ({ key: a, label: a }))
+  }
   // プレイヤーを選ぶ（D20・借金取り）。候補は chooser の相手だけ（NH-20：自分は選べない）
   if ('player' in p) {
     const seat = other(resolvePlayer(state, env, ch.chooser))
@@ -1287,6 +1292,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (options.length < min0 && ch.mode === 'target') {
         return { tasks: [], actions: [{ type: 'procTrace', entry: { kind: 'abort', text: `${item.label}: 適切な対象が無い（立ち消え）`, id: item.key } }] }
       }
+      // 属性で絞った能力値の候補が1つなら選択を出さずにそれに決める（NH-27⑤「属性が1つなら選択を出さない」）
+      if ('stat' in ch.pick && ch.pick.rule === 'attrOf' && options.length === 1) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [options[0].key] } } }, actions: [] }
       if (options.length === 0) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [] } } }, actions: [] }
       const id = `${frame.id}:${item.key}:${ch.slot}:${eng.seq}`
       if (ch.repeat) {
@@ -1428,7 +1435,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const until = op.duration === 'endOfBattle' || op.kind === '攻防修正' ? 'battle' : 'turn'
       if (op.duration !== 'endOfBattle' && op.duration !== 'endOfTurn' && op.duration !== 'instant') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い`)
       const origin = originOf(state, env)
-      const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin))
+      const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, op.mode === 'set' ? `${item.label} ${stat}=${delta}` : `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin, op.mode === 'set'))
       return { tasks: rest, actions: add.length ? [{ type: 'procLayers', add }] : [] }
     }
     case 'addContinuous': {
