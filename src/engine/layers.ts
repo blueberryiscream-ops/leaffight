@@ -519,6 +519,14 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     const u = untargetableBy(ctx, state, t, kind)
     if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
   }
+  // FAQ:1168・228: 支払い方法（payWith）で提示したコスト発生の発生源（場のキャラ）も「コスト発生」の対象として扱う
+  for (const g of decl.costGens ?? []) {
+    for (const s of g) {
+      if (s.from !== 'field' || allTargets.has(s.iid)) continue
+      const u = untargetableBy(ctx, state, s.iid, 'コスト発生')
+      if (u) out.push({ kind: 'untargetable', text: `${name(s.iid)}は「${u.layer.label}」によりコスト発生の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
+    }
+  }
   // 参加キャラに対して効果を発揮する特殊能力・イベントは使えない（FAQ:3735 の線引き。効果が参加キャラに及ばなければ使える＝3070・1013・3224）。
   // 及ぶ＝対象に選ぶ／選ばずに決まる（R4b0 の暗黙の対象 implicitTargetsOf）／forEach・selector で及ぶ
   if (decl.kind === 'ability' || decl.kind === 'event') {

@@ -215,7 +215,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       actionType: frame ? '割込型' : '通常型',
       label: 'コスト発生',
       sourceIid: src.iid,
-      targets: [],
+      // FAQ:1168・228: 消耗させる発生源（場のキャラ）は「コスト発生」の対象として扱う（穏形法などで断る）
+      targets: fromHand ? [] : [src.iid, ...moreSources.map((m) => m.iid)],
       costGens: [],
       sources: [{ iid: src.iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }, ...moreSources],
       trigger: frame?.id ?? null,
