@@ -681,14 +681,20 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const unusable = new Set<string>()
   const d = derived(ctx, state)
   for (const e of d.effs) if (e.effect.ce === 'battleCardUnusable') for (const x of targetsOf(ctx, state, e)) unusable.add(x)
-  const barNow = { challenge: [] as string[], any: [] as string[] }
+  const barNow = { challenge: [] as string[], any: [] as string[], receiveRested: [] as string[] }
   for (const e of d.effs) {
     if (e.effect.ce !== 'barFromBattle') continue
     for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !barNow[e.effect.role].includes(x)) barNow[e.effect.role].push(x)
   }
+  // 守る者（receiveWhenRested）: 消耗状態でも受けるキャラの候補に足すキャラ
+  for (const e of d.effs) {
+    if (e.effect.ce !== 'receiveWhenRested') continue
+    for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !barNow.receiveRested.includes(x)) barNow.receiveRested.push(x)
+  }
+  barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',')
+  const barChanged = barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -783,7 +789,7 @@ export const LIMIT_RULES: LimitRule[] = [
   { id: 'battleCards', rule: 'バトルカードの配置制限: 自分のフィールドに3枚まで', where: '19-1 oldrule.txt:980-986' },
 ]
 
-function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'charCount' | 'sameName' | 'component'): boolean {
+export function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'charCount' | 'sameName' | 'component'): boolean {
   // 例外は DSL の exemptLimit（常時効果。カードの特性 FAQ:1962）
   const c = state.cards[iid]
   const def = c ? ctx.defs[c.cardId] : undefined

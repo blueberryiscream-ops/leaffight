@@ -41,7 +41,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, clearableMods, collectEffectTargets, continuousSeed, damagePrevented, exempt, isCharSource, limitFix, maxKiryokuOf, modSeed, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -741,7 +741,8 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   let components: string[] | undefined
   if (kind === 'call') {
     // 15-2 同名キャラ制限・キャラ数制限（宣言時の制限 15-10-1）
-    if (mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
+    // 《HM-13》量産:「同名キャラの制限を受けない」（exemptLimit sameName。手札のこのカード自身の特性で見る FAQ:3536）
+    if (!exempt(ctx, state, src.iid, 'sameName') && mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
     if (mine.filter((c) => c.zone !== 'leader').length >= 5) return { ok: false, reason: 'キャラ数制限（15-2）' }
   } else if (kind === 'tag') {
     // 15-10-2[4]: 構成要素の2枚（フィールドの待機状態のキャラ1体以上＋残りは手札）。名前はタッグの名前（「＆」の前後）
@@ -760,7 +761,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
       } else if (state.cards[t].zone !== 'hand') return { ok: false, reason: `構成要素が自分のフィールドにも手札にも無い: ${nm}` }
     }
     if (onFieldN === 0) return { ok: false, reason: '構成要素のキャラが自分のフィールドに1体もいない（15-10-2）' }
-    if (mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
+    if (!exempt(ctx, state, src.iid, 'sameName') && mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
     components = targets
   } else if (kind === 'equip') {
     // 17-3[3] 装備対象（フィールドのキャラ。装備対象の種類の制限 17-1 は K4＝R3）

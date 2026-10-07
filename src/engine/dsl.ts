@@ -385,6 +385,9 @@ export type Continuous =
    *  受ける側の候補が0なら[12]で自動的にリーダーが参加する（FAQ:1165。oldrule 20-4[11][12]）。
    *  core はカードを知らない: エンジンが layers で外すキャラの iid を導き出して core の LayerState に置く（oncePerChar と同じ流れ） */
   | { ce: 'barFromBattle'; who: CardRef | Selector; role: 'challenge' | 'any' }
+  /** 「消耗状態でもこのバトルを受けることができる」（《坂神蝉丸》守る者 R4c G2b-1a）: 20-4[11] の受けるキャラの候補に、消耗状態のこのキャラを足す（待機状態の他のキャラ・リーダーも今どおり選べる）。
+   *  core はカードを知らない: barFromBattle と同じ流れでエンジンが layers で iid を導き出して core の LayerState.receiveRested に置く。addContinuous・duration endOfBattle で使う */
+  | { ce: 'receiveWhenRested'; who: CardRef | Selector }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）

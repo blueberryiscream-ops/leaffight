@@ -1114,7 +1114,9 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       // 20-8: 待機状態のキャラか、リーダー（消耗状態でもよい）
       const chars = fieldChars(state, d)
       // 効果で「バトルに参加することができない」キャラは候補から外す。候補が0なら[12]で自動的にリーダーが参加する（FAQ:1165）
-      const opts = [...chars.filter((x) => x.zone !== 'leader' && x.orientation === 'ready'), ...chars.filter((x) => x.zone === 'leader')].filter((x) => !state.layers.barAny.includes(x.iid))
+      // 効果で「消耗状態でもバトルを受けることができる」キャラ（《坂神蝉丸》守る者）は消耗状態でも候補に足す（待機状態の他のキャラ・リーダーは今どおり選べる）。
+      // 選ばれたら[11]の「その後、そのキャラを消耗させる」は消耗済みなので変化なし
+      const opts = [...chars.filter((x) => x.zone !== 'leader' && (x.orientation === 'ready' || state.layers.receiveRested.includes(x.iid))), ...chars.filter((x) => x.zone === 'leader')].filter((x) => !state.layers.barAny.includes(x.iid))
       if (opts.length === 0) return setFrame(state, advance(frame))
       return coreChoice(state, frame, { by: d, kind: 'select', purpose: 'battleParticipant', prompt: 'バトルを受けるキャラ（20-4[11]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
@@ -1998,7 +2000,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
-      bar?: { challenge: string[]; any: string[] }
+      bar?: { challenge: string[]; any: string[]; receiveRested: string[] }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2059,7 +2061,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {
