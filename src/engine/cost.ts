@@ -12,7 +12,7 @@ import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
 import { grantedOfDef } from './abilities'
-import { ACTION_KIND, applyCostMod, costModOf } from './layers'
+import { ACTION_KIND, applyCostMod, cannotGenerateIids, costModOf } from './layers'
 import { evalExpr, resolveRef } from './eval'
 
 const ICONS = 'WRGLT'
@@ -251,8 +251,11 @@ export function planPayment(
 
 /** 余った属性アイコン（8-2-1）: その属性を持つキャラが自分のフィールドに待機状態でいるか（exclude＝支払いで消耗させるキャラ） */
 function readyAttrsOk(ctx: EngineCtx, state: BoardState, by: Seat, attrs: Attr[], exclude: string[] = []): boolean {
+  if (!attrs.length) return true
+  // 「コストを発生できない」キャラ（《ビンボー》《電波の傀儡》）は属性だけを出すこともできない（FAQ:2754。R4c G3c）
+  const noGen = cannotGenerateIids(ctx, state)
   return attrs.every((a) =>
-    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && attrsOf(ctx.cards[c.cardId]).includes(a)),
+    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && !noGen.has(c.iid) && attrsOf(ctx.cards[c.cardId]).includes(a)),
   )
 }
 

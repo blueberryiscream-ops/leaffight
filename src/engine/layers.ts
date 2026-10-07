@@ -619,6 +619,13 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
 // 使用代償の増減（K6・D3・D4）
 // ───────────────────────────────────────────────────────────────
 
+/** 「コストを発生することができない」（cannotGenerateCost）の効果が掛かっているキャラ。属性だけを出すこと（8-2-1 の余りの属性アイコン）もできない（FAQ:2754。R4c G3c） */
+export function cannotGenerateIids(ctx: EngineCtx, state: BoardState): Set<string> {
+  const out = new Set<string>()
+  for (const e of derived(ctx, state).effs) if (e.effect.ce === 'cannotGenerateCost') for (const x of targetsOf(ctx, state, e)) out.add(x)
+  return out
+}
+
 /** 当てはまる costMod を全部（層の順）集めて足し合わせる。宣言前（declareOne）は decl がまだ無いので軽い形で渡す。
  *  printedCost: applies.costIsZero（《ライジング・コスト》）の判定に使う印刷値の使用代償 */
 export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern['kinds'][number], by: Seat, sourceIid: string | null, targets: string[] = [], printedCost?: Cost): { icons: Partial<Record<CostIcon, number>>; kiryoku: number } {
