@@ -12,7 +12,7 @@ import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
 import { grantedOfDef } from './abilities'
-import { ACTION_KIND, applyCostMod, cannotGenerateIids, costModOf, costSetOf } from './layers'
+import { ACTION_KIND, applyCostMod, attrsNow, cannotGenerateIids, costModOf, costSetOf } from './layers'
 import { evalExpr, resolveRef } from './eval'
 
 const ICONS = 'WRGLT'
@@ -218,7 +218,7 @@ export function planPayment(
     if (c.zone === 'hand') return { iid, from: 'hand', icon: 'W', attrs: [] } // 7-1-2: 手札からは無属性の W
     if (!isCharOnField(c)) return null
     const icon: CostIcon = iid === sourceIid ? 'R' : c.zone === 'leader' ? 'L' : info.kind === 't' ? 'T' : 'G'
-    return { iid, from: 'field', icon, attrs: attrsOf(info) }
+    return { iid, from: 'field', icon, attrs: attrsNow(ctx, state, iid) }
   }
   if (payWith?.length || payPool?.length) {
     // D21: payWith にイベント（コストを発生するときに割込型として使える）の iid があれば、それは CostSource にしない
@@ -280,7 +280,7 @@ function readyAttrsOk(ctx: EngineCtx, state: BoardState, by: Seat, attrs: Attr[]
   // 「コストを発生できない」キャラ（《ビンボー》《電波の傀儡》）は属性だけを出すこともできない（FAQ:2754。R4c G3c）
   const noGen = cannotGenerateIids(ctx, state)
   return attrs.every((a) =>
-    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && !noGen.has(c.iid) && attrsOf(ctx.cards[c.cardId]).includes(a)),
+    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && !noGen.has(c.iid) && attrsNow(ctx, state, c.iid).includes(a)),
   )
 }
 
@@ -325,10 +325,9 @@ export function poolOnlyPayment(ctx: EngineCtx, state: BoardState, by: Seat, cos
 function candidatesFor(ctx: EngineCtx, state: BoardState, by: Seat, sourceIid: string | null, icon: CostIcon, attr: Attr | null, taken: CostSource[]): CostSource | null {
   const ok = (iid: string) => {
     const c = state.cards[iid]
-    const info = c ? ctx.cards[c.cardId] : undefined
-    return !!c && isCharOnField(c) && c.orientation === 'ready' && controllerOf(state, iid) === by && !taken.some((t) => t.iid === iid) && (!attr || attrsOf(info).includes(attr))
+    return !!c && isCharOnField(c) && c.orientation === 'ready' && controllerOf(state, iid) === by && !taken.some((t) => t.iid === iid) && (!attr || attrsNow(ctx, state, iid).includes(attr))
   }
-  const mk = (iid: string, i: CostIcon): CostSource => ({ iid, from: 'field', icon: i, attrs: attrsOf(ctx.cards[state.cards[iid].cardId]) })
+  const mk = (iid: string, i: CostIcon): CostSource => ({ iid, from: 'field', icon: i, attrs: attrsNow(ctx, state, iid) })
   if (icon === 'R') return sourceIid && ok(sourceIid) ? mk(sourceIid, 'R') : null
   const chars = Object.values(state.cards).filter((c) => isCharOnField(c) && c.owner === by).sort((a, b) => (a.zone === b.zone ? a.index - b.index : a.zone === 'leader' ? -1 : 1))
   if (icon === 'L') {

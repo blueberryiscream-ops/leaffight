@@ -158,6 +158,7 @@ export type Cond =
   // ── R4c G2a で足した（NH-23・NH-27）
   | { battleNamed: string }                    // 進行中のバトルの種目（バトルカード）のカード名が一致し、種目が決まっている（[18]〜[28]・oldrule 20-5。インファイトで攻防・テキストが変わっても名前のまま FAQ:4042）
   | { battleAtkHas: Attr }                     // 進行中のバトルのバトルカードの印刷された攻撃属性に属性が含まれる（種目が決まった [18]〜[28]。《チャンピオン》R4c G4d。《インファイト》の選んだ能力値は含まない FAQ:3136）
+  | { costumeWas: '男性' | '女性' }            // この層（衣装の効果）を足した（装備した）時点の性別がそれか「両方」。押し出される衣装の置き換えを除いた性別（NH-36①・FAQ:205）。R4c G6a-1
   | { sexIs: [CardRef, '男性' | '女性'] }      // その性別か「両方」なら真。性別無しはどちらにも偽（FAQ:2939）
   | { oppositeSex: [CardRef, CardRef] }       // 異性（NH-24）: 男性⇔女性。「両方」は男性・女性・両方の誰とでも異性。性別無しはどれとも異性でない（どちらが無しでも偽）。R4c G2b-2a《衣装・きわどい服》
   | { nameStarts: [CardRef, string] }          // カード名が prefix で始まる（「衣装」で始まるアイテム。R4c G2b-2a。equipsNamed と同じ prefix の考え方）
@@ -403,6 +404,12 @@ export type Continuous =
    *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
   /** [水中バトルペナルティ] 等、名前（能力の name）で指したペナルティの効果が who に及ばない（強化兵のさらなる修正も同じ能力の中なので丸ごと。R4c G2b-2b 水着・岩切） */
   | { ce: 'ignorePenalty'; who: CardRef | Selector; name: string; when?: Cond }
+  /** 性別を1つに置き換える（規 15-8。後から発揮された効果が勝つ 12-2）。場のキャラだけ今の値（FAQ:1468・2625）。costume＝衣装の置き換え（次の衣装が装備された時点の判定から除く NH-36①）。R4c G6a-1 */
+  | { ce: 'setSex'; who: CardRef | Selector; sex: '男性' | '女性' | '両方'; costume?: boolean }
+  /** キャラタイプを足す（元のタイプは残る 15-9・FAQ:219）。読み口は G6a-1・カードは G6a-3 */
+  | { ce: 'addCharType'; who: CardRef | Selector; type: string }
+  /** 属性を置き換える（15-7）。読み口は G6a-1・カードは G6a-2 */
+  | { ce: 'setAttrs'; who: CardRef | Selector; attrs: Attr[] }
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }
   | { ce: 'battleAttrSwap'; battleCard: CardRef; requires: 'pureAttrs' }                 // [攻]と[防]の入れ替え
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }

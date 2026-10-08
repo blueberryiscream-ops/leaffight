@@ -8,7 +8,7 @@ import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
-import { battleMod, currentStat } from './layers'
+import { attrsNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
   if (typeof p === 'string') {
@@ -303,7 +303,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   if ('hasAttr' in c) {
     // 属性が複数でも含めば当たる（FAQ:1709「力属性がその中に含まれていれば「力属性のキャラ」」）
     const xs = resolveRef(state, env, c.hasAttr[0])
-    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.attr ?? '').includes(c.hasAttr[1]))
+    return xs.length > 0 && xs.every((x) => attrsNow(ctx, state, x).includes(c.hasAttr[1]))
   }
   if ('isKind' in c) {
     const xs = resolveRef(state, env, c.isKind[0])
@@ -311,7 +311,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   }
   if ('charType' in c) {
     const xs = resolveRef(state, env, c.charType[0])
-    return xs.length > 0 && xs.every((x) => (ctx.cards[state.cards[x]?.cardId ?? '']?.charTypes ?? []).includes(c.charType[1]))
+    return xs.length > 0 && xs.every((x) => charTypesOf(ctx, state, x).includes(c.charType[1]))
   }
   if ('hasAbility' in c) {
     // 見出しの完全一致（FAQ:3762「アイドル声優」は「アイドル」に該当しない）。印刷された能力で見る（特殊能力を失う層は見ない）
@@ -335,13 +335,17 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const bc = bf?.battle?.battleCard
     return !!bf && !!bc && bf.step >= 18 && bf.step <= 28 && (ctx.cards[state.cards[bc]?.cardId ?? '']?.battleAtk ?? '').includes(c.battleAtkHas)
   }
+  if ('costumeWas' in c) {
+    // 衣装を装備した時点の性別（層を足したときに置いた env.sx0。「両方」は男性にも女性にも当たる 15-8）
+    return env.sx0 === c.costumeWas || env.sx0 === '両方'
+  }
   if ('sexIs' in c) {
     const xs = resolveRef(state, env, c.sexIs[0])
-    return xs.length > 0 && xs.every((x) => { const s = ctx.cards[state.cards[x]?.cardId ?? '']?.sex; return s === c.sexIs[1] || s === '両方' })
+    return xs.length > 0 && xs.every((x) => { const s = sexOf(ctx, state, x); return s === c.sexIs[1] || s === '両方' })
   }
   if ('oppositeSex' in c) {
     // NH-24: 「両方」は誰とでも異性（無しを除く）。無しはどれとも異性でない
-    const sx = (x: string) => ctx.cards[state.cards[x]?.cardId ?? '']?.sex ?? ''
+    const sx = (x: string) => sexOf(ctx, state, x)
     const xs = resolveRef(state, env, c.oppositeSex[0])
     const ys = resolveRef(state, env, c.oppositeSex[1])
     return xs.length > 0 && ys.length > 0 && xs.every((x) => ys.every((y) => { const a = sx(x), b = sx(y); return a !== '' && b !== '' && (a === '両方' || b === '両方' || a !== b) }))

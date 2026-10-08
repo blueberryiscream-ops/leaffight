@@ -41,6 +41,8 @@ interface LayerBody {
   ei?: number
   /** 足した行動の種類（《能力禁止》FAQ:606 は特殊能力の効果を失わせる） */
   origin?: 'ability' | 'event' | 'static' | 'force'
+  /** 常時効果の層を足した（装備した）時点の性別（衣装 costume の setSex を除いた性別。costumeWas が読む。NH-36①・R4c G6a-1） */
+  sx0?: string
   /** stayRested: 消耗状態になって固定されたカード */
   locked?: string[]
 }
@@ -84,7 +86,7 @@ function layerEnv(state: BoardState, l: Layer): Env {
   if (l.ability !== null) {
     const self = l.source
     const you = (self ? controllerOf(state, self) : null) ?? l.by
-    return { self, you, slots: {}, trigger: null, declId: null, declared: {}, host: l.host }
+    return { self, you, slots: {}, trigger: null, declId: null, declared: {}, host: l.host, ...(b.sx0 !== undefined ? { sx0: b.sx0 } : {}) }
   }
   const e = b.env ?? { self: l.source, you: l.by, slots: {} }
   return { self: e.self, you: e.you, slots: e.slots, trigger: null, declId: null, declared: {} }
@@ -163,6 +165,48 @@ export function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, k
     if (targetsOf(ctx, state, e).includes(iid)) return e
   }
   return null
+}
+
+// ───────────────────────────────────────────────────────────────
+// 今の性別・キャラタイプ・属性（規 15-7〜15-9「キャラの現在の〜」。R4c G6a-1・NH-36③）
+// 場のキャラは印刷の値に層を連番（seq）の順に当てる（後から発揮された効果が勝つ 12-2）。手札・デッキ・ゴミ箱は印刷の値（FAQ:1468・2625）
+// ───────────────────────────────────────────────────────────────
+
+/** キャラの今の性別（'男性'・'女性'・'両方'・''＝無し）。excludeCostume＝衣装（costume）の置き換えを除いた性別（NH-36①） */
+export function sexOf(ctx: EngineCtx, state: BoardState, iid: string, opts?: { excludeCostume?: boolean }): string {
+  const c = state.cards[iid]
+  let s: string = (c ? ctx.cards[c.cardId]?.sex : undefined) ?? ''
+  if (!c || !isCharOnField(c)) return s
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'setSex' || (opts?.excludeCostume && f.costume)) continue
+    if (effectOn(ctx, state, e, iid)) s = f.sex
+  }
+  return s
+}
+
+/** キャラの今のキャラタイプ（元のタイプは残り、足したタイプが増える 15-9。同名は1つ FAQ:3365） */
+export function charTypesOf(ctx: EngineCtx, state: BoardState, iid: string): string[] {
+  const c = state.cards[iid]
+  const out = [...((c ? ctx.cards[c.cardId]?.charTypes : undefined) ?? [])]
+  if (!c || !isCharOnField(c)) return out
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce === 'addCharType' && !out.includes(f.type) && effectOn(ctx, state, e, iid)) out.push(f.type)
+  }
+  return out
+}
+
+/** キャラの今の属性（複数持てる。置き換えは後から発揮された効果が勝つ 15-7・12-2） */
+export function attrsNow(ctx: EngineCtx, state: BoardState, iid: string): Attr[] {
+  const c = state.cards[iid]
+  let out = [...((c ? ctx.cards[c.cardId]?.attr : undefined) ?? '')].filter((ch) => ATTRS.includes(ch as Attr)) as Attr[]
+  if (!c || !isCharOnField(c)) return out
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce === 'setAttrs' && effectOn(ctx, state, e, iid)) out = [...f.attrs]
+  }
+  return out
 }
 
 /** 今の能力値（K3）: 印刷値に層を連番の順で重ね（修正の足し引き・性格反転 H-6＝今の値を入れ替える）、最後に手直しの層を重ねる */
@@ -721,7 +765,7 @@ function equipProblem(ctx: EngineCtx, state: BoardState, item: CardInstance | un
     // 味方キャラのみ: 装備させるプレイヤー（宣言のとき）／アイテムの持ち主（付け替えのあと。使用権の移動 K8 は後）の味方【決めたこと】
     if (eq.friendlyOnly && (by ?? item.owner) !== (controllerOf(state, hostIid) ?? host.owner)) return '味方キャラのみ装備できる'
     // 性別の装備対象（《衣装・純白のドレス》は女性キャラのみ。「両方」は装備できる FAQ:2622・NH-24。R4c G2b-2a）。性別無し・別の性別は断る
-    if (eq.sex) { const sx = ctx.cards[host.cardId]?.sex; if (sx !== eq.sex && sx !== '両方') return `${eq.sex}キャラしか装備できない` }
+    if (eq.sex) { const sx = sexOf(ctx, state, hostIid); if (sx !== eq.sex && sx !== '両方') return `${eq.sex}キャラしか装備できない` }
     const bound = state.layers.bound[item.iid]
     if (eq.bound && bound && bound !== hostIid) return '装備対象はこのアイテムで選んだキャラ'
   }
@@ -771,7 +815,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const remove: string[] = []
   const lostOps: { ops: Op[]; env: Env; label: string; by: Seat }[] = []
   // ── 常時効果
-  const want = new Map<string, { iid: string; index: number; ei: number; host: string | null; effect: Continuous; label: string }>()
+  const want = new Map<string, { iid: string; index: number; ei: number; host: string | null; effect: Continuous; label: string; costume?: boolean }>()
   const cards = Object.values(state.cards).sort((a, b) => (a.owner === b.owner ? rank(a) - rank(b) || a.index - b.index : a.owner < b.owner ? -1 : 1))
   for (const c of cards) {
     const def = ctx.defs[c.cardId]
@@ -782,7 +826,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       if (ab.kind !== 'static') return
       ab.effects.forEach((effect, ei) => {
         if (effect.ce === 'manual' || effect.ce === 'exemptLimit') return
-        want.set(`${c.iid}#${index}#${ei}`, { iid: c.iid, index, ei, host: c.attachedTo, effect, label: ab.name ?? def.name })
+        want.set(`${c.iid}#${index}#${ei}`, { iid: c.iid, index, ei, host: c.attachedTo, effect, label: ab.name ?? def.name, costume: ab.effects.some((x) => x.ce === 'setSex' && x.costume) })
       })
     })
   }
@@ -807,7 +851,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   }
   for (const [key, w] of want) {
     if (have.has(key)) continue
-    add.push({ source: w.iid, ability: w.index, by: controllerOf(state, w.iid) ?? state.cards[w.iid].owner, label: w.label, kind: w.effect.ce === 'statMod' ? w.effect.kind : null, until: 'whileSource', targets: [], host: w.host, body: { effect: w.effect, ei: w.ei, origin: 'static' } })
+    add.push({ source: w.iid, ability: w.index, by: controllerOf(state, w.iid) ?? state.cards[w.iid].owner, label: w.label, kind: w.effect.ce === 'statMod' ? w.effect.kind : null, until: 'whileSource', targets: [], host: w.host, body: { effect: w.effect, ei: w.ei, origin: 'static', ...(w.costume && w.host ? { sx0: sexOf(ctx, state, w.host, { excludeCostume: true }) } : {}) } })
   }
   // ── 効果で足した層（12-1・12-2）
   const participants = abilityLostChars(ctx, state)

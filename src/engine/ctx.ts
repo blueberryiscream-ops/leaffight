@@ -56,6 +56,8 @@ export interface Env {
   it?: string
   /** 参照 equipped の差し替え（常時効果の層が失われたときの処理は、その層を足したときの装備先を指す。R3） */
   host?: string | null
+  /** 常時効果の層を足した（装備した）時点の性別（衣装の効果が「装備した時点の性別」を読む costumeWas。R4c G6a-1） */
+  sx0?: string
 }
 
 export function other(seat: Seat): Seat {

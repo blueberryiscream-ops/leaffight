@@ -37,12 +37,12 @@ import {
 import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
-import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
+import { costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, adjustGenerated, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -217,7 +217,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       const m = state.cards[iid]
       const mi = m ? ctx.cards[m.cardId] : undefined
       if (!m || !mi || !isCharOnField(m) || m.orientation !== 'ready' || controllerOf(state, m.iid) !== req.by) return []
-      return [{ iid, from: 'field' as const, icon: (m.zone === 'leader' ? 'L' : mi.kind === 't' ? 'T' : 'G') as CostIcon, attrs: attrsOf(mi) }]
+      return [{ iid, from: 'field' as const, icon: (m.zone === 'leader' ? 'L' : mi.kind === 't' ? 'T' : 'G') as CostIcon, attrs: attrsNow(ctx, state, iid) }]
     })
     const decl: ProcDecl = {
       id,
@@ -229,7 +229,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       // FAQ:1168・228: 消耗させる発生源（場のキャラ）は「コスト発生」の対象として扱う（穏形法などで断る）
       targets: fromHand ? [] : [src.iid, ...moreSources.map((m) => m.iid)],
       costGens: [],
-      sources: [{ iid: src.iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }, ...moreSources],
+      sources: [{ iid: src.iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsNow(ctx, state, src.iid) }, ...moreSources],
       trigger: frame?.id ?? null,
       usageKey: null,
       eng: {},
@@ -409,10 +409,10 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     const banned = p.excludeSlot ? env.slots[p.excludeSlot]?.[0] : undefined
     return ['力', '早', '賢', '根', '感'].filter((a) => a !== banned).map((a) => ({ key: a, label: a }))
   }
-  // 候補をあるキャラの属性に絞る（《アドバイス》NH-27⑤）。印刷の属性（attrsOf）。属性なしなら候補0
+  // 候補をあるキャラの属性に絞る（《アドバイス》NH-27⑤）。今の属性（attrsNow・G6a-1）。属性なしなら候補0
   if ('stat' in p && p.rule === 'attrOf') {
     const c = state.cards[resolveRef(state, env, p.of)[0] ?? '']
-    return attrsOf(c ? ctx.cards[c.cardId] : undefined).map((a) => ({ key: a, label: a }))
+    return (c ? attrsNow(ctx, state, c.iid) : []).map((a) => ({ key: a, label: a }))
   }
   // プレイヤーを選ぶ（D20・借金取り）。候補は chooser の相手だけ（NH-20：自分は選べない）
   if ('player' in p) {
@@ -1171,7 +1171,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
           const info = ctx.cards[c.cardId]
           const fromHand = c.zone === 'hand'
           const icon: CostIcon = fromHand ? 'W' : c.zone === 'leader' ? 'L' : info?.kind === 't' ? 'T' : 'G'
-          return { iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsOf(info) }
+          return { iid, from: fromHand ? 'hand' : 'field', icon, attrs: fromHand ? [] : attrsNow(ctx, state, iid) }
         })
         const declId = `${a.id}:cg`
         return [save({ awaiting: { ...a, pay: { ...pay, stage: 'genPending', genDeclId: declId } } }), { type: 'procStartCostGen', by: seat, sources, declId }]
