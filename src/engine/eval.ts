@@ -5,7 +5,7 @@
 
 import type { BoardState, CardInstance, Seat } from '../core/board'
 import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
-import type { Ability, CardRef, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
+import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
 import { battleMod, currentStat } from './layers'
@@ -79,7 +79,8 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
           return f.battle?.battleCard ? [f.battle.battleCard] : []
         case 'summonedChar':
           // D17: 効果で「呼び出す」ときの《キャラクターカードが呼び出されるとき》の窓（このときキャラはまだ場に出ていない）
-          return f.summon ? [f.summon.iid] : []
+          // 宣言を経る呼び出し（規 705 [11]・R4c G5f-2 の威圧）は frame.decl の発生源がそのカード（まだ提示エリアにある）
+          return f.summon ? [f.summon.iid] : f.kind === 'call' && f.decl?.sourceIid ? [f.decl.sourceIid] : []
         default:
           return []
       }
@@ -378,6 +379,15 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     if (!ab) return false
     return c.declaredHasAnyOp.some((name) => hasOpDeep(opsOf(ab), name))
   }
+  if ('declaredLooks' in c) {
+    const f = triggerFrame(state, env)
+    const d = f?.decl
+    const cardId = d?.eng.cardId as string | undefined
+    const idx = d?.eng.index as number | undefined
+    const ab = cardId !== undefined && idx !== undefined ? abilityAt(ctx, cardId, idx) : undefined
+    if (!ab) return false
+    return looksAtHidden(opsOf(ab), (ab as { choices?: Choice[] }).choices ?? [])
+  }
   if ('declaredReducesKiryoku' in c) {
     const f = triggerFrame(state, env)
     const d = f?.decl
@@ -413,6 +423,30 @@ function reducesKiryokuOf(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[]
 }
 
 /** Op の列に、name の op が（forEach・if・simul・offer の中も含めて）含まれるか（D23「ドローする効果をもつ」の判定） */
+/**
+ * 「手札やデッキを調べる効果」（規 1200・R4c G5f-2 F12）＝デッキや手札など非公開情報のカードを見る効果。
+ * 当たる: lookTop／lookHand／pickRandom（相手の手札を引いて見る）／choose の候補がデッキ・相手の手札（chooser が相手でないもの＝探す）。
+ * 当たらない: ドロー・ゴミ箱から選ぶ（公開）・自分の手札から選ぶ・相手が自分の手札から選んで捨てる（画策・徴収）・見ずに捨てる（予知能力）
+ */
+function selLooks(pick: Choice['pick'], chooser: PlayerRef): boolean {
+  if (!('cards' in pick)) return false
+  const s = pick.cards
+  if (s.zone === 'deck') return true
+  return s.zone === 'hand' && s.side === 'opponent' && chooser !== 'opponent'
+}
+function looksAtHidden(ops: Op[], choices: Choice[]): boolean {
+  if (choices.some((ch) => selLooks(ch.pick, ch.chooser))) return true
+  return ops.some((o) => {
+    if (o.op === 'lookTop' || o.op === 'lookHand') return true
+    if (o.op === 'pickRandom') return o.from.zone === 'deck' || (o.from.zone === 'hand' && o.from.side === 'opponent')
+    if (o.op === 'choose') return selLooks(o.choice.pick, o.choice.chooser)
+    if (o.op === 'forEach' || o.op === 'simul') return looksAtHidden(o.do, [])
+    if (o.op === 'if') return looksAtHidden(o.then, []) || (o.else ? looksAtHidden(o.else, []) : false)
+    if (o.op === 'offer') return looksAtHidden(o.pay, []) || looksAtHidden(o.ifPaid, []) || looksAtHidden(o.ifDeclined, [])
+    return false
+  })
+}
+
 function hasOpDeep(ops: Op[], name: string): boolean {
   return ops.some((o) => {
     if (o.op === name) return true

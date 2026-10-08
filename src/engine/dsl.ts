@@ -168,6 +168,8 @@ export type Cond =
   | { declaredHasOp: string }
   /** declaredHasOp の複数版: 宣言の効果が、ops のどれか1つでも含むか（《リンク・ドロー》＝draw／drawBoth。R4c G5f-1） */
   | { declaredHasAnyOp: string[] }
+  /** 宣言の能力・イベントが「手札やデッキを調べる効果」（規 1200）をもつか。記述から機械で判定（eval.ts looksAtHidden）。《情報規制》（R4c G5f-2・F12） */
+  | { declaredLooks: true }
   /** 今の窓を開いた宣言の効果に、そのカードの気力を直接減らす op（op:kiryoku・recover でない・delta が負）があり、宣言の時点でそのカードに及ぶ（対象に選んだ・全体の効果に含まれる）。
    *  ダメージ・使用代償の気力－・回復数マイナスの回復（recover:true）は含まない（規 1195-1199・NH-31②④）。《命の香炉》R4c G11b-3 */
   | { declaredReducesKiryoku: CardRef }
@@ -491,6 +493,8 @@ export interface Trigger {
   /** その処理を行ったのが誰か（DESIGN §5.1 アクター条件） */
   actor?: 'you' | 'opponent' | 'any'
   when?: Cond
+  /** 同じ能力が別の《〜とき》でも使える（《情報規制》＝特殊能力・イベントカードのどちらを使用したときも。R4c G5f-2） */
+  alsoTimings?: Timing[]
 }
 
 // ───────────────────────────────────────────────────────────────

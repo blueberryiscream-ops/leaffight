@@ -61,7 +61,7 @@ export function findAbility(ctx: EngineCtx, cardId: string, name: string | null 
 /** そのフレームの今の段で、この《〜とき》が来ているか（行為者・当事者・条件も見る） */
 export function triggerMatches(ctx: EngineCtx, state: BoardState, env: Env, trig: Trigger, frame: ProcFrame): boolean {
   const names = stepNames(frame)
-  if (!names.includes(trig.timing)) return false
+  if (!names.includes(trig.timing) && !trig.alsoTimings?.some((t) => names.includes(t))) return false
   const e: Env = { ...env, trigger: frame.id }
   if (trig.actor && trig.actor !== 'any') {
     // summon（D17・R4a-2）は decl を持たない軽い手順なので、行為者は frame.by（呼び出す側）で見る
