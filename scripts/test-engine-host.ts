@@ -425,6 +425,7 @@ function battleStart(battleCard: string): History {
     st('Weak', 'c', S(3, 3, 3, 3, 3)),
     st('WeakOpt', 'c', S(3, 3, 3, 3, 3)),
     st('PBP', 'c', S(1, 1, 1, 1, 1), 5),
+    st('PBM', 'c', S(1, 1, 1, 1, 1), 5),
     st('RC', 'e', null, null),
   ]
   const self = { ref: 'self' as const }
@@ -467,6 +468,7 @@ function battleStart(battleCard: string): History {
     WeakOpt: { id: 'WeakOpt', name: 'WeakOpt', kind: 'c', status: 'draft', abilities: [{ kind: 'conditional', trigger: { timing: 'ターン終了時', when: { activeIs: 'you' } }, optional: true, effect: [{ op: 'kiryoku', who: self, delta: 1 }] }] },
     // PHASE-R4b §2(D)・統括17の直し 単体テスト用: payByPlayer が実際に 7-2[3]《コストを発生するとき》の窓を開くことを
     // 確かめる。RC は臨時収入と同じ本文「[WWW]を発生する。コストを発生するときに使うこともできる」の最小限（割込型のみ）
+    PBM: { id: 'PBM', name: 'PBM', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Ask', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'payByPlayer', who: 'opponent', amount: ['W'], mandatory: true, ifPaid: [], ifNot: [{ op: 'kiryoku', who: self, delta: -2 }] }] }] },
     PBP: { id: 'PBP', name: 'PBP', kind: 'c', status: 'draft', abilities: [{ kind: 'activated', name: 'Ask', cost: { icons: [], attrs: [] }, speed: '通常型', choices: [], effect: [{ op: 'payByPlayer', who: 'opponent', amount: ['W'], giveTo: 'you', ifPaid: [], ifNot: [] }] }] },
     RC: { id: 'RC', name: 'RC', kind: 'e', status: 'draft', cost: { icons: [], attrs: [] }, abilities: [{ kind: 'play', speed: '割込型', trigger: { timing: 'コストを発生するとき', actor: 'you' }, choices: [], effect: [{ op: 'generateCost', icons: ['W', 'W', 'W'] }] }] },
   }
@@ -646,6 +648,33 @@ function battleStart(battleCard: string): History {
     const pick = [tokCh!.options[0].key]
     s = drive(act3(s, { type: 'procChoose', id: tokCh!.id, pick }), ctx3).state
     eq([s.costs.A.map((t) => t.icon), s.costs.B.length], [['W'], 2], 'payByPlayer: 払った1枚が you（A）へ・残り2枚は B の手元（7-3・FAQ:1353 と同じ理屈）')
+  }
+
+  // R4c G4c 単体テスト: payByPlayer の mandatory（「払わなければならない」NH-34⑩）。払える手段（待機のリーダー LB）があって発生済みのコストが無い→
+  // 「発生させる」の問いは断れない（min 1・空の答えは受け付けない）。発生済みの W があれば問わずに払う
+  {
+    const runAsk = (b: BoardState): BoardState => {
+      const d = declare(b, ctx3, { by: 'A', source: 'PBM', ability: 'Ask' })
+      if (!d.ok) throw new Error(`PBM Ask declare failed: ${d.reason}`)
+      let cur = b
+      d.actions.forEach((a) => (cur = act3(cur, a)))
+      cur = drive(cur, ctx3).state
+      for (let i = 0; i < 50 && !cur.procMeta.choice && !cur.result; i++) {
+        const seat = awaitingSeat(cur)
+        if (!seat) break
+        cur = drive(act3(cur, { type: 'procPass', by: seat }), ctx3).state
+      }
+      return cur
+    }
+    const m0 = drive(base3([card('PBM', 'A', 'char', { kiryoku: 5 })]), ctx3).state
+    const m1 = runAsk(m0)
+    const askM = m1.procMeta.choice
+    eq([askM?.by, askM?.min, askM?.purpose], ['B', 1, undefined], 'payByPlayer mandatory: 手段があって発生済みのコストが無い→ 断れない問い（min 1・offer の帯ではない）')
+    const m2 = act3(m1, { type: 'procChoose', id: askM!.id, pick: [] })
+    eq(m2.procMeta.choice?.id, askM!.id, 'payByPlayer mandatory: 空の答え（断る）は受け付けられず、問いが残る')
+    const withW = drive({ ...m0, costs: { ...m0.costs, B: [{ id: 'tw', icon: 'W' as const, attrs: [], frameId: null }] } } as BoardState, ctx3).state
+    const m3 = runAsk(withW)
+    eq([m3.procMeta.choice === null, m3.costs.B.length], [true, 0], 'payByPlayer mandatory: 発生済みの W があれば問わずに払う（問いは出ず、B の W は消費される。giveTo なし＝7-4）')
   }
 
   // D17・R4a-2 単体テスト: 効果で呼び出す（callByEffect）。《キャラクターカードが呼び出されるとき》の窓では、

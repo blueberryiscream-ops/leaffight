@@ -2065,6 +2065,8 @@ export type ProcAction =
  * repeat でない選択は同じ選択肢を2度選べない。（それ以外の数の確かめは呼び出し側。R2a の約束を変えない）
  */
 export function validChoicePick(ch: ProcChoice, pick: string[]): boolean {
+  // 「使う／払う」の問い（kind 'use'）で min 1 のもの＝断れない問い（R4c G4c・アンチ・イベント／スキルの維持の支払い NH-34⑩）
+  if (ch.kind === 'use' && ch.min > 0 && pick.length < ch.min) return false
   if (!ch.repeat) return ch.kind === 'order' || new Set(pick).size === pick.length
   const count: Record<string, number> = {}
   for (const k of pick) {

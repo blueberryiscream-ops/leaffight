@@ -93,7 +93,7 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
     ...EMPTY_BOARD,
     cards,
     mode: 'engine',
-    turn: { active: seatOf(spec.active), phase: spec.phase ?? 'メイン' },
+    turn: { active: seatOf(spec.active), phase: spec.phase ?? 'メイン', ...(spec.turnNo !== undefined ? { n: spec.turnNo } : {}) },
     downs,
     costs,
   }

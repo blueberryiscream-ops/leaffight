@@ -81,7 +81,7 @@ interface ItemEng {
      * tokens（発生済みのコストから払うトークンを選ぶ。プールがちょうど amount 分ならここへは来ず自動で払う）
      */
     pay?: {
-      stage: 'ask' | 'source' | 'genPending' | 'tokens'
+      stage: 'ask' | 'source' | 'genPending' | 'tokens' | 'auto'
       who: Seat
       giveTo: Seat | null
       /** amount { chosen:true }（R4b-3a-2・交渉売買）: 'chosen'＝払う数も who が選ぶ（0可） */
@@ -1105,6 +1105,8 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       if (findFrame(state, a.pay!.genDeclId!)) return []
       return finishPayFromPool(state, frame, item, eng, save, a, a.pay!)
     }
+    // payByPlayer の 'auto' 段（mandatory・R4c G4c）: 問わずに発生済みのコストから払う（足りなければ finishPayFromPool が ifNot へ倒す）
+    if (a.kind === 'payByPlayer' && a.pay!.stage === 'auto') return finishPayFromPool(state, frame, item, eng, save, a, a.pay!)
     const ans = state.procMeta.answers[a.id]
     if (!ans) return []
     if (a.kind === 'use') {
@@ -1524,6 +1526,16 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const giveTo = op.giveTo ? resolvePlayer(state, env, op.giveTo) : null
       const amount: CostIcon[] | 'chosen' = Array.isArray(op.amount) ? op.amount : 'chosen'
       const id = `${frame.id}:${item.key}:payByPlayer${eng.seq}`
+      // R4c G4c（mandatory）: 発生済みのコストで足りる／発生させる手段が何も無い→ 問わずに払う（足りなければ ifNot）。手段があるのに足りない→ 「発生させる」を断れない（min 1）
+      let forced = false
+      if (op.mandatory && Array.isArray(amount)) {
+        const pool = state.costs[who] ?? []
+        const hasSource = Object.values(state.cards).some((c) => c.owner === who && ((isCharOnField(c) && c.orientation === 'ready') || (c.zone === 'hand' && (['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? '') || !!ctx.defs[c.cardId]?.abilities.some((a) => a.kind === 'play' && a.speed === '割込型' && a.trigger?.timing === 'コストを発生するとき')))))
+        if (pool.length >= amount.length || !hasSource) {
+          return { tasks: rest, patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'auto', who, giveTo, amount, recordAs: op.recordAs, addToBattlePaid: op.addToBattlePaid, ifPaid: op.ifPaid, ifNot: op.ifNot } } }, actions: [] }
+        }
+        forced = true
+      }
       return {
         tasks: rest,
         patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'ask', who, giveTo, amount, recordAs: op.recordAs, addToBattlePaid: op.addToBattlePaid, ifPaid: op.ifPaid, ifNot: op.ifNot } } },
@@ -1531,7 +1543,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
           {
             type: 'procChoice',
             // purpose 'offer' を流用（払う/払わないの帯。K5・D8）。テストの answer(by, accept) もこの convention（pick ['pay']/[]）を使う
-            choice: { id, by: who, kind: 'use', prompt: 'コストを発生させるアクションを行うか（自分の待機状態のキャラを消耗させる、または手札のキャラクターカード・タッグキャラクターカードをゴミ箱送りにする。7-2）', options: [{ key: 'pay', label: 'コストを発生させる' }], min: 0, max: 1, purpose: 'offer', frameId: frame.id },
+            choice: { id, by: who, kind: 'use', prompt: 'コストを発生させるアクションを行うか（自分の待機状態のキャラを消耗させる、または手札のキャラクターカード・タッグキャラクターカードをゴミ箱送りにする。7-2）', options: [{ key: 'pay', label: 'コストを発生させる' }], min: forced ? 1 : 0, max: 1, ...(forced ? {} : { purpose: 'offer' as const }), frameId: frame.id },
           },
         ],
       }

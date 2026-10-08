@@ -283,7 +283,9 @@ export type Op =
    */
   // addToBattlePaid（R4b-3a-2・交渉売買）: amount { chosen:true } のとき、払った数を今のバトルの battle.paid[who] に積む（BattleExpr { paid:true } が読む）。
   // amount { chosen:true } では ifPaid/ifNot は「1枚以上払った／0枚だった（＝どちらかが支払わなくなった）」の分岐になる
-  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; addToBattlePaid?: boolean; ifPaid: Op[]; ifNot: Op[] }
+  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; addToBattlePaid?: boolean;
+      /** 「払わなければならない」（R4c G4c・アンチ・イベント／スキル NH-34⑩）: 払えるなら払わない選択は無い。発生済みのコストが足りれば問わずに払い、足りなければ「コストを発生させる」を断れない（min 1）。発生源も手札の候補も無ければ問わずに ifNot へ */
+      mandatory?: boolean; ifPaid: Op[]; ifNot: Op[] }
   // ── 能力と実体
   | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
   | { op: 'createToken'; token: TokenSpec; side: PlayerRef; orientation: 'ready' | 'rested' }

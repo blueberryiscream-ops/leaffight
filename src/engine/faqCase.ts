@@ -45,6 +45,8 @@ export interface BoardSpec {
   opponent: SideSpec
   active: Side
   phase?: 'エントリー' | 'メイン' | '終了' | '手札調整'
+  /** ターンの番号（turn.n）。書くと実際の手順で進む盤面になる＝エントリー終了後にメインフェイズ開始時（10-5[1]）の段が回る（R4c G4c。書かなければ今までどおりメインの窓から） */
+  turnNo?: number
   /** バトル中から始めるとき: 20-4 の手順番号と参加キャラ */
   battle?: { at: number; challenger: Side; battleCard?: string; participants?: Partial<Record<Side, string[]>> }
 }
