@@ -504,6 +504,16 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const hit = attr === null ? toks.length > 0 && toks.every((t) => t.icon === icon && t.attrs.length === 0) : attr === 'なし' ? toks.some((t) => t.icon === icon && t.attrs.length === 0) : toks.some((t) => t.icon === icon && (!attr || t.attrs.includes(attr)))
     return { ok: hit, msg: `発生済みのコスト ${side} に ${icon}${attr ?? ''} が無い（今: ${toks.map((t) => `${t.icon}${t.attrs.join('')}`).join('・') || '無し'}）` }
   }
+  if ('shuffled' in e) {
+    const [side, n] = e.shuffled
+    const got = run.actions.filter((a) => a.type === 'shuffleDeck' && a.owner === seatOf(side)).length
+    return { ok: got === n, msg: `${side} のデッキのシャッフル = ${got}回（期待 ${n}回）` }
+  }
+  if ('revealed' in e) {
+    const got = run.actions.flatMap((a) => (a.type === 'procReveal' ? [{ name: a.cardName, to: SIDE_NAME[a.to] }] : []))
+    const fmt = (xs: { name: string; to: string }[]) => xs.map((x) => `${x.name}→${x.to}`).join('・') || '無し'
+    return { ok: fmt(got) === fmt(e.revealed), msg: `見せたカード = ${fmt(got)}（期待 ${fmt(e.revealed)}）` }
+  }
   if ('costN' in e) {
     const [side, icon, attr, n] = e.costN
     const toks = s.costs[seatOf(side)]

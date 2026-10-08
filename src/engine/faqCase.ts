@@ -95,6 +95,10 @@ export type Expect = (
   | { illegal: { step: number; reason?: string } }
   /** steps の index 番目の操作が合法 */
   | { legal: { step: number } }
+  /** そのプレイヤーのデッキをシャッフルした回数（shuffleDeck アクションの数。実行器の shuffle は並びを変えないので回数で確かめる。R4c G5a） */
+  | { shuffled: [side: Side, count: number] }
+  /** 相手に見せたカード（reveal の記録 procReveal の並び。空配列＝見せていない。名前は印刷名・to は見せた相手。R4c G5a） */
+  | { revealed: { name: string; to: Side }[] }
   /** 処理された順（ログに出る処理の名前の並び） */
   | { order: string[] }
   | { battleAborted: boolean }

@@ -148,7 +148,7 @@ function zoneCards(state: BoardState, sel: Selector, seats: Seat[]): CardInstanc
     case 'battleCards':
       return all.filter((c) => c.zone === 'battle' && seats.includes(c.owner)).sort(byIndex)
     default:
-      return all.filter((c) => c.zone === sel.zone && seats.includes(c.owner) && c.attachedTo === null).sort(byIndex)
+      return all.filter((c) => (c.zone === sel.zone || (sel.orZone !== undefined && c.zone === sel.orZone)) && seats.includes(c.owner) && c.attachedTo === null).sort(byIndex)
   }
 }
 

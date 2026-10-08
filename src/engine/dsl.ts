@@ -88,6 +88,8 @@ export type EventRole = 'damageRecipient' | 'damageDealer' | 'downedChar' | 'dec
 /** カードの集合を選ぶ条件 */
 export interface Selector {
   zone: 'field' | 'hand' | 'trash' | 'deck' | 'battleCards' | 'fieldCard'
+  /** もう1つの置き場も候補に入れる（《メーカー直販》「デッキあるいはゴミ箱から」。R4c G5a）。zone が deck／hand／trash のときだけ */
+  orZone?: 'hand' | 'trash' | 'deck'
   side: PlayerRef | 'both'
   class?: CharClass
   kind?: CardKind[]
@@ -305,6 +307,8 @@ export type Op =
   | { op: 'moveTo'; what: CardRef; to: 'hand' | 'deckTop' | 'deckBottom' }        // 手札に戻す・デッキの上／下に戻す（持ち主の）
   | { op: 'swapZones'; player: PlayerRef }                                          // ゴミ箱のカードを混ぜてデッキと入れ替える（《輪廻》FAQ:1716）
   | { op: 'shuffle'; player: PlayerRef }                                            // デッキをシャッフル（並びは呼び出し側が決める）
+  /** 「相手に見せる」（NH-35③・R4c G5a）。見せたカードの名前を、見せた相手のログに残す（非公開のカード名の例外）。カードは動かさない。画面の表示は別の束 */
+  | { op: 'reveal'; what: CardRef; to: PlayerRef }
   /** 「フィールドに出す」（呼び出しではない FAQ:3106）。orientation.asDeclared＝宣言した時点のそのカードの状態（FAQ:2298・3097）。
    *  inheritFrom＝アイテムとダメージを引き継ぐ元 */
   | { op: 'putOntoField'; what: CardRef; orientation: 'ready' | 'rested' | { asDeclared: CardRef }; inheritFrom?: CardRef }

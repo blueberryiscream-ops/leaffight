@@ -1501,6 +1501,11 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (!ctx.shuffle) warnings.push('シャッフルの並びが渡されていない（今の並びのまま）')
       return { tasks: rest, actions: [{ type: 'procSwapZones', seat, order }] }
     }
+    case 'reveal': {
+      // NH-35③: 見せたことを処理の記録に残す（カード名は見せた相手のログに出る）。カードは動かさない
+      const to = resolvePlayer(state, env, op.to)
+      return { tasks: rest, actions: refs(op.what).filter((iid) => iid in state.cards).map((iid) => ({ type: 'procReveal', iid, to, cardName: ctx.cards[state.cards[iid].cardId]?.name ?? state.cards[iid].cardId }) as BoardAction) }
+    }
     case 'shuffle': {
       const seat = resolvePlayer(state, env, op.player)
       const deck = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'deck').sort((a, b) => a.index - b.index).map((c) => c.iid)

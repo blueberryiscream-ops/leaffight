@@ -1964,6 +1964,8 @@ export type ProcAction =
   | { type: 'procBattleUsed'; iids: string[]; used: boolean }
   | { type: 'procMove'; iid: string; to: 'trash' | 'hand' | 'deckTop' | 'deckBottom' | 'field' | 'battle'; orientation?: 'ready' | 'rested'; kiryoku?: number; attachItemsFrom?: string; owner?: Seat }
   | { type: 'procSwapZones'; seat: Seat; order: string[] }
+  /** 効果で「相手に見せる」（NH-35③）。カードは動かさず、見せた相手のログにカード名を残す（cardName は呼び出し側がカード表から入れる＝core はカード知識を持たない） */
+  | { type: 'procReveal'; iid: string; to: Seat; cardName: string }
   | { type: 'procDraw'; seat: Seat; n: number }
   | { type: 'procAddDowns'; seat: Seat; n: number }
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
@@ -2444,6 +2446,12 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       } else s = moveTo(s, c.iid, action.to)
       trace.push({ kind: 'name', text: `移動:${action.iid}:${action.to}` })
       return { state: s, log: `${c.cardId} を移した` }
+    }
+    case 'procReveal': {
+      const c = state.cards[action.iid]
+      if (!c) return { state, log: '' }
+      trace.push({ kind: 'name', text: `見せた:${action.iid}:${action.to}` })
+      return { state, log: `${action.cardName} を ${action.to} に見せた` }
     }
     case 'procSwapZones': {
       // ゴミ箱とデッキを入れ替える（《輪廻》）。order＝新しいデッキの並び（呼び出し側が混ぜた順）
