@@ -130,6 +130,8 @@ export type Cond =
   | { cmp: [Expr, '<' | '<=' | '==' | '>=' | '>', Expr] }
   | { pureAttrs: CardRef; side: 'atk' | 'def' | 'both' } // 用語【属性のみで構成された～】oldrule.txt:1250-1252
   | { exists: Selector }
+  /** その枠に選んだ答えがある（効果の中の「〜することができる」の選択。R4c G5c） */
+  | { picked: string }
   // ── R2a で足した（HANDOFF-R2a「決めたこと」）
   | { equipsNamed: [CardRef, string] }          // そのキャラが、名前が prefix で始まるアイテムを装備している（《ファッション》の「衣装」FAQ:3819・3822）
   | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
@@ -314,6 +316,15 @@ export type Op =
   | { op: 'shuffle'; player: PlayerRef }                                            // デッキをシャッフル（並びは呼び出し側が決める）
   /** 「相手に見せる」（NH-35③・R4c G5a）。見せたカードの名前を、見せた相手のログに残す（非公開のカード名の例外）。カードは動かさない。画面の表示は別の束 */
   | { op: 'reveal'; what: CardRef; to: PlayerRef }
+  /** 「デッキの上を見る」（NH-35③・R4c G5c）。🚨 reveal と違い、見たカードの名前は共有のログに出さず、見た人（viewer）への選択の選択肢にだけ出す。
+   *  choose＝見る枚数 0〜max を viewer が選ぶ（false なら min(max, 枚数) 枚）。デッキが少なければある分（NH-35⑪）・0枚なら何もしない。
+   *  reorder＝見た人が好きな順に並びを答える→その順でデッキの一番上へ（false なら確認の選択だけ） */
+  | { op: 'lookTop'; deckOf: PlayerRef; viewer: PlayerRef; max: number; choose: boolean; reorder: boolean }
+  /** lookTop の内部の段（枚数が決まってから見せる・並びを答えさせる）。カードの記述には書かない */
+  | { op: 'lookTop2'; deckOf: PlayerRef; viewer: PlayerRef; reorder: boolean; n?: number; countSlot?: string }
+  | { op: 'lookTop3'; deckOf: PlayerRef; orderSlot: string; n: number; reorder: boolean }
+  /** 「手札を見る」（取材 FAQ:2772）。処理の間だけ viewer にその手札の名前が出る（確認の選択を1回答えるまで）。手札0枚なら選択を出さない */
+  | { op: 'lookHand'; of: PlayerRef; viewer: PlayerRef }
   /** 「フィールドに出す」（呼び出しではない FAQ:3106）。orientation.asDeclared＝宣言した時点のそのカードの状態（FAQ:2298・3097）。
    *  inheritFrom＝アイテムとダメージを引き継ぐ元 */
   | { op: 'putOntoField'; what: CardRef; orientation: 'ready' | 'rested' | { asDeclared: CardRef }; inheritFrom?: CardRef }

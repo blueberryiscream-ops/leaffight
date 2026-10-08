@@ -101,6 +101,14 @@ export type Expect = (
   | { shuffled: [side: Side, count: number] }
   /** 相手に見せたカード（reveal の記録 procReveal の並び。空配列＝見せていない。名前は印刷名・to は見せた相手。R4c G5a） */
   | { revealed: { name: string; to: Side }[] }
+  /** 見た記録（procLook の並び。誰が・誰の・どこを・何枚。空配列＝見ていない。R4c G5c） */
+  | { looked: { by: Side; of: Side; zone: 'deck' | 'hand'; n: number }[] }
+  /** そのプレイヤーのデッキの上から、この ref の並び（R4c G5c） */
+  | { deckOrder: [side: Side, refs: string[]] }
+  /** 共有のログ・記録に、これらのカード名が1つも出ていない（見た人にだけ名前が出る＝reveal を使わない。R4c G5c） */
+  | { noLeak: string[] }
+  /** 答えを待つ選択が残っているか（取材「使用したときにだけ見ることができる」FAQ:2772。R4c G5c） */
+  | { choicePending: boolean }
   /** 処理された順（ログに出る処理の名前の並び） */
   | { order: string[] }
   | { battleAborted: boolean }

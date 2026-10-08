@@ -111,6 +111,8 @@ interface Run {
   ctx: EngineCtx
   refs: Record<string, string>
   actions: BoardAction[]
+  /** 共有のログ（applyAction が返した log の並び。名前が漏れないかの確認 R4c G5c） */
+  logs: string[]
   trace: ProcTrace[]
   warnings: string[]
   steps: { legal?: boolean; reason?: string; declId?: string; consumed: boolean }[]
@@ -134,6 +136,7 @@ function apply(run: Run, a: BoardAction): boolean {
   const r = applyAction(run.state, a)
   if (r.state === run.state && !r.log) return false
   run.state = r.state
+  if (r.log) run.logs.push(r.log)
   run.actions.push(a)
   if (r.trace) run.trace.push(...r.trace)
   snap(run)
@@ -144,6 +147,7 @@ function driveRun(run: Run) {
   const d = drive(run.state, run.ctx)
   run.state = d.state
   run.actions.push(...d.actions)
+  run.logs.push(...d.logs)
   run.trace.push(...d.trace)
   run.warnings.push(...d.warnings)
   snap(run)
@@ -514,6 +518,26 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const fmt = (xs: { name: string; to: string }[]) => xs.map((x) => `${x.name}→${x.to}`).join('・') || '無し'
     return { ok: fmt(got) === fmt(e.revealed), msg: `見せたカード = ${fmt(got)}（期待 ${fmt(e.revealed)}）` }
   }
+  if ('looked' in e) {
+    const got = run.actions.flatMap((a) => (a.type === 'procLook' ? [{ by: SIDE_NAME[a.viewer], of: SIDE_NAME[a.owner], zone: a.zone, n: a.n }] : []))
+    const fmt = (xs: { by: string; of: string; zone: string; n: number }[]) => xs.map((x) => `${x.by}が${x.of}の${x.zone}${x.n}枚`).join('・') || '無し'
+    return { ok: fmt(got) === fmt(e.looked), msg: `見た記録 = ${fmt(got)}（期待 ${fmt(e.looked)}）` }
+  }
+  if ('deckOrder' in e) {
+    const [side, refs] = e.deckOrder
+    const deck = Object.values(s.cards).filter((x) => x.owner === seatOf(side) && x.zone === 'deck').sort((a, b) => a.index - b.index).map((x) => x.iid)
+    const got = deck.slice(0, refs.length)
+    const want = refs.map((r) => run.refs[r] ?? r)
+    return { ok: got.join() === want.join(), msg: `${side} のデッキの上 = ${got.join('・')}（期待 ${want.join('・')}）` }
+  }
+  if ('noLeak' in e) {
+    const leaked = e.noLeak.filter((nm) => run.logs.some((l) => l.includes(nm)))
+    return { ok: leaked.length === 0, msg: `共有のログに名前が出た = ${leaked.join('・')}` }
+  }
+  if ('choicePending' in e) {
+    const p = !!s.procMeta.choice
+    return { ok: p === e.choicePending, msg: `答えを待つ選択 = ${p ? 'あり' : 'なし'}（期待 ${e.choicePending ? 'あり' : 'なし'}）` }
+  }
   if ('costN' in e) {
     const [side, icon, attr, n] = e.costN
     const toks = s.costs[seatOf(side)]
@@ -586,7 +610,7 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
   // 盤面に置いたアイテム・フィールドで記述の無いもの（常時効果が効くかもしれない）
   const noDef = [...new Set(Object.values(state.cards).filter((x) => { const k = ctx.cards[x.cardId]?.kind; return (k === 'i' || k === 'f') && !ctx.defs[x.cardId] }).map((x) => x.cardId))]
   const snaps = (c.expect as Expect[]).filter((e) => e.at).map((e) => ({ at: e.at!, state: null as BoardState | null }))
-  const run: Run = { state, ctx, refs, actions: [], trace: [], warnings: [], steps: [], pending: [], intent: {}, snaps, all: c.steps }
+  const run: Run = { state, ctx, refs, actions: [], logs: [], trace: [], warnings: [], steps: [], pending: [], intent: {}, snaps, all: c.steps }
   try {
     snap(run)
     driveRun(run)

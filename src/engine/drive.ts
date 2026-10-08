@@ -104,6 +104,8 @@ export interface DriveResult {
   actions: BoardAction[]
   warnings: string[]
   trace: ProcTrace[]
+  /** applyAction が返したログの並び（共有のログに名前が漏れないかの確認用・R4c G5c） */
+  logs: string[]
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -422,9 +424,10 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
  * 無いとき（FAQ テスト）は今までどおり manual の警告を出して値なしで進める
  */
 export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: boolean; askValues?: boolean } = {}): DriveResult {
-  const out: DriveResult = { state, actions: [], warnings: [], trace: [] }
+  const out: DriveResult = { state, actions: [], warnings: [], trace: [], logs: [] }
   const apply = (a: BoardAction) => {
     const r = applyAction(out.state, a)
+    if (r.log) out.logs.push(r.log)
     out.state = r.state
     out.actions.push(a)
     if (r.trace) out.trace.push(...r.trace)
@@ -1511,6 +1514,62 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const order = ctx.shuffle ? ctx.shuffle(trash) : trash
       if (!ctx.shuffle) warnings.push('シャッフルの並びが渡されていない（今の並びのまま）')
       return { tasks: rest, actions: [{ type: 'procSwapZones', seat, order }] }
+    }
+    case 'lookTop': {
+      // 見た人にだけ名前が出る（共有のログには枚数だけ）。🚨 reveal を使わない
+      const owner = resolvePlayer(state, env, op.deckOf)
+      const viewer = resolvePlayer(state, env, op.viewer)
+      const size = Object.values(state.cards).filter((c) => c.owner === owner && c.zone === 'deck').length
+      const m = Math.min(op.max, size)
+      if (m <= 0) return { tasks: rest, actions: [] }
+      if (!op.choose) return { tasks: [{ op: { op: 'lookTop2', deckOf: op.deckOf, viewer: op.viewer, reorder: op.reorder, n: m } }, ...rest], actions: [] }
+      const id = `${frame.id}:${item.key}:look${eng.seq}`
+      const countSlot = `__look${eng.seq}`
+      return {
+        tasks: [{ op: { op: 'lookTop2', deckOf: op.deckOf, viewer: op.viewer, reorder: op.reorder, countSlot } }, ...rest],
+        patch: { awaiting: { id, kind: 'choose', slot: countSlot } },
+        actions: [{ type: 'procChoice', choice: { id, by: viewer, kind: 'select', prompt: `${item.label}: デッキの上から何枚見るか（0〜${m}）`, options: Array.from({ length: m + 1 }, (_, i) => ({ key: String(i), label: `${i}枚` })), min: 1, max: 1, frameId: frame.id } }],
+      }
+    }
+    case 'lookTop2': {
+      const owner = resolvePlayer(state, env, op.deckOf)
+      const viewer = resolvePlayer(state, env, op.viewer)
+      const top = Object.values(state.cards).filter((c) => c.owner === owner && c.zone === 'deck').sort((a, b) => a.index - b.index)
+      const n = Math.min(op.n ?? Number(env.slots[op.countSlot ?? '']?.[0] ?? '0'), top.length)
+      if (!(n > 0)) return { tasks: rest, actions: [] }
+      const seen = top.slice(0, n)
+      const id = `${frame.id}:${item.key}:see${eng.seq}`
+      const orderSlot = `__see${eng.seq}`
+      return {
+        tasks: [{ op: { op: 'lookTop3', deckOf: op.deckOf, orderSlot, n, reorder: op.reorder } }, ...rest],
+        patch: { awaiting: { id, kind: 'choose', slot: orderSlot } },
+        actions: [
+          { type: 'procLook', viewer, owner, zone: 'deck', n },
+          // 名前は見た人への選択の選択肢にだけ出る（相手の画面は「相手が選んでいます」だけ）
+          { type: 'procChoice', choice: { id, by: viewer, kind: 'select', prompt: op.reorder ? `${item.label}: 見たカードを一番上にしたい順に選ぶ（${n}枚）` : `${item.label}: 見たカードを確認する`, options: seen.map((c) => ({ key: c.iid, label: nameOf(ctx, state, c.iid) })), min: op.reorder ? n : 0, max: n, frameId: frame.id } },
+        ],
+      }
+    }
+    case 'lookTop3': {
+      if (!op.reorder) return { tasks: rest, actions: [] }
+      const owner = resolvePlayer(state, env, op.deckOf)
+      const top = Object.values(state.cards).filter((c) => c.owner === owner && c.zone === 'deck').sort((a, b) => a.index - b.index).slice(0, op.n).map((c) => c.iid)
+      const ans = (env.slots[op.orderSlot] ?? []).filter((k, i, a) => top.includes(k) && a.indexOf(k) === i)
+      const iids = [...ans, ...top.filter((k) => !ans.includes(k))]
+      return { tasks: rest, actions: [{ type: 'procReorderDeck', owner, iids }] }
+    }
+    case 'lookHand': {
+      const owner = resolvePlayer(state, env, op.of)
+      const viewer = resolvePlayer(state, env, op.viewer)
+      const hand = Object.values(state.cards).filter((c) => c.owner === owner && c.zone === 'hand').sort((a, b) => a.index - b.index)
+      const look: BoardAction = { type: 'procLook', viewer, owner, zone: 'hand', n: hand.length }
+      if (hand.length === 0) return { tasks: rest, actions: [look] }
+      const id = `${frame.id}:${item.key}:hand${eng.seq}`
+      return {
+        tasks: rest,
+        patch: { awaiting: { id, kind: 'choose', slot: `__hand${eng.seq}` } },
+        actions: [look, { type: 'procChoice', choice: { id, by: viewer, kind: 'select', prompt: `${item.label}: 相手の手札を確認する（${hand.length}枚）`, options: hand.map((c) => ({ key: c.iid, label: nameOf(ctx, state, c.iid) })), min: 0, max: hand.length, frameId: frame.id } }],
+      }
     }
     case 'reveal': {
       // NH-35③: 見せたことを処理の記録に残す（カード名は見せた相手のログに出る）。カードは動かさない

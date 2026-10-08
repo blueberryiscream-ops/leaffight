@@ -24,7 +24,7 @@
 //   10-4 エントリーフェイズ [1]〜[5]（384-389）／10-7 手札調整フェイズ [1]〜[4]（430-435）／10-8 ターン終了（436-441）
 //   7-2[3]《コストを発生するとき》の窓は宣言の段で開く（244-250・統括11 の検証 C19）
 
-import { cardsInZone, moveCard, type BoardState, type CardInstance, type Layer, type Seat, type ZoneId } from './board'
+import { cardsInZone, moveCard, shuffleDeck, type BoardState, type CardInstance, type Layer, type Seat, type ZoneId } from './board'
 import type { CostKind } from './types'
 
 // ───────────────────────────────────────────────────────────────
@@ -1966,6 +1966,10 @@ export type ProcAction =
   | { type: 'procSwapZones'; seat: Seat; order: string[] }
   /** 効果で「相手に見せる」（NH-35③）。カードは動かさず、見せた相手のログにカード名を残す（cardName は呼び出し側がカード表から入れる＝core はカード知識を持たない） */
   | { type: 'procReveal'; iid: string; to: Seat; cardName: string }
+  /** 見た（NH-35③・R4c G5c）。誰が・誰の・どこを・何枚。🚨 カード名は持たない（見た人にだけ。名前は見た人への選択の選択肢にだけ出る）。盤面は変えない */
+  | { type: 'procLook'; viewer: Seat; owner: Seat; zone: 'deck' | 'hand'; n: number }
+  /** デッキの上 n 枚の並びを入れ替える（iids＝新しい並び。現在の上 n 枚と同じ集合でなければ何もしない）。カード知識なし */
+  | { type: 'procReorderDeck'; owner: Seat; iids: string[] }
   | { type: 'procDraw'; seat: Seat; n: number }
   /** お互いが同時に n 枚ドローする（《心機一転》。引けなかった側が負け・両者なら引き分け oldrule.txt:325。R4c G5b） */
   | { type: 'procDrawBoth'; n: number }
@@ -2448,6 +2452,18 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       } else s = moveTo(s, c.iid, action.to)
       trace.push({ kind: 'name', text: `移動:${action.iid}:${action.to}` })
       return { state: s, log: `${c.cardId} を移した` }
+    }
+    case 'procLook': {
+      trace.push({ kind: 'name', text: `見た:${action.viewer}:${action.owner}:${action.zone}:${action.n}` })
+      return { state, log: `${action.viewer} が ${action.owner} の${action.zone === 'deck' ? `デッキの上から${action.n}枚` : `手札 ${action.n}枚`}を見た` }
+    }
+    case 'procReorderDeck': {
+      const deck = cardsInZone(state, action.owner, 'deck').map((c) => c.iid)
+      const top = deck.slice(0, action.iids.length)
+      if (action.iids.length === 0 || new Set(action.iids).size !== action.iids.length || !action.iids.every((i) => top.includes(i))) return { state, log: '' }
+      const r = shuffleDeck(state, { owner: action.owner, orderedIids: [...action.iids, ...deck.filter((i) => !action.iids.includes(i))] })
+      trace.push({ kind: 'name', text: `並べ替え:${action.owner}:${action.iids.length}` })
+      return { state: r.state, log: `${action.owner} のデッキの上 ${action.iids.length}枚を並べ替えた` }
     }
     case 'procReveal': {
       const c = state.cards[action.iid]

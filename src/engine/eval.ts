@@ -229,6 +229,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     }
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
+  if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
   if ('equipsNamed' in c) {
     const xs = resolveRef(state, env, c.equipsNamed[0])
     return xs.length > 0 && xs.every((x) => Object.values(state.cards).some((a) => a.attachedTo === x && (ctx.cards[a.cardId]?.name ?? '').startsWith(c.equipsNamed[1])))
