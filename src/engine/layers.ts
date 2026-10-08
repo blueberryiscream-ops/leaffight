@@ -1161,7 +1161,8 @@ export function levelChoiceFix(ctx: EngineCtx, state: BoardState): BoardAction |
       if (attrs.length <= 1) continue
       const key = levelKey(itemIid, attrs)
       if (state.procMeta.answers[key]) continue
-      const chooser = resolvePlayer(state, layerEnv(state, e.layer), 'you')
+      // 「装備させたプレイヤー」＝アイテムの持ち主（手札から装備させた人）。層の you は装備先の使用者（controllerOf）なので、相手のキャラに付けたレベルダウンで相手が選んでいた（統括30・text-i_レベルダウン-3）
+      const chooser = state.cards[itemIid]?.owner ?? resolvePlayer(state, layerEnv(state, e.layer), 'you')
       return {
         type: 'procChoice',
         choice: { id: key, by: chooser, kind: 'select', prompt: `「${e.layer.label}」: キャラの属性から能力値を1つ指定する（FAQ:173・属性が変わったらその時点で指定し直す FAQ:176）`, options: attrs.map((a) => ({ key: a, label: a })), min: 1, max: 1, frameId: null },
