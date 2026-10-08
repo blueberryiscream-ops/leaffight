@@ -551,7 +551,7 @@ function forEachReach(ctx: EngineCtx, state: BoardState, decl: ProcDecl): string
 }
 
 /** 宣言が層の「禁止・対象にならない・特殊能力を失っている」に当たるか（宣言[1]〜[5] を済ませた ProcDecl で調べる） */
-export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): Violation[] {
+export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl, printedCost?: Cost): Violation[] {
   const out: Violation[] = []
   const kind = declActionKind(decl)
   const d = derived(ctx, state)
@@ -560,6 +560,8 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl): V
     const f = e.effect
     if (f.ce !== 'prohibit' || !f.action.kinds.includes(kind)) continue
     if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
+    // R4c G4b 《計画阻止》FAQ:1231: costIsZero＝印刷された使用代償にコストアイコンが無い（支払いの増減は見ない）。印刷値が分からない宣言は当てはまらない
+    if (f.action.costIsZero && (!printedCost || printedCost.icons.length !== 0)) continue
     if (!patternHits(ctx, state, e, f.action, decl)) continue
     out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label, sourceIid: e.layer.source })
   }
@@ -642,6 +644,19 @@ export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern
     kiryoku += f.kiryoku ?? 0
   }
   return { icons, kiryoku }
+}
+
+/** R4c G4b（NH-34⑧ 《バーゲン・セール》）: 当てはまる costSet があれば、使用代償の基礎のコストアイコン（後から発揮した効果が後 12-2 なので最後のもの）。無ければ null */
+export function costSetOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern['kinds'][number], by: Seat, sourceIid: string | null, targets: string[] = []): CostIcon[] | null {
+  let icons: CostIcon[] | null = null
+  const pseudo = { by, sourceIid, targets } as ProcDecl
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'costSet' || !f.applies.kinds.includes(kind)) continue
+    if (!patternHits(ctx, state, e, f.applies, pseudo)) continue
+    icons = f.icons
+  }
+  return icons
 }
 
 /** D3: 印刷値のコストアイコン枚数・気力コストへ増減をまとめて適用し、下限をとる（アイコンは種類ごとに0未満にならない・気力コストの最終値は0未満にならない） */

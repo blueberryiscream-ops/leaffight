@@ -171,7 +171,9 @@ export function declare(state: BoardState, ctx: EngineCtx, req: DeclareReq): Dec
  */
 function withViolations(state: BoardState, ctx: EngineCtx, out: Omit<Extract<DeclareOutcome, { ok: true }>, 'violations'> | Extract<DeclareOutcome, { ok: false }>): DeclareOutcome {
   if (!out.ok) return out
-  const vs = violations(ctx, state, out.decl)
+  // R4c G4b: prohibit の costIsZero（《計画阻止》）が読む印刷値の使用代償。イベントだけ（ほかの宣言は undefined＝costIsZero の禁止に当てはまらない）
+  const printed = out.decl.kind === 'event' && out.decl.sourceIid ? costOfAbility(ctx, state.cards[out.decl.sourceIid]?.cardId ?? '', null).cost : undefined
+  const vs = violations(ctx, state, out.decl, printed)
   if (ENFORCE === 'tested') {
     const isTested = (iid: string | null) => !!iid && ctx.defs[state.cards[iid]?.cardId ?? '']?.status === 'tested'
     const blocked = vs.filter((v) => isTested(v.sourceIid))

@@ -364,6 +364,9 @@ export type Continuous =
    *  当てはまる costMod を全部（層の順で）まとめて加算してから下限をとる（アイコンは種類ごとに0未満にならない。気力コストは最終値が0未満にならない）。
    *  icons: アイコン種類ごとの増減（＋で増える・－で減る）。kiryoku: 気力コストの増減（気力－N型の N に足す）。R4a で足した */
   | { ce: 'costMod'; applies: ActionPattern; icons?: Partial<Record<CostIcon, number>>; kiryoku?: number }
+  /** 使用代償の置き換え（R4c G4b・NH-34⑧ 《バーゲン・セール》）: 当てはまる宣言の使用代償の**基礎**のコストアイコンを icons にする（属性アイコン・気力コストなどはそのまま。印刷値は変えない）。
+   *  effectiveCost が costMod より先に当てる（置き換えてから他の増減を足して下限） */
+  | { ce: 'costSet'; applies: ActionPattern; icons: CostIcon[] }
   | { ce: 'prohibit'; action: ActionPattern; when?: Cond }                                // 「～できない」
   /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
   | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }

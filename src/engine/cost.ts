@@ -12,7 +12,7 @@ import type { CostSource, CostToken, ProcDecl } from '../core/proc'
 import type { Attr, Cost, CostIcon, OtherCost } from './dsl'
 import { controllerOf, isCharOnField, type CardInfo, type EngineCtx } from './ctx'
 import { grantedOfDef } from './abilities'
-import { ACTION_KIND, applyCostMod, cannotGenerateIids, costModOf } from './layers'
+import { ACTION_KIND, applyCostMod, cannotGenerateIids, costModOf, costSetOf } from './layers'
 import { evalExpr, resolveRef } from './eval'
 
 const ICONS = 'WRGLT'
@@ -165,8 +165,11 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
  * declareOne の支払い方法の宣言・payNow の支払いの両方が、この一か所を通る（統括「使用代償の構造の算出を一か所に」PHASE §3-7）
  */
 export function effectiveCost(ctx: EngineCtx, state: BoardState, actionKind: ProcDecl['kind'] | 'actionItem', by: Seat, sourceIid: string | null, targets: string[], cost: Cost): Cost {
-  const mod = costModOf(ctx, state, actionKind === 'actionItem' ? 'その他' : ACTION_KIND[actionKind], by, sourceIid, targets, cost) // actionItem＝アクションアイテムの宣言（17-7。イベントの増減は掛からない）
-  return applyCostMod(cost, mod)
+  const kind = actionKind === 'actionItem' ? 'その他' : ACTION_KIND[actionKind] // actionItem＝アクションアイテムの宣言（17-7。イベントの増減は掛からない）
+  // R4c G4b（NH-34⑧ 《バーゲン・セール》）: 置き換えが先。基礎のコストアイコンを置き換え（属性・気力コストはそのまま）、他の増減（印刷値で条件を読む）を足して下限（下限の基準も置き換えた後の基礎）
+  const set = costSetOf(ctx, state, kind, by, sourceIid, targets)
+  const mod = costModOf(ctx, state, kind, by, sourceIid, targets, cost)
+  return applyCostMod(set ? { ...cost, icons: [...set] } : cost, mod)
 }
 
 /**
