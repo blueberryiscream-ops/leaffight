@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -471,6 +471,17 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
       apply(swapChoice)
       if (out.state === before) {
         out.warnings.push('H-6 の入れ替えの選択が受け付けられない')
+        break
+      }
+      continue
+    }
+    // R4c G6a-2: 《レベルアップ／ダウン》を装備したキャラの属性が複数なら、装備させたプレイヤーに能力値を1つ指定させる（属性が変わるたびに指定し直す FAQ:173・176）
+    const levelChoice = levelChoiceFix(ctx, s)
+    if (levelChoice) {
+      const before = out.state
+      apply(levelChoice)
+      if (out.state === before) {
+        out.warnings.push('レベルアップ／ダウンの指定が受け付けられない')
         break
       }
       continue

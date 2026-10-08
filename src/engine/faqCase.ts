@@ -91,6 +91,8 @@ export type Expect = (
   | { ready: [ref: string, ready: boolean] }
   | { used: [ref: string, used: boolean] }   // バトルカードの使用済み／未使用（R4c G11a-2）
   | { stat: [ref: string, attr: Attr, value: number] }
+  /** 今の属性（層から導き出した値 attrsNow）が、力早賢根感の順に並べたこの文字列と同じ（R4c G6a-2）。属性なしは '' */
+  | { attrs: [ref: string, attrs: string] }
   | { downs: [side: Side, value: number] }
   | { result: 'youWin' | 'opponentWins' | 'draw' | 'continues' }
   /** steps の index 番目の操作がルール違反（今は警告）になる */

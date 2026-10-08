@@ -243,6 +243,10 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
       if (d.modLost.has(iid)) continue
       items.push({ seq: e.layer.seq, run: () => !(imm.has(f.stat) && blocked(f.stat, e.layer.source)) && effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
+    } else if (f.ce === 'statByAttr') {
+      // 《レベルアップ／ダウン》: 今の属性と同じ能力値を delta（R4c G6a-2）。属性が1つならそれ・複数なら指定した1つ・無ければ修正しない
+      if (d.modLost.has(iid)) continue
+      items.push({ seq: e.layer.seq, run: () => { if (!effectOn(ctx, state, e, iid)) return; const a = levelStatAttr(ctx, state, e, iid); if (a) v[a] += f.delta } })
     } else if (f.ce === 'statSwap') {
       items.push({ seq: e.layer.seq, run: () => { const keep = { ...v }; if (effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v)) for (const st of imm.keys()) if (blocked(st, e.layer.source)) v[st] = keep[st] } })
     }
@@ -1126,6 +1130,45 @@ export function continuousSeed(ctx: EngineCtx, state: BoardState, env: Env, effe
 /** 看護（clearMods）: そのカードに効果で足した修正の層（12-1）の id */
 export function clearableMods(state: BoardState, iid: string, kind: '能力値修正' | '攻防修正'): string[] {
   return state.layers.list.filter((l) => l.ability === null && l.kind === kind && l.targets.includes(iid) && !bodyOf(l).mod?.immune).map((l) => l.id) // 「影響を受けない」印つきの set は消えない（スーパー御堂×看護 FAQ:2498）
+}
+
+/** 《レベルアップ／ダウン》の答えの鍵: アイテム×そのときの属性の組（属性が変わるたびに指定し直す FAQ:176） */
+const levelKey = (itemIid: string, attrs: Attr[]) => `lvl:${itemIid}:${ATTRS.filter((a) => attrs.includes(a)).join('')}`
+
+/** statByAttr が修正する能力値（今の属性が1つならそれ・複数なら指定済みの1つ・指定前と属性なしは null） */
+function levelStatAttr(ctx: EngineCtx, state: BoardState, e: Eff, iid: string): Attr | null {
+  const attrs = attrsNow(ctx, state, iid)
+  if (attrs.length === 0) return null
+  if (attrs.length === 1) return attrs[0]
+  const itemIid = e.layer.source
+  const pick = itemIid ? state.procMeta.answers[levelKey(itemIid, attrs)]?.[0] : undefined
+  return pick && attrs.includes(pick as Attr) ? (pick as Attr) : null
+}
+
+/**
+ * 《レベルアップ／ダウン》の指定（FAQ:173・176）: 今の属性が複数あって、その組への指定がまだなら、装備させたプレイヤーに1つ指定させる。
+ * 属性が変わるたびに（組が変わるたびに）指定し直す。答えは procMeta.answers['lvl:<アイテムiid>:<属性の組>']（同じ組に戻ったときは前の指定のまま）
+ */
+export function levelChoiceFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  if (state.result || state.procMeta.choice) return null
+  for (const e of derived(ctx, state).effs) {
+    if (e.effect.ce !== 'statByAttr') continue
+    const itemIid = e.layer.source
+    if (!itemIid) continue
+    for (const iid of targetsOf(ctx, state, e)) {
+      if (!effectOn(ctx, state, e, iid)) continue
+      const attrs = attrsNow(ctx, state, iid)
+      if (attrs.length <= 1) continue
+      const key = levelKey(itemIid, attrs)
+      if (state.procMeta.answers[key]) continue
+      const chooser = resolvePlayer(state, layerEnv(state, e.layer), 'you')
+      return {
+        type: 'procChoice',
+        choice: { id: key, by: chooser, kind: 'select', prompt: `「${e.layer.label}」: キャラの属性から能力値を1つ指定する（FAQ:173・属性が変わったらその時点で指定し直す FAQ:176）`, options: attrs.map((a) => ({ key: a, label: a })), min: 1, max: 1, frameId: null },
+      }
+    }
+  }
+  return null
 }
 
 

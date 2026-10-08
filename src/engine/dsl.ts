@@ -410,6 +410,8 @@ export type Continuous =
   | { ce: 'addCharType'; who: CardRef | Selector; type: string }
   /** 属性を置き換える（15-7）。読み口は G6a-1・カードは G6a-2 */
   | { ce: 'setAttrs'; who: CardRef | Selector; attrs: Attr[] }
+  /** 今の属性と同じ能力値を delta する（《レベルアップ／ダウン》。属性が1つならそれ・複数なら装備させたプレイヤーが1つ指定し、属性が変わるたびに指定し直す FAQ:173・176。属性なしなら修正しない NH-36⑩）。R4c G6a-2 */
+  | { ce: 'statByAttr'; who: CardRef | Selector; delta: number }
   | { ce: 'statSwap'; who: CardRef; tieBreak: { chooser: PlayerRef; when: 'apply' } }
   | { ce: 'battleAttrSwap'; battleCard: CardRef; requires: 'pureAttrs' }                 // [攻]と[防]の入れ替え
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }
