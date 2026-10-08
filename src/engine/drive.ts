@@ -39,7 +39,7 @@ import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, t
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { attrsOf, costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
-import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Op, Selector } from './dsl'
+import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
 import { ATTRS, adjustGenerated, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
@@ -110,10 +110,17 @@ export interface DriveResult {
 // 宣言（宣言[1]〜[5]）
 // ───────────────────────────────────────────────────────────────
 
+/** 選ぶ枚数（式は評価して 0 以上の整数にする。R4c G5b） */
+function countOf(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice): [number, number] {
+  const f = (e: number | Expr) => (typeof e === 'number' ? e : Math.max(0, evalExpr(ctx, state, env, e)))
+  return [f(ch.count[0]), f(ch.count[1])]
+}
+
 /** 選択の問いの文言。DSL の枠の名前（s1・target 等）は画面に出さず、選ぶ物の種類で言う（統括20） */
 function pickPrompt(ch: Choice): string {
   const p = ch.pick
-  const n = ch.count[0] === ch.count[1] ? `${ch.count[0]}` : `${ch.count[0]}〜${ch.count[1]}`
+  const [c0, c1] = ch.count
+  const n = typeof c0 !== 'number' || typeof c1 !== 'number' ? '好きな数' : c0 === c1 ? `${c0}` : `${c0}〜${c1}`
   if ('stat' in p) return `能力値${n}つを選ぶ`
   if ('cards' in p) return `カード${n}枚を選ぶ`
   if ('ability' in p) return '特殊能力を選ぶ'
@@ -281,7 +288,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   // 宣言[3] 対象の指定（空打ちは宣言できない 11-3）
   const declChoices = ab.choices.filter((c) => c.when === 'declare')
   let given = [...(req.targets ?? [])]
-  const need = declChoices.reduce((s, c) => s + c.count[1], 0)
+  const need = declChoices.reduce((s, c) => s + countOf(ctx, state, env, c)[1], 0)
   // 【決めたこと】FAQ ケースの約束「身代わりの targets: [ダメージを受けるキャラ, 代わりに受けるキャラ]」:
   // 選択の数より多い対象の先頭が、いま進行中の手順の当事者（ダメージの受け手・ダウンするキャラ）なら読み飛ばす
   while (given.length > need && frame && (frame.damage?.recipient === given[0] || frame.down?.iid === given[0])) given = given.slice(1)
@@ -291,15 +298,16 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   for (const ch of declChoices) {
     const chooser = resolvePlayer(state, env, ch.chooser)
     const opts = choiceOptions(ctx, state, { ...env, slots }, ch)
-    if (opts.length < ch.count[0]) return { ok: false, reason: `対象を指定できない（空打ち 11-3）: ${ch.slot}` }
+    const [lo, hi] = countOf(ctx, state, { ...env, slots }, ch)
+    if (opts.length < lo) return { ok: false, reason: `対象を指定できない（空打ち 11-3）: ${ch.slot}` }
     if (chooser !== req.by || given.length === 0) {
       later.push(ch)
       continue
     }
-    const take = given.slice(0, ch.count[1])
+    const take = given.slice(0, hi)
     given = given.slice(take.length)
     for (const t of take) if (!opts.some((o) => o.key === t)) return { ok: false, reason: `適切な対象でない: ${nameOf(ctx, state, t)}（11-3）` }
-    if (take.length < ch.count[0]) return { ok: false, reason: '対象の数が足りない' }
+    if (take.length < lo) return { ok: false, reason: '対象の数が足りない' }
     slots[ch.slot] = take
   }
 
@@ -366,7 +374,7 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
   const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: currentWindow(state)?.frame?.id ?? null, declId: null, declared: {} }
   return ab.choices
     .filter((c) => c.when === 'declare' && resolvePlayer(state, env, c.chooser) === req.by)
-    .map((c) => ({ slot: c.slot, min: c.count[0], max: c.count[1], options: choiceOptions(ctx, state, env, c).map((o) => o.key) }))
+    .map((c) => ({ slot: c.slot, min: countOf(ctx, state, env, c)[0], max: countOf(ctx, state, env, c)[1], options: choiceOptions(ctx, state, env, c).map((o) => o.key) }))
 }
 
 function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, withPrefer = true): { key: string; label: string }[] {
@@ -554,7 +562,7 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
     if (!ch) return [{ type: 'procDeclPatch', declId: d.id, eng: { later: later.slice(1) } }]
     const env: Env = { self: d.sourceIid, you: d.by, slots, trigger: d.trigger, declId: d.id, declared: {} }
     const options = choiceOptions(ctx, state, env, ch)
-    return [{ type: 'procChoice', choice: { id: cid, by: resolvePlayer(state, env, ch.chooser), kind: 'select', prompt: `${d.label}: ${pickPrompt(ch)}（対象）`, options, min: ch.count[0], max: ch.count[1], frameId: null } }]
+    return [{ type: 'procChoice', choice: { id: cid, by: resolvePlayer(state, env, ch.chooser), kind: 'select', prompt: `${d.label}: ${pickPrompt(ch)}（対象）`, options, min: countOf(ctx, state, env, ch)[0], max: countOf(ctx, state, env, ch)[1], frameId: null } }]
   }
   return null
 }
@@ -1259,6 +1267,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
+    case 'drawBoth':
+      return { tasks: rest, actions: [{ type: 'procDrawBoth', n: op.n }] }
     case 'draw':
       return { tasks: rest, actions: [{ type: 'procDraw', seat: resolvePlayer(state, env, op.player), n: evalExpr(ctx, state, env, op.n) }] }
     case 'remember':
@@ -1279,7 +1289,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'adjustDamage':
       if (!trigger?.damage) return manual('増減するダメージが無い')
-      return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: op.delta, all: op.scope === 'allSimultaneous', ...(op.halve ? { halve: true } : {}) }] }
+      return { tasks: rest, actions: [{ type: 'procDamageEdit', frameId: trigger.id, delta: evalExpr(ctx, state, env, op.delta), all: op.scope === 'allSimultaneous', ...(op.halve ? { halve: true } : {}) }] }
     case 'generateCost': {
       // D21: 効果でコストを発生させる。icons が配列なら固定の並び、{ callCostOf } ならそのカードの印刷された呼び出しコスト＋extra
       // R4c G3a（NH-33⑦）: 属性 'choose' は処理時に使用者が5属性から1つ選ぶ（選択の枠を前に積み、選び終えてからこの Op を { slot } の形で実行する）
@@ -1399,14 +1409,15 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const ch = op.choice
       const chooser = resolvePlayer(state, env, ch.chooser)
       const options = choiceOptions(ctx, state, env, ch)
-      const [min0, max] = ch.count
+      const [min0, max] = countOf(ctx, state, env, ch)
       // 対象にとる選択で、適切な対象が足りない＝立ち消え（11-4・FAQ:3623）。対象にとらない選択は、あるだけ選ぶ
       if (options.length < min0 && ch.mode === 'target') {
         return { tasks: [], actions: [{ type: 'procTrace', entry: { kind: 'abort', text: `${item.label}: 適切な対象が無い（立ち消え）`, id: item.key } }] }
       }
       // 属性で絞った能力値の候補が1つなら選択を出さずにそれに決める（NH-27⑤「属性が1つなら選択を出さない」）
       if ('stat' in ch.pick && ch.pick.rule === 'attrOf' && options.length === 1) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [options[0].key] } } }, actions: [] }
-      if (options.length === 0) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [] } } }, actions: [] }
+      // 選ぶ枚数の上限が 0（《徴収》で0枚を選んだ→相手も 0 枚）なら何も選ばない
+      if (options.length === 0 || max <= 0) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [ch.slot]: [] } } }, actions: [] }
       const id = `${frame.id}:${item.key}:${ch.slot}:${eng.seq}`
       if (ch.repeat) {
         // 割り振り: 同じカードを何度も選べる。気力が0より小さくならない回数まで（《サバイバル》FAQ:4109）

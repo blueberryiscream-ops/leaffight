@@ -82,7 +82,7 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
     s.trash?.forEach((c, i) => put(c, seat, 'trash', i))
     const top = s.deckTop ?? []
     top.forEach((c, i) => put(c, seat, 'deck', i))
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < (s.fillers ?? 20); i++) {
       const iid = `filler${seat}${i}`
       cards[iid] = { iid, cardId: FILLER, owner: seat, zone: 'deck', index: top.length + i, orientation: 'ready', faceUp: false, kiryoku: null, attachedTo: null }
     }

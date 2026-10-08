@@ -1967,6 +1967,8 @@ export type ProcAction =
   /** 効果で「相手に見せる」（NH-35③）。カードは動かさず、見せた相手のログにカード名を残す（cardName は呼び出し側がカード表から入れる＝core はカード知識を持たない） */
   | { type: 'procReveal'; iid: string; to: Seat; cardName: string }
   | { type: 'procDraw'; seat: Seat; n: number }
+  /** お互いが同時に n 枚ドローする（《心機一転》。引けなかった側が負け・両者なら引き分け oldrule.txt:325。R4c G5b） */
+  | { type: 'procDrawBoth'; n: number }
   | { type: 'procAddDowns'; seat: Seat; n: number }
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
   // useAsSeat（D20・R4a-2）＝発生させたのは seat だが、発生済みのコストは useAsSeat のものになる（《借金取り》）
@@ -2470,6 +2472,23 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       trace.push({ kind: 'name', text: `ドロー:${action.seat}:${action.n}` })
       return { state: s, log: `${action.seat} が ${action.n} 枚ドロー` }
     }
+    case 'procDrawBoth': {
+      let s = state
+      const losers: Seat[] = []
+      for (const seat of ['A', 'B'] as Seat[]) {
+        for (let i = 0; i < action.n; i++) {
+          const top = cardsInZone(s, seat, 'deck')[0]
+          if (!top) {
+            losers.push(seat)
+            break
+          }
+          s = moveTo(s, top.iid, 'hand')
+        }
+      }
+      s = endGame(s, losers, 'デッキからドローできない（9-3）')
+      trace.push({ kind: 'name', text: `ドロー（同時）:${action.n}` })
+      return { state: s, log: `お互いが ${action.n} 枚ドロー` }
+    }
     case 'procAddDowns': {
       // 「勝利条件を＋１」（9-2-1）: ダウン処理[3] ではない＝割り込み側の結果なので即座に数え、即座に判定する（H-12 ②）
       const s: BoardState = { ...state, downs: { ...state.downs, [action.seat]: state.downs[action.seat] + action.n } }
@@ -2572,7 +2591,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       if (action.delta) {
         const g = findFrame(s, f.id)!
-        s = setFrame(s, { ...g, damage: { ...g.damage!, value: g.damage!.value + action.delta } })
+        s = setFrame(s, { ...g, damage: { ...g.damage!, value: Math.max(0, g.damage!.value + action.delta) } })
         trace.push({ kind: 'name', text: `ダメージ${action.delta > 0 ? '+' : ''}${action.delta}` })
         if (action.all && d.group) {
           const grp = findFrame(s, d.group)

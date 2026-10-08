@@ -48,6 +48,12 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
       return env.self ? [env.self] : []
     case 'it':
       return env.it ? [env.it] : []
+    case 'deckTop': {
+      // デッキの一番上（index が最小）の1枚。デッキ0枚なら空（R4c G5b・予知能力）
+      const seat = resolvePlayer(state, env, r.side)
+      const top = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'deck').sort((a, b) => a.index - b.index)[0]
+      return top ? [top.iid] : []
+    }
     case 'slot':
       return (env.slots[r.slot] ?? []).filter((x) => x in state.cards)
     case 'equipped': {

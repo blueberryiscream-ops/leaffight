@@ -72,6 +72,8 @@ export type CardRef =
   | { ref: 'slot'; slot: string } // §3 の選択で埋まったもの
   | { ref: 'event'; role: EventRole } // 進行中の処理の当事者（ダメージの受け手など）
   | { ref: 'battle'; role: 'challengerParticipants' | 'challengedParticipants' | 'battleCard' }
+  /** そのプレイヤーのデッキの一番上の1枚（無ければ空。《予知能力》R4c G5b。ドローではない＝デッキ0枚でも何も起きない oldrule.txt:552-555） */
+  | { ref: 'deckTop'; side: PlayerRef }
   | { ref: 'it' }                   // Selector の where の中で「いま調べている1枚」
   | { ref: 'named'; name: string }    // 名前で指す（『HM-12』等）。コピーしても self にならない（FAQ oldfaq.txt:2172-2173）
   // ── R2b で足した（HANDOFF-R2b「決めたこと」）
@@ -182,7 +184,8 @@ export interface Choice {
   slot: string
   chooser: PlayerRef
   pick: Pick
-  count: [number, number]
+  /** 選ぶ枚数の下限・上限。式も書ける（R4c G5b: 《徴収》「自分が捨てた枚数と同数」《緊急回避》「好きな枚数」＝[0, 手札の数]）。処理時に評価し、候補が下限に足りなければある分を選ぶ（画策 FAQ:1182）。上限が 0 なら何も選ばない */
+  count: [number | Expr, number | Expr]
   mode: 'target' | 'select'
   when: 'declare' | 'resolve' | 'apply'  // apply＝継続効果が適用される瞬間（装備した時など）
   /** 選ぶときの優先（満たす候補があればその中から選ぶ）。対象の条件ではないので立ち消えの判定には使わない
@@ -232,10 +235,12 @@ export type Op =
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
   | { op: 'trash'; what: CardRef }
   | { op: 'setBattleUsed'; what: Selector; used: boolean }       // バトルカードを使用済み／未使用にする（19-3。《猫寄せドラ》R4c G11a-2。reusable でも使用済みにする）
+  /** お互いが同時に n 枚ドローする。引けなかった側が負け・両方なら引き分け（《心機一転》oldrule.txt:325。R4c G5b）。1つの action で行い、先に引けなかった側だけ負けにしない */
+  | { op: 'drawBoth'; n: number }
   | { op: 'draw'; player: PlayerRef; n: number | Expr }        // n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）
   // ── 進行中の処理を書き換える（MTG の置換効果の代わり。原典には置換効果という概念が無い）
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
-  | { op: 'adjustDamage'; delta: number; scope: 'this' | 'allSimultaneous'; halve?: true }  // halve＝今のダメージを半分・端数切り上げ（《衣装・純白のドレス》。1以上のときだけ。delta は 0 にする。R4c G2b-2a）
+  | { op: 'adjustDamage'; delta: Expr; scope: 'this' | 'allSimultaneous'; halve?: true }  // halve＝今のダメージを半分・端数切り上げ（《衣装・純白のドレス》。1以上のときだけ。delta は 0 にする。R4c G2b-2a）
   /**
    * 打ち消し（原典に定義が無い ❓）。part が無ければ全体（H-8: 範囲は「その効果」だけ）。
    * part: 'draw'（D23・おあずけ・R4a-2）＝その効果のうち「ドロー」の操作（op:'draw'）だけを打ち消す（他は処理する）。
