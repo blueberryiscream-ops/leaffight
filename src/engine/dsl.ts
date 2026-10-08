@@ -145,6 +145,7 @@ export type Cond =
   | { downed: CardRef }                        // そのカードが今ゴミ箱にある＝ダウン処理が打ち消されずに終わった近似（D22・D16・R4a-2）
   // ── R4c G2a で足した（NH-23・NH-27）
   | { battleNamed: string }                    // 進行中のバトルの種目（バトルカード）のカード名が一致し、種目が決まっている（[18]〜[28]・oldrule 20-5。インファイトで攻防・テキストが変わっても名前のまま FAQ:4042）
+  | { battleAtkHas: Attr }                     // 進行中のバトルのバトルカードの印刷された攻撃属性に属性が含まれる（種目が決まった [18]〜[28]。《チャンピオン》R4c G4d。《インファイト》の選んだ能力値は含まない FAQ:3136）
   | { sexIs: [CardRef, '男性' | '女性'] }      // その性別か「両方」なら真。性別無しはどちらにも偽（FAQ:2939）
   | { oppositeSex: [CardRef, CardRef] }       // 異性（NH-24）: 男性⇔女性。「両方」は男性・女性・両方の誰とでも異性。性別無しはどれとも異性でない（どちらが無しでも偽）。R4c G2b-2a《衣装・きわどい服》
   | { nameStarts: [CardRef, string] }          // カード名が prefix で始まる（「衣装」で始まるアイテム。R4c G2b-2a。equipsNamed と同じ prefix の考え方）
@@ -425,6 +426,10 @@ export type Continuous =
   | { ce: 'barFromBattle'; who: CardRef | Selector; role: 'challenge' | 'any' }
   /** 「消耗状態でもこのバトルを受けることができる」（《坂神蝉丸》守る者 R4c G2b-1a）: 20-4[11] の受けるキャラの候補に、消耗状態のこのキャラを足す（待機状態の他のキャラ・リーダーも今どおり選べる）。
    *  core はカードを知らない: barFromBattle と同じ流れでエンジンが layers で iid を導き出して core の LayerState.receiveRested に置く。addContinuous・duration endOfBattle で使う */
+  /** 「バトルを挑むときは[W]を支払わなければならない」（マネージャー・やる気ナシ・ロゥ R4c G4d・NH-34①④）: そのキャラが20-4[7] の挑むキャラに選ばれる時に、挑んだプレイヤーが**発生済みのコストだけ**で icons ぶん払う（FAQ:3133）。
+   *  払えないキャラは挑むキャラの候補から外す。使用代償ではない（costMod は掛からない）。選んだ後に条件が変わっても払い直さない（FAQ:399）。
+   *  core はカードを知らない: エンジンが layers で iid ごとの額（効果ごとの icons の数の合計）を導き出して core の LayerState.challengeCost に置く。候補の絞りと支払い（トークンを消す）は core が額だけを見て行う */
+  | { ce: 'challengeCost'; who: CardRef | Selector; icons: CostIcon[] }
   | { ce: 'receiveWhenRested'; who: CardRef | Selector }
   /** 「エントリー時に待機状態に戻すことができなくなる」（《病気》R4c G11a-2・FAQ:631）: 10-4[2] の規定の待機戻しの候補から外す（効果で待機にするのは可 FAQ:628）。
    *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.noEntryReady に置く（reusable と同じ流れ） */

@@ -306,6 +306,12 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const bc = bf?.battle?.battleCard
     return !!bf && !!bc && bf.step >= 18 && bf.step <= 28 && ctx.cards[state.cards[bc]?.cardId ?? '']?.name === c.battleNamed
   }
+  if ('battleAtkHas' in c) {
+    // バトルカードの印刷の攻撃属性に属性が含まれる（種目が決まった [18]〜[28]。《チャンピオン》。《インファイト》で選んだ能力値は含まない FAQ:3136）
+    const bf = nearestBattle(state)
+    const bc = bf?.battle?.battleCard
+    return !!bf && !!bc && bf.step >= 18 && bf.step <= 28 && (ctx.cards[state.cards[bc]?.cardId ?? '']?.battleAtk ?? '').includes(c.battleAtkHas)
+  }
   if ('sexIs' in c) {
     const xs = resolveRef(state, env, c.sexIs[0])
     return xs.length > 0 && xs.every((x) => { const s = ctx.cards[state.cards[x]?.cardId ?? '']?.sex; return s === c.sexIs[1] || s === '両方' })

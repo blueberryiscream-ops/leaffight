@@ -709,7 +709,10 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
 /** バトルの宣言（20-4[1]）の形。宣言でなく効果で始まるバトル（《抜き打ち》）もこの形で持つ */
 /** 20-4[7] バトルを挑むキャラの候補（待機状態。効果で「バトルを挑むことができない／参加することができない」キャラを除く）。drive.ts の宣言の判定も同じ一か所を通す */
 export function challengeCandidates(state: BoardState, seat: Seat): CardInstance[] {
-  return fieldChars(state, seat).filter((x) => x.orientation === 'ready' && !state.layers.barChallenge.includes(x.iid) && !state.layers.barAny.includes(x.iid))
+  // 挑むときの[W]（challengeCost R4c G4d）: 発生済みのコストだけで払えない額のキャラは候補から外す（NH-34①。栗原透子 FAQ:2427 と同じ扱い。コストを発生させる窓は無い FAQ:3133）
+  const pool = state.costs[seat].length
+  const cc = state.layers.challengeCost ?? {}
+  return fieldChars(state, seat).filter((x) => x.orientation === 'ready' && !state.layers.barChallenge.includes(x.iid) && !state.layers.barAny.includes(x.iid) && (cc[x.iid] ?? 0) <= pool)
 }
 
 export function battleDecl(id: string, challenger: Seat): ProcDecl {
@@ -1350,6 +1353,16 @@ function applyCoreChoice(state: BoardState, ch: ProcChoice, pick: string[], trac
       const seat = ch.by
       let s = state
       const joinedReady = [...b!.joinedReady]
+      // 挑むキャラに選ばれた時に、挑んだプレイヤーが発生済みのコストで [W] を払う（challengeCost。20-2・NH-34④）。払うトークンは属性つきを残す（属性なしから先に消す）。7-4: 払ったコストは消える
+      if (seat === b!.challenger) {
+        const n = pick.reduce((acc, iid) => acc + (s.layers.challengeCost?.[iid] ?? 0), 0)
+        if (n > 0) {
+          const pool = s.costs[seat]
+          const gone = new Set([...pool].sort((p, q) => p.attrs.length - q.attrs.length).slice(0, n).map((t) => t.id))
+          s = { ...s, costs: { ...s.costs, [seat]: pool.filter((t) => !gone.has(t.id)) } }
+          trace.push({ kind: 'name', text: `挑むときのコスト:${n}`, id: `${frame.id}:challengeCost` })
+        }
+      }
       for (const iid of pick) {
         const x = s.cards[iid]
         if (!x) continue
@@ -2035,7 +2048,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
-      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[] }
+      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number> }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2098,7 +2111,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

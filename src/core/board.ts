@@ -116,9 +116,11 @@ export interface LayerState {
   receiveRested: string[]
   /** 10-4[2] の規定の待機戻しの候補から外すキャラ（noEntryReady。《病気》R4c G11a-2。エンジンが導き出して置く控え。中身の意味は持たない） */
   noEntryReady: string[]
+  /** 挑むキャラに選ぶ時に挑んだプレイヤーが発生済みのコストで払う [W] の数（iid ごと。challengeCost。マネージャー・やる気ナシ・ロゥ R4c G4d）。20-4[7] の候補は払える額のキャラだけ。エンジンが導き出して置く控え。中身の意味は持たない */
+  challengeCost: Record<string, number>
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [] }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {} }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。

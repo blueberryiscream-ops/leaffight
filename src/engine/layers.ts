@@ -842,10 +842,17 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !noEntryReady.includes(x)) noEntryReady.push(x)
   }
   noEntryReady.sort()
+  // 挑むときの[W]（challengeCost）: 効果ごと・対象ごとに icons の数を足す（ロゥは1効果＝タイプをいくつ持っても1つ）。core が候補の絞りと支払いに使う
+  const ccMap: Record<string, number> = {}
+  for (const e of d.effs) {
+    if (e.effect.ce !== 'challengeCost') continue
+    for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x])) ccMap[x] = (ccMap[x] ?? 0) + e.effect.icons.length
+  }
+  const challengeCost: Record<string, number> = Object.fromEntries(Object.entries(ccMap).sort(([p], [q]) => (p < q ? -1 : p > q ? 1 : 0)))
   barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
+  const barChanged = JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -894,7 +901,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
-      ...(barChanged ? { bar: { ...barNow, noEntryReady } } : {}),
+      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
     })
