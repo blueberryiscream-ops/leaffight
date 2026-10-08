@@ -327,7 +327,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: found.cardId, ...(speed === '割込型' && frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: found.cardId, ...(frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
