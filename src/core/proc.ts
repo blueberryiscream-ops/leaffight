@@ -1022,7 +1022,10 @@ function enterCardUse(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): 
         const target = decl.equipTo!
         if (!onField(state.cards[target])) return frame.transfer ? abortFrame(state, frame, '移し替え先が失われている', trace) : trashCard(state, '装備対象が失われている')
         const c = state.cards[iid]
-        let s = moveCard(state, { iid, toOwner: c.owner, toZone: 'char', toIndex: 100, cardName: c.cardId }).state
+        // 置き場 char は枠の入れ替え式（moveCard は同じ index の札と入れ替える）＝アイテムは持ち主の char の 100 以上の空いた番号に置く。
+        // いつも 100 に置くと、先に装備したアイテム（index 100）が提示エリアへ押し出されていた（統括30が見つけた・text-i_ピンクのル-ジュ-6）
+        const nextIdx = Object.values(state.cards).filter((x) => x.owner === c.owner && x.zone === 'char' && x.index >= 100).reduce((a, x) => Math.max(a, x.index + 1), 100)
+        let s = moveCard(state, { iid, toOwner: c.owner, toZone: 'char', toIndex: nextIdx, cardName: c.cardId }).state
         s = { ...s, cards: { ...s.cards, [iid]: { ...s.cards[iid], attachedTo: target, kiryoku: null } } }
         trace.push({ kind: 'name', text: `装備:${c.cardId}→${target}`, id: decl.id })
         return setFrame(s, advance(frame))
