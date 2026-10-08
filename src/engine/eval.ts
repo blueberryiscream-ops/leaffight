@@ -24,6 +24,8 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
       case 'challenger':
       case 'battleUser': // H-9c 仮の既定＝挑んだ側
         return nearestBattle(state)?.battle?.challenger ?? env.you
+      case 'triggerActor':
+        return triggerFrame(state, env)?.decl?.by ?? env.you
       case 'equipper': // 性格反転キノコの静的効果は you＝発生源（アイテム）の使用権者＝装備させたプレイヤー（layers.ts layerEnv）
         return env.you
       case 'challenged': {
@@ -366,6 +368,15 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const ab = cardId !== undefined && idx !== undefined ? abilityAt(ctx, cardId, idx) : undefined
     if (!ab) return false
     return hasOpDeep(opsOf(ab), c.declaredHasOp)
+  }
+  if ('declaredHasAnyOp' in c) {
+    const f = triggerFrame(state, env)
+    const d = f?.decl
+    const cardId = d?.eng.cardId as string | undefined
+    const idx = d?.eng.index as number | undefined
+    const ab = cardId !== undefined && idx !== undefined ? abilityAt(ctx, cardId, idx) : undefined
+    if (!ab) return false
+    return c.declaredHasAnyOp.some((name) => hasOpDeep(opsOf(ab), name))
   }
   if ('declaredReducesKiryoku' in c) {
     const f = triggerFrame(state, env)

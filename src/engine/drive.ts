@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, adjustGenerated, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, adjustGenerated, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -255,9 +255,14 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   // 発生源はフィールドのアイテム（手札のカードは宣言できない）、宣言できるのは装備先のキャラの使用者（FAQ:405）
   const holder = src.attachedTo ? state.cards[src.attachedTo] : undefined
   const isAI = ab.kind === 'activated' && info?.kind === 'i' && isCharOnField(holder)
+  // 18-5 アクションフィールド（クイック）: 場のフィールドカードの起動型。手順は16-1（イベント）と同じ段（decl.kind 'event'）。お互いのプレイヤーが使用できる（持ち主に限らない）
+  const isAF = ab.kind === 'activated' && info?.kind === 'f' && src.zone === 'field'
   // 発生源の場所: 特殊能力はそのキャラの使用者がフィールドで（15-13-1）、イベントは自分の手札から（16-1）
   if (isEvent) {
     if (src.zone !== 'hand' || src.owner !== req.by) return { ok: false, reason: '自分の手札のカードでない（16-1）' }
+  } else if (isAF) {
+    // 本文「メインフェイズに」＝どちらのメインフェイズでも（宣言の機会が開いていれば）。回数の制限は無い
+    if (state.turn && state.turn.phase !== 'メイン') return { ok: false, reason: 'アクションフィールドはメインフェイズにだけ使える（クイック・18-5）' }
   } else if (isAI) {
     if (controllerOf(state, src.iid) !== req.by) return { ok: false, reason: '装備先のキャラを使用しているプレイヤーでない（17-7-1・FAQ:405）' }
   } else if (!isCharOnField(src) || controllerOf(state, src.iid) !== req.by) return { ok: false, reason: '自分のフィールドのキャラでない（15-13-1）' }
@@ -267,7 +272,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const speed = ab.speed
   // 20-4[19][20][22]: バトル中のアクションの機会（特殊能力は決まった側が1回・イベントは両者が複数回。その他のアクションは行えない FAQ:318・3318）
   const battleAct = frame?.kind === 'battle' && [19, 20, 22].includes(frame.step)
-  if (speed === '通常型' && battleAct && !isAI) {
+  if (speed === '通常型' && battleAct && !isAI && !isAF) {
     const b = frame!.battle!
     if (!isEvent) {
       const who = frame!.step === 20 ? other(b.challenger) : b.challenger
@@ -278,7 +283,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     // アクションアイテムは『その他のアクション』＝バトル中（[4]〜[28]）や処理の途中（《コストを発生するとき》など）には宣言できない（FAQ:314・317・3431）
     // R4c G3a: alsoInterrupt を持つ特殊能力は、その窓（《コストを発生するとき》）でも宣言できる
     const alsoOk = !isEvent && !isAI && !!frame && !!(ab as Activated).alsoInterrupt && triggerMatches(ctx, state, env, (ab as Activated).alsoInterrupt!, frame)
-    if (frame && !alsoOk) return { ok: false, reason: isAI ? 'アクションアイテムはメイン・終了フェイズの手順の外でだけ宣言できる（FAQ:314・317・3431）' : '通常型は処理の途中に宣言できない（11-1）' }
+    if (frame && !alsoOk) return { ok: false, reason: isAF ? 'アクションフィールドはメインフェイズの手順の外でだけ宣言できる（18-5）' : isAI ? 'アクションアイテムはメイン・終了フェイズの手順の外でだけ宣言できる（FAQ:314・317・3431）' : '通常型は処理の途中に宣言できない（11-1）' }
   } else {
     if (!frame) return { ok: false, reason: '割込型の使用タイミングでない（手順の外）' }
     if (ab.trigger && !triggerMatches(ctx, state, env, ab.trigger, frame)) {
@@ -320,19 +325,19 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const warnings: string[] = []
   if (unknown.length) warnings.push(`manual: 読めない使用代償「${unknown.join('＋')}」（人が処理）`)
   // K6（D3）: costMod（増減）を今の状態でまとめて適用したもので支払い方法を宣言する（払う段 [9] でも同じ一か所を通す＝engineStep 'pay'）
-  const cost = effectiveCost(ctx, state, isAI ? 'actionItem' : isEvent ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
-  const plan = planPayment(ctx, state, req.by, isEvent || isAI ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
+  const cost = effectiveCost(ctx, state, isAI || isAF ? 'actionItem' : isEvent ? 'event' : 'ability', req.by, src.iid, Object.values(slots).flat(), printedCost)
+  const plan = planPayment(ctx, state, req.by, isEvent || isAI || isAF ? null : src.iid, cost, req.payWith?.length ? req.payWith : null, req.payPool?.length ? req.payPool : null)
   // 16-1[4]・15-13-1[4]: 支払い方法を指定できなければ宣言の段で中断＝カードは手札に残る（FAQ:4225）
   if (!plan.ok) return { ok: false, reason: '使用代償の支払い方法を指定できない（[4]・FAQ:4225）' }
   // FAQ:3396: 『その他（カードの効果によるアクション）』の途中ではコストを発生させられない＝アクションアイテムは発生済みのコストからだけ払える（7-2・16-1[4]）
-  if (isAI && plan.costGens.length) return { ok: false, reason: 'アクションアイテムの宣言ではコストを発生させられない＝発生済みのコストからだけ払える（FAQ:3396）' }
+  if ((isAI || isAF) && plan.costGens.length) return { ok: false, reason: 'アクションアイテムの宣言ではコストを発生させられない＝発生済みのコストからだけ払える（FAQ:3396）' }
   warnings.push(...plan.warn)
 
-  const label = isAI ? `${info?.name ?? src.cardId}（${(ab as Activated).name}）` : isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name
+  const label = isAI || isAF ? `${info?.name ?? src.cardId}（${(ab as Activated).name}）` : isEvent ? `${info?.name ?? src.cardId}${(ab as Play).name ? `（${(ab as Play).name}）` : ''}` : (ab as Activated).name
   const decl: ProcDecl = {
     id,
     by: req.by,
-    kind: isEvent || isAI ? 'event' : 'ability',
+    kind: isEvent || isAI || isAF ? 'event' : 'ability',
     actionType: speed,
     label,
     sourceIid: src.iid,
@@ -341,7 +346,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: found.cardId, ...(frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: found.cardId, ...(frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : isAF ? { actionItem: true, actionField: true, abName: (ab as Activated).name } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
@@ -1284,10 +1289,16 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: [{ type: 'procAside', seat: env.you, iids: select(ctx, state, env, op.from) }] }
     case 'returnAside':
       return { tasks: rest, actions: [{ type: 'procUnaside', seat: resolvePlayer(state, env, op.player) }] }
-    case 'drawBoth':
+    case 'drawBoth': {
+      // R4c G5f-1: アンチ・ドロー＝ドローを行わない（引けない負けにはしない）
+      const anti = drawCancelled(ctx, state)
+      if (anti) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: `アンチ・ドローでドローを行わない（${anti}）` } }] }
       return { tasks: rest, actions: [{ type: 'procDrawBoth', n: op.n }] }
+    }
     case 'draw': {
       const seat = resolvePlayer(state, env, op.player)
+      const anti = drawCancelled(ctx, state)
+      if (anti) return { tasks: rest, ...(op.into ? { patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.into]: [] } } } } : {}), actions: [{ type: 'procTrace', entry: { kind: 'name', text: `アンチ・ドローでドローを行わない（${anti}）` } }] }
       const n = evalExpr(ctx, state, env, op.n)
       const act: BoardAction = { type: 'procDraw', seat, n }
       if (!op.into) return { tasks: rest, actions: [act] }

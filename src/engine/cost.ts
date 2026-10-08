@@ -160,7 +160,8 @@ export function costOfAbility(ctx: EngineCtx, cardId: string, abilityName: strin
   if (!info) return { cost: { icons: [], attrs: [] }, unknown: [] }
   if (abilityName === null) return { cost: cardCost(info), unknown: [] }
   const a = info.abilities.find((x) => x.header === abilityName)
-  if (!a && info.kind === 'i') {
+  // 18-5 アクションフィールド（クイック・R4c G5f-1）も同じ: 見出しが無い＝使用代償は記述の cost（手札のゴミ箱送り）
+  if (!a && (info.kind === 'i' || info.kind === 'f')) {
     // 17-7-1 アクションアイテム: 印刷の見出しも使用代償の表記も無い。使用代償は「このアイテムをゴミ箱送りにする」（記述の cost。R4c G11a-1）
     const ab = ctx.defs[cardId]?.abilities.find((x) => x.kind === 'activated' && x.name === abilityName)
     if (ab && ab.kind === 'activated') return { cost: ab.cost, unknown: [] }
@@ -398,6 +399,11 @@ export function payNow(
       const onFieldItem = !!sc && sc.attachedTo !== null && isCharOnField(state.cards[sc.attachedTo])
       if (!tgt || !(isCharOnField(sc) || onFieldItem)) return fail('ゴミ箱送りにするキャラがいない')
       trash.push(tgt)
+    } else if ('trashHand' in o) {
+      // クイック: 宣言[3]で選んだ手札（slot）を払う。選んだ枚数が足りない・もう手札に無い（[4]〜[9] の間に動いた）なら払えない
+      const chosen = ((decl.eng.slots as Record<string, string[]> | undefined) ?? {})[o.trashHand] ?? []
+      if (chosen.length < 2 || chosen.some((iid) => state.cards[iid]?.zone !== 'hand' || state.cards[iid]?.owner !== by) || new Set(chosen).size !== chosen.length) return fail('ゴミ箱送りにする手札が足りない')
+      trash.push(...chosen)
     } else if ('down' in o) {
       if (!self || !isCharOnField(state.cards[self])) return fail('ダウンさせるキャラがいない')
       down.push(self)

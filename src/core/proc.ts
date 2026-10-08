@@ -1425,7 +1425,7 @@ function enterAction(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       let represented = false
       if (decl.eng.actionItem) {
         // 17-7: アクションアイテムは手札から出さない。再提示＝装備されたまま場にあること（ゴミ箱送りは使用代償として [9] で払う）
-        represented = !!src && src.attachedTo !== null && onField(state.cards[src.attachedTo])
+        represented = decl.eng.actionField ? !!src && src.zone === 'field' : !!src && src.attachedTo !== null && onField(state.cards[src.attachedTo])
       } else if (frame.kind === 'event') {
         if (src && src.zone === 'pending') {
           s = moveTo(s, src.iid, 'trash')

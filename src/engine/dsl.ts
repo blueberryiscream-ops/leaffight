@@ -56,6 +56,7 @@ export type PlayerRef =
   | 'active' | 'nonActive'
   | 'challenger' | 'challenged'   // 20-2
   | 'battleUser'                  // 「このバトルを使用したプレイヤー」。誰かは穴 H-9c の切り替え（既定＝挑んだ側）
+  | 'triggerActor'                // 今の窓を開いた宣言（env.trigger）を行ったプレイヤー（《リンク・ドロー》。R4c G5f-1）
   | 'equipper'                    // このアイテムを装備させたプレイヤー（性格反転キノコ）
   | { controllerOf: CardRef }
   | { ownerOf: CardRef }          // 3-3 持ち主（ゲーム中不変）
@@ -165,6 +166,8 @@ export type Cond =
   /** 今の窓を開いた宣言（env.trigger）の元の能力・イベントの効果が、その op を含むか（再帰。forEach・if・simul・offer の中も見る）。
    *  「ドローする効果をもつ」（D23・おあずけ）の宣言時の制限に使う。カード構造の検査なので board 状態ではない */
   | { declaredHasOp: string }
+  /** declaredHasOp の複数版: 宣言の効果が、ops のどれか1つでも含むか（《リンク・ドロー》＝draw／drawBoth。R4c G5f-1） */
+  | { declaredHasAnyOp: string[] }
   /** 今の窓を開いた宣言の効果に、そのカードの気力を直接減らす op（op:kiryoku・recover でない・delta が負）があり、宣言の時点でそのカードに及ぶ（対象に選んだ・全体の効果に含まれる）。
    *  ダメージ・使用代償の気力－・回復数マイナスの回復（recover:true）は含まない（規 1195-1199・NH-31②④）。《命の香炉》R4c G11b-3 */
   | { declaredReducesKiryoku: CardRef }
@@ -210,6 +213,7 @@ export type OtherCost =
   | { kiryoku: number | Expr; of?: CardRef }   // 「気力－N」。既定は能力を持つキャラ自身（8-3）。Expr は可変の使用代償（D16。宣言時に選んだ数 { chosen }）
   | { kiryokuAny: true }                // 気力－任意
   | { trash: CardRef }                  // 「このキャラ／このアイテムをゴミ箱送りにする」
+  | { trashHand: string }               // 「手札を N 枚ゴミ箱送りにすることで」（クイック）。宣言[3]で選んだ手札（slot）を [9] で払う。slot の枚数が足りない・手札に無ければ払えない
   | { down: CardRef }                   // 「このキャラをダウンさせる」（《マルチ》受け渡し）。取り消されたら支払っていない（FAQ:2040）。R2a で足した
 
 export interface Cost {
@@ -417,6 +421,8 @@ export type Continuous =
   | { ce: 'extraW' }
   /** 《エンプティ》（R4c G3b-1）: W は発生しない（効果の W・手札のキャラを捨てた W。G/R/L/T は発生する FAQ:4073） */
   | { ce: 'noW' }
+  /** 《アンチ・ドロー》（R4c G5f-1）: カードの効果の draw／drawBoth は（どちらのプレイヤーのものも）行わない。ルールのドロー（エントリー・ダウンのボーナス）は core のまま。打ち消されたドローは負けではない */
+  | { ce: 'noDraw' }
   /** 《分厚い財布》《衣装・メイド服》（R4c G3b-2）: who が消耗して 7-2 でコストを発生するとき、発生源1つにつき属性無しの W を1つ多く発生する（NH-15 で常に。ブースト・エンプティの対象） */
   | { ce: 'extraWOnGen'; who: CardRef }
   /** 《集魔の鏡》（R4c G3b-2）: who の 7-2 の発生源のコストを、選んだ1属性の G にできる（任意・7-2[7] で選ぶ。財布・メイド服の W も G になる） */

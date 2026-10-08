@@ -312,6 +312,12 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
   return null
 }
 
+/** 《アンチ・ドロー》（R4c G5f-1）: 場にある間、カードの効果のドロー（draw／drawBoth）は行わない。どちらのプレイヤーのものにも及ぶ */
+export function drawCancelled(ctx: EngineCtx, state: BoardState): string | null {
+  for (const e of derived(ctx, state).effs) if (e.effect.ce === 'noDraw') return e.layer.label
+  return null
+}
+
 /** W の発生を変える常時効果（R4c G3b-1・NH-33⑥）: 'none'＝《エンプティ》／'extra'＝《ブースト》／null＝なし。両方のプレイヤーに効く。18-2 で同時には場に無い */
 export function wGenMode(ctx: EngineCtx, state: BoardState): 'none' | 'extra' | null {
   let m: 'none' | 'extra' | null = null
