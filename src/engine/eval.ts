@@ -230,6 +230,12 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
   if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
+  if ('mustUnused' in c) {
+    const xs = resolveRef(state, env, c.mustUnused)
+    const p = state.procMeta.presented ?? {}
+    const mk = state.procMeta.mustMarks ?? {}
+    return xs.length > 0 && xs.every((x) => state.cards[x]?.zone === 'hand' && (p[x] ?? 0) <= (mk[x] ?? 0))
+  }
   if ('oathMatch' in c) {
     const xs = resolveRef(state, env, c.oathMatch[0])
     const oath = env.slots[c.oathMatch[1]]?.[0]

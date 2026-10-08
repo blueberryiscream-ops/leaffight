@@ -238,6 +238,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   }
 
   if (req.battle) return declareBattle(ctx, state, req, id)
+  // 横に置いたカード（強襲モード）は手札ではない＝ターン終了時まで使用できない。デッキ・ゴミ箱のカードも宣言できない（記述の欠けではない＝missingDef にしない。R4c G5e）
+  if (!req.ability && !req.option && !req.costGen && (src.zone === 'aside' || src.zone === 'deck' || src.zone === 'trash')) return { ok: false, reason: src.zone === 'aside' ? '横に置いたカードはターン終了時まで使用できない' : '手札にないカードは使用できない' }
   if (!req.ability && src.zone === 'hand' && info && ['c', 't', 'i', 'f', 'b'].includes(info.kind)) return declareCardUse(ctx, state, req, id)
 
   if (!ctx.defs[src.cardId]) return { ok: false, reason: `カードの記述が無い: ${nameOf(ctx, state, src.iid)}`, missingDef: true }
@@ -1270,6 +1272,18 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
+    case 'mustUse': {
+      // R4c G5e: 提示の回数を覚え、ターン終了時（手札調整の後）に「手札にあり、その後提示されていない」ならゴミ箱送りにする遅延を層に預ける（atTurnEnd と同じ形）
+      const iid = refs(op.what)[0]
+      if (!iid) return { tasks: rest, actions: [] }
+      const ops: Op[] = [{ op: 'if', cond: { mustUnused: { ref: 'slot', slot: '__must' } }, then: [{ op: 'trash', what: { ref: 'slot', slot: '__must' } }] }]
+      const seed: LayerSeed = { source: env.self, ability: null, by: env.you, label: `${item.label}（使用の義務・ターン終了時）`, kind: null, until: 'turn', targets: [], host: null, body: { delayed: { ops, env: { self: env.self, you: env.you, slots: { ...env.slots, __must: [iid] } } } } }
+      return { tasks: rest, actions: [{ type: 'procMustUse', iid }, { type: 'procLayers', add: [seed] }] }
+    }
+    case 'setAside':
+      return { tasks: rest, actions: [{ type: 'procAside', seat: env.you, iids: select(ctx, state, env, op.from) }] }
+    case 'returnAside':
+      return { tasks: rest, actions: [{ type: 'procUnaside', seat: resolvePlayer(state, env, op.player) }] }
     case 'drawBoth':
       return { tasks: rest, actions: [{ type: 'procDrawBoth', n: op.n }] }
     case 'draw': {

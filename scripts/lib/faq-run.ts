@@ -461,6 +461,7 @@ const ZONE_OF: Record<string, (c: CardInstance) => boolean> = {
   hand: (c) => c.zone === 'hand',
   trash: (c) => c.zone === 'trash',
   deck: (c) => c.zone === 'deck',
+  aside: (c) => c.zone === 'aside', // R4c G5e: 横に置いたカード
 }
 
 const SIDE_NAME: Record<Seat, Side> = { A: 'you', B: 'opponent' }

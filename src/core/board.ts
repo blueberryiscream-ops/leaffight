@@ -10,7 +10,8 @@ import type { CostToken, GameResult, Phase, ProcFrame, ProcMeta } from './proc'
 // 「どちらが自分か」はクライアント側だけが知る情報（ui/board/useBoard.ts の localSeat）。
 export type Seat = 'A' | 'B'
 
-export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field' | 'pending'
+/** 'aside'＝横に置いたカード（強襲モード・R4c G5e）。持ち主ごと・裏向き（手札ではない＝使えない）。相手には枚数だけ */
+export type ZoneId = 'deck' | 'hand' | 'trash' | 'leader' | 'char' | 'battle' | 'field' | 'pending' | 'aside'
 
 export type Orientation = 'ready' | 'rested'
 
@@ -171,6 +172,9 @@ export const EMPTY_PROC_META: ProcMeta = {
   aborted: [],
   battles: [],
   phaseRun: null,
+  asideStack: [],
+  presented: {},
+  mustMarks: {},
 }
 
 export const EMPTY_BOARD: BoardState = {
@@ -284,7 +288,7 @@ export function modifiersFor(state: BoardState, iid: string): Modifier[] {
  * zone/faceUp だけを見るので、移動前後の仮の状態（`{ zone, faceUp }`）を渡しても使える。
  */
 export function isPublicCard(c: Pick<CardInstance, 'zone' | 'faceUp'>): boolean {
-  return c.zone !== 'deck' && c.zone !== 'hand' && c.faceUp
+  return c.zone !== 'deck' && c.zone !== 'hand' && c.zone !== 'aside' && c.faceUp
 }
 
 /**
@@ -364,7 +368,8 @@ export function spawnCard(
  * 裏のままなのは使い勝手が悪い」）。それ以外の移動では今の表裏を維持する（手動の裏返しは別途可能）。
  */
 function resolveFaceUp(fromZone: ZoneId, toZone: ZoneId, current: boolean): boolean {
-  if (toZone === 'deck') return false
+  if (toZone === 'deck' || toZone === 'aside') return false
+  if (fromZone === 'aside') return true
   if (fromZone === 'deck') return true
   return current
 }
@@ -768,4 +773,5 @@ export const ZONE_LABEL: Record<ZoneId, string> = {
   battle: 'バトル',
   field: 'フィールド',
   pending: '宣言中',
+  aside: '横に置いたカード',
 }

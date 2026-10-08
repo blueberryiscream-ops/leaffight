@@ -254,6 +254,11 @@ if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
   const results: (CaseResult & { inScope: boolean })[] = []
   for (const c of cases.filter((c) => c.grade === 'T')) {
+    // 調べたいケースだけ詳しく出す: DEBUG_CASE=<id> npm run test:faq（R4c G5e で足した道具）
+    if (process.env.DEBUG_CASE === c.id) {
+      const d = runCase(c, ctx, true) as CaseResult & { debug?: { trace: { text: string }[]; steps: unknown[] } }
+      console.log(JSON.stringify({ id: c.id, verdict: d.verdict, reasons: d.reasons, warnings: d.warnings, failures: d.failures, steps: d.debug?.steps, trace: d.debug?.trace.map((t) => t.text) }, null, 1))
+    }
     const r = runCase(c, ctx)
     const inScope = scope.has(c.id)
     if (!inScope && r.verdict === '❌') {

@@ -77,7 +77,7 @@ export type Step =
 /** FAQ の答えに書いてある結果だけ */
 export type Expect = (
   | { kiryoku: [ref: string, value: number] }
-  | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'gone', owner?: Side] }
+  | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'aside' | 'gone', owner?: Side] }
   /** steps の index 番目の宣言が立ち消え（11-4）た */
   | { fizzled: { step: number } }
   /** 発生済みのコストの数（その側） */

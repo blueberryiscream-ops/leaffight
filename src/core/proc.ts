@@ -351,6 +351,12 @@ export interface ProcMeta {
   battles: BattleLog[]
   /** このフェイズの段（エントリー・手札調整・ターン終了）を始めたか。null＝まだ */
   phaseRun: string | null
+  /** 横に置いた束（強襲モード・R4c G5e）。後に置いた束が末尾。戻すときは「まだ横にある一番新しい束」から（FAQ:1220）。ターン終了で空にする。古い保存には無い（?? [] で読む） */
+  asideStack?: { seat: Seat; iids: string[] }[]
+  /** このターンに宣言で提示された回数（iid ごと。規 693・828 の「この時点で使用したと見なされる」。使う義務の判定用・ターン終了で空にする） */
+  presented?: Record<string, number>
+  /** 使う義務を負った時点の presented の回数（iid ごと）。そのあと提示されていなければ「使用していない」 */
+  mustMarks?: Record<string, number>
 }
 
 /** 処理の記録（FAQ テストの order・fizzled と画面のログ用） */
@@ -1335,7 +1341,7 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
   if (frame.step === 2) {
     const list = state.layers.list.filter((m) => m.until !== 'turn' && !(m.kind === '能力値修正' && m.until !== 'whileSource'))
     trace.push({ kind: 'name', text: 'ターン終了の処理（10-8）' })
-    return setFrame(setMeta({ ...state, costs: { A: [], B: [] }, layers: { ...state.layers, list } }, { used: {}, marks: {} }), advance(frame))
+    return setFrame(setMeta({ ...state, costs: { A: [], B: [] }, layers: { ...state.layers, list } }, { used: {}, marks: {}, asideStack: [], presented: {}, mustMarks: {} }), advance(frame))
   }
   return setFrame(state, advance(frame))
 }
@@ -1964,6 +1970,12 @@ export type ProcAction =
   | { type: 'procBattleUsed'; iids: string[]; used: boolean }
   | { type: 'procMove'; iid: string; to: 'trash' | 'hand' | 'deckTop' | 'deckBottom' | 'field' | 'battle'; orientation?: 'ready' | 'rested'; kiryoku?: number; attachItemsFrom?: string; owner?: Seat }
   | { type: 'procSwapZones'; seat: Seat; order: string[] }
+  /** 手札を横に置く（強襲モード・R4c G5e）: 持ち主ごとの置き場 aside へ（裏向き）。束として積む */
+  | { type: 'procAside'; seat: Seat; iids: string[] }
+  /** 横に置いた束のうち「まだ横にある一番新しい束」を手札に戻す（FAQ:1220） */
+  | { type: 'procUnaside'; seat: Seat }
+  /** 「使用しなければならない」を負った（R4c G5e）: そのときの提示の回数を覚える */
+  | { type: 'procMustUse'; iid: string }
   /** 効果で「相手に見せる」（NH-35③）。カードは動かさず、見せた相手のログにカード名を残す（cardName は呼び出し側がカード表から入れる＝core はカード知識を持たない） */
   | { type: 'procReveal'; iid: string; to: Seat; cardName: string }
   /** 見た（NH-35③・R4c G5c）。誰が・誰の・どこを・何枚。🚨 カード名は持たない（見た人にだけ。名前は見た人への選択の選択肢にだけ出る）。盤面は変えない */
@@ -2160,7 +2172,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       return { state: setMeta(state, { base: openWindow(null, activeSeat(state)) }), log: `${action.by} がフェイズ終了を認めない（10-2-2）` }
     }
     case 'procDeclare': {
-      const s = applyDeclare(state, action.by, action.decl)
+      const s0 = applyDeclare(state, action.by, action.decl)
+      // 提示した回数（規 693・828・873・945・999「この時点で使用したと見なされる」。使う義務の判定 R4c G5e）。宣言の発生源の iid ごと
+      const s = s0 && action.decl.sourceIid ? setMeta(s0, { presented: { ...(s0.procMeta.presented ?? {}), [action.decl.sourceIid]: ((s0.procMeta.presented ?? {})[action.decl.sourceIid] ?? 0) + 1 } }) : s0
       return s ? { state: s, log: `${action.by} が「${action.decl.label}」を宣言` } : null
     }
     case 'procPass': {
@@ -2470,6 +2484,30 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (!c) return { state, log: '' }
       trace.push({ kind: 'name', text: `見せた:${action.iid}:${action.to}` })
       return { state, log: `${action.cardName} を ${action.to} に見せた` }
+    }
+    case 'procAside': {
+      let s = state
+      const iids = action.iids.filter((iid) => s.cards[iid]?.zone === 'hand' && s.cards[iid].owner === action.seat)
+      for (const iid of iids) s = moveTo(s, iid, 'aside')
+      s = setMeta(s, { asideStack: [...(s.procMeta.asideStack ?? []), { seat: action.seat, iids }] })
+      trace.push({ kind: 'name', text: `横に置いた:${action.seat}:${iids.length}` })
+      return { state: s, log: `${action.seat} が手札を ${iids.length} 枚横に置いた` }
+    }
+    case 'procUnaside': {
+      const stack = state.procMeta.asideStack ?? []
+      let at = -1
+      for (let i = stack.length - 1; i >= 0 && at < 0; i--) if (stack[i].seat === action.seat && stack[i].iids.some((iid) => state.cards[iid]?.zone === 'aside')) at = i
+      if (at < 0) return { state, log: '' }
+      let s = state
+      const back = stack[at].iids.filter((iid) => s.cards[iid]?.zone === 'aside' && s.cards[iid].owner === action.seat)
+      for (const iid of back) s = moveTo(s, iid, 'hand')
+      s = setMeta(s, { asideStack: stack.filter((_, i) => i !== at) })
+      trace.push({ kind: 'name', text: `横から戻した:${action.seat}:${back.length}` })
+      return { state: s, log: `${action.seat} が横に置いたカードを ${back.length} 枚手札に戻した` }
+    }
+    case 'procMustUse': {
+      const p = state.procMeta.presented ?? {}
+      return { state: setMeta(state, { mustMarks: { ...(state.procMeta.mustMarks ?? {}), [action.iid]: p[action.iid] ?? 0 } }), log: '' }
     }
     case 'procSwapZones': {
       // ゴミ箱とデッキを入れ替える（《輪廻》）。order＝新しいデッキの並び（呼び出し側が混ぜた順）

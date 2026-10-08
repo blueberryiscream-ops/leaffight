@@ -11,5 +11,5 @@ import type { CardInstance, Seat } from '../../core/board'
  */
 export function hiddenFromViewer(c: Pick<CardInstance, 'owner' | 'zone' | 'faceUp'>, mySeat: Seat): boolean {
   if (c.zone === 'deck') return true
-  return c.owner !== mySeat && (c.zone === 'hand' || !c.faceUp)
+  return c.owner !== mySeat && (c.zone === 'hand' || c.zone === 'aside' || !c.faceUp)
 }
