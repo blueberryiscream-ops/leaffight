@@ -62,6 +62,8 @@ export type PlayerRef =
   | { slot: string }              // §3 の選択で選んだプレイヤー（Pick { player } の答え。D20・R4a-2）
   /** 既に決めた席（'A'|'B'）。battleUser 等バトルに依存する PlayerRef を層を作る時点で解決して固定するときに使う（R4b-1 続き・統括16） */
   | { seat: 'A' | 'B' }
+  /** そのプレイヤーの相手（《計画的犯行》《借金取り》が自分を対象にしたとき、払う先は対象の相手。R4c G3d・NH-33④） */
+  | { opponentOf: PlayerRef }
 
 export type CardRef =
   | { ref: 'self' }               // この能力を「今持っている」カード。コピー（模写）されたらコピー先に再束縛される
@@ -76,6 +78,8 @@ export type CardRef =
   | { ref: 'participants'; side: PlayerRef }  // 進行中のバトルのそのプレイヤーのバトル参加キャラ
   /** そのプレイヤーのリーダー（評価した時点。「味方リーダーの気力－２」ジェラシー・死中に活。R4c G1a-2） */
   | { ref: 'leader'; side: PlayerRef }
+  /** この使用代償を払うために 7-2 で消耗させたキャラ（宣言の costGens の発生源・処理時に場にいるものだけ。消耗させずに払った＝空。《手作り弁当》R4c G3d・NH-33①⑤） */
+  | { ref: 'paidBy' }
   | { ref: 'opponentChar'; of: CardRef }      // 対戦キャラ（相手側のバトル参加キャラ）。参加していないキャラが身代わりで結果ダメージを受けたら元の受け手の対戦キャラ（H-13）
 
 /** 進行中の処理オブジェクトの役。ダメージ・ダウン・宣言・バトル種目選択など */
@@ -169,7 +173,7 @@ export type Pick =
   | { stat: CardRef; rule: 'attrOf'; of: CardRef }
   | { option: string[] }
   | { number: { min: number } }  // 数を選ぶ（可変の使用代償・D16「世話焼き」。答えは数の文字列。1以上・上限は無いが候補は実装で有限に区切る）
-  | { player: true }             // プレイヤーを選ぶ（候補は chooser の相手だけ。D20「借金取り」・NH-20。答えは席の文字）
+  | { player: true }             // プレイヤーを選ぶ（候補は両方＝自分も選べる。D20「借金取り」・NH-20 を改めた NH-33④。答えは席の文字）
 
 export interface Choice {
   slot: string

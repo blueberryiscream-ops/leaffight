@@ -35,6 +35,7 @@ export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
     }
   }
   if ('seat' in p) return p.seat
+  if ('opponentOf' in p) return other(resolvePlayer(state, env, p.opponentOf))
   if ('controllerOf' in p) return controllerOf(state, resolveRef(state, env, p.controllerOf)[0] ?? '') ?? env.you
   if ('slot' in p) return (env.slots[p.slot]?.[0] as Seat | undefined) ?? env.you
   return state.cards[resolveRef(state, env, p.ownerOf)[0] ?? '']?.owner ?? env.you
@@ -89,6 +90,12 @@ export function resolveRef(state: BoardState, env: Env, r: CardRef): string[] {
       const seat = resolvePlayer(state, env, r.side)
       const l = Object.values(state.cards).find((x) => x.zone === 'leader' && x.owner === seat)
       return l ? [l.iid] : []
+    }
+    case 'paidBy': {
+      // 《手作り弁当》: 宣言の使用代償を払うために 7-2 で消耗させた（発生源の）キャラ。処理時に場にいなければ無し（NH-33⑤）。消耗させずに払ったなら無し（NH-33①）
+      const d = env.declId ? state.proc.find((f) => f.decl?.id === env.declId)?.decl : undefined
+      const src = d?.costGens.flat().find((s) => s.from === 'field')
+      return src && isCharOnField(state.cards[src.iid]) ? [src.iid] : []
     }
     case 'opponentChar':
       return opponentChars(state, env, resolveRef(state, env, r.of)[0])

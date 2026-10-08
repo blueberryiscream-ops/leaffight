@@ -327,7 +327,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     sources: [],
     trigger: frame?.id ?? null,
     usageKey,
-    eng: { cardId: found.cardId, index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
+    eng: { cardId: found.cardId, ...(speed === '割込型' && frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
   }
   const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
   return { ok: true, actions, decl, warnings }
@@ -397,8 +397,8 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
   }
   // プレイヤーを選ぶ（D20・借金取り）。候補は chooser の相手だけ（NH-20：自分は選べない）
   if ('player' in p) {
-    const seat = other(resolvePlayer(state, env, ch.chooser))
-    return [{ key: seat, label: `プレイヤー${seat}` }]
+    // NH-33④: 自分も対象にとれる（NH-20 を改めた）
+    return (['A', 'B'] as Seat[]).map((seat) => ({ key: seat, label: `プレイヤー${seat}` }))
   }
   return [] // 能力を選ぶ（模写など）は R4
 }
@@ -1296,7 +1296,9 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (icons.length === 0 || times <= 0) return { tasks: rest, actions: [] }
       // D20: useAs があれば、発生させたコストは useAs（借金取りの使用者）の発生済みのコストになる
       const useAsSeat = op.useAs ? resolvePlayer(state, env, op.useAs) : undefined
-      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: adjustGenerated(ctx, state, Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: costAttrs }))).flat()), useAsSeat }] }
+      // 7-3: 割込型（7-2[3] の窓）で発生したコストの種類は、その窓を開いた外側のアクションの中だけ有効（decl.eng.bindTo）。通常型は結びつけない
+      const bindTo = ((env.declId ? state.proc.find((f) => f.decl?.id === env.declId)?.decl?.eng.bindTo : undefined) as string | undefined) ?? null
+      return { tasks: rest, actions: [{ type: 'procGenCost', seat, tokens: adjustGenerated(ctx, state, Array.from({ length: times }, () => icons.map((icon) => ({ icon, attrs: costAttrs }))).flat()), useAsSeat, bindTo }] }
     }
     case 'counter': {
       // H-8: 範囲は「その効果」だけ。打ち消されたイベントは手順どおりゴミ箱・使用代償は戻らない
@@ -1342,7 +1344,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // NH-17: 幸せ泥棒（part:'recover'）は処理条件がある常時効果（conditional。関西魂など）も対象にできる
       if (!origAb || (origAb.kind !== 'activated' && origAb.kind !== 'play' && origAb.kind !== 'conditional')) return fizzle('乗っ取る能力が無い')
       // D11: 使用タイミング・使用条件は、乗っ取った側を you として、元の宣言が反応した窓（originalDecl.trigger）の状況で確かめ直す
-      const origEnv: Env = { self: originalDecl.sourceIid, you: hijacker, slots: {}, trigger: originalDecl.trigger, declId: originalDecl.id, declared: (originalDecl.eng.declared as Env['declared']) ?? {} }
+      const origEnv: Env = { self: originalDecl.sourceIid, you: hijacker, slots: (originalDecl.eng.slots as Record<string, string[]> | undefined) ?? {}, trigger: originalDecl.trigger, declId: originalDecl.id, declared: (originalDecl.eng.declared as Env['declared']) ?? {} }
       if (origAb.trigger) {
         const trigFrame = originalDecl.trigger ? findFrame(state, originalDecl.trigger) : undefined
         if (!trigFrame || !triggerMatches(ctx, state, origEnv, origAb.trigger, trigFrame)) return fizzle('使用タイミングを満たさない')
@@ -1371,7 +1373,9 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
               when: 'resolve',
             }
             built.push({ op: { op: 'choose', choice: pickChoice }, bind: { [srcSlot]: cands } })
-            built.push({ op: { op: 'kiryoku', who: { ref: 'slot', slot: pickSlot }, delta: o.delta, recover: true } })
+            // 《手作り弁当》: 回復数が「支払ったキャラの感性」（paidBy）なら元の宣言の環境で数えてから渡す（乗っ取った側の宣言には支払ったキャラが無い。FAQ:1258・NH-33）
+            const delta = typeof o.delta !== 'number' && JSON.stringify(o.delta).includes('paidBy') ? evalExpr(ctx, state, origEnv, o.delta) : o.delta
+            built.push({ op: { op: 'kiryoku', who: { ref: 'slot', slot: pickSlot }, delta, recover: true } })
           })
       } else if (origAb.kind === 'conditional') {
         return fizzle('乗っ取る能力の形が合わない（conditional は part:recover だけ）')

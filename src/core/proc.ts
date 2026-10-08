@@ -1955,7 +1955,7 @@ export type ProcAction =
   | { type: 'procAddDowns'; seat: Seat; n: number }
   /** 効果でコストを発生させる（D21・7-3「その他の代償」として即使える。frameId 無し） */
   // useAsSeat（D20・R4a-2）＝発生させたのは seat だが、発生済みのコストは useAsSeat のものになる（《借金取り》）
-  | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[]; useAsSeat?: Seat }
+  | { type: 'procGenCost'; seat: Seat; tokens: { icon: CostKind; attrs: string[] }[]; useAsSeat?: Seat; /** 7-3: 種類が有効なアクションのフレーム（割込型の窓の外側のアクション）。無ければ結びつけない */ bindTo?: string | null }
   /** PHASE-R4b §2(D): who の発生済みのコスト（tokenIds）を払う（7-4）。giveTo があればアイコン W・属性そのままで移す。無ければ消費 */
   | { type: 'procPayCost'; seat: Seat; tokenIds: string[]; giveTo: Seat | null }
   /**
@@ -2462,7 +2462,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       for (const t of action.tokens) {
         const [s2, id] = nextId(s, 'cost')
         s = s2
-        tokens.push({ id, icon: t.icon, attrs: t.attrs, frameId: null })
+        tokens.push({ id, icon: t.icon, attrs: t.attrs, frameId: action.useAsSeat ? null : (action.bindTo ?? null) })
       }
       s = { ...s, costs: { ...s.costs, [bucket]: tokens } }
       trace.push({ kind: 'name', text: `コスト発生（効果）:${action.tokens.map((x) => x.icon + x.attrs.join('')).join('')}` })
