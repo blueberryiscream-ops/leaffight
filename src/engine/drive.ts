@@ -1272,8 +1272,31 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
     case 'drawBoth':
       return { tasks: rest, actions: [{ type: 'procDrawBoth', n: op.n }] }
-    case 'draw':
-      return { tasks: rest, actions: [{ type: 'procDraw', seat: resolvePlayer(state, env, op.player), n: evalExpr(ctx, state, env, op.n) }] }
+    case 'draw': {
+      const seat = resolvePlayer(state, env, op.player)
+      const n = evalExpr(ctx, state, env, op.n)
+      const act: BoardAction = { type: 'procDraw', seat, n }
+      if (!op.into) return { tasks: rest, actions: [act] }
+      // R4c G5d: 引いたカード＝引く前のデッキの上 n 枚（デッキ切れで引けなければある分・負けは procDraw が決める）
+      const top = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'deck').sort((a, b) => a.index - b.index).slice(0, Math.max(0, n)).map((c) => c.iid)
+      return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.into]: top } } }, actions: [act] }
+    }
+    case 'pickRandom': {
+      // R4c G5d: 候補（手札の並び順）を ctx.shuffle で混ぜた先頭 n 枚。実行器の shuffle は並びを変えない＝手札の先頭
+      const cand = select(ctx, state, env, op.from).sort((a, b) => (state.cards[a]?.index ?? 0) - (state.cards[b]?.index ?? 0))
+      if (!ctx.shuffle && cand.length > 1) warnings.push('シャッフルの並びが渡されていない（今の並びのまま）')
+      const picked = (ctx.shuffle ? ctx.shuffle(cand) : cand).slice(0, Math.max(0, op.n))
+      return {
+        tasks: rest,
+        patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.into]: picked } } },
+        actions: [{ type: 'procTrace', entry: { kind: 'name', text: `${op.from.side === 'both' ? '' : op.from.side === 'you' ? '自分' : '相手'}の${op.from.zone === 'hand' ? '手札' : op.from.zone}から無作為に${picked.length}枚引いた` } }],
+      }
+    }
+    case 'announce': {
+      const ans = env.slots[op.slot]?.[0]
+      if (!ans) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: `${env.you} が宣誓した: ${ans}` } }] }
+    }
     case 'remember':
       return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.slot]: [String(evalExpr(ctx, state, env, op.value))] } } }, actions: [] }
     case 'callByEffect': {

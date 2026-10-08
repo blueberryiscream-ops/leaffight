@@ -535,6 +535,10 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const leaked = e.noLeak.filter((nm) => run.logs.some((l) => l.includes(nm)))
     return { ok: leaked.length === 0, msg: `共有のログに名前が出た = ${leaked.join('・')}` }
   }
+  if ('logged' in e) {
+    const missing = e.logged.filter((s2) => !run.logs.some((l) => l.includes(s2)))
+    return { ok: missing.length === 0, msg: `共有のログに出ていない = ${missing.join('・')}` }
+  }
   if ('choicePending' in e) {
     const p = !!s.procMeta.choice
     return { ok: p === e.choicePending, msg: `答えを待つ選択 = ${p ? 'あり' : 'なし'}（期待 ${e.choicePending ? 'あり' : 'なし'}）` }

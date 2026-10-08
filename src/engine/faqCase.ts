@@ -107,6 +107,8 @@ export type Expect = (
   | { deckOrder: [side: Side, refs: string[]] }
   /** 共有のログ・記録に、これらのカード名が1つも出ていない（見た人にだけ名前が出る＝reveal を使わない。R4c G5c） */
   | { noLeak: string[] }
+  /** 共有のログ（書かれた文字列）に、これらの文字列が全部出ている（宣誓は公開＝「宣誓した: イベント」。R4c G5d） */
+  | { logged: string[] }
   /** 答えを待つ選択が残っているか（取材「使用したときにだけ見ることができる」FAQ:2772。R4c G5c） */
   | { choicePending: boolean }
   /** 処理された順（ログに出る処理の名前の並び） */

@@ -230,6 +230,13 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
   if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
+  if ('oathMatch' in c) {
+    const xs = resolveRef(state, env, c.oathMatch[0])
+    const oath = env.slots[c.oathMatch[1]]?.[0]
+    const kinds: Record<string, string[]> = { キャラクター: ['c'], バトル: ['b'], イベント: ['e'], その他: ['i', 'f', 't'] }
+    const ok = oath ? kinds[oath] : undefined
+    return !!ok && xs.length > 0 && xs.every((x) => ok.includes(ctx.cards[state.cards[x]?.cardId ?? '']?.kind ?? ''))
+  }
   if ('equipsNamed' in c) {
     const xs = resolveRef(state, env, c.equipsNamed[0])
     return xs.length > 0 && xs.every((x) => Object.values(state.cards).some((a) => a.attachedTo === x && (ctx.cards[a.cardId]?.name ?? '').startsWith(c.equipsNamed[1])))

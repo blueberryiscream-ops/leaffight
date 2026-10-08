@@ -132,6 +132,9 @@ export type Cond =
   | { exists: Selector }
   /** その枠に選んだ答えがある（効果の中の「〜することができる」の選択。R4c G5c） */
   | { picked: string }
+  /** 宣誓（slot 名の答え＝キャラクター／バトル／イベント／その他）の通りのカードか。キャラクター＝c／バトル＝b／イベント＝e／その他＝i・f・t（タッグは「その他」FAQ:3093・規 586）。
+   *  CardRef が空（ドローできなかった等）なら外れ（R4c G5d） */
+  | { oathMatch: [CardRef, string] }
   // ── R2a で足した（HANDOFF-R2a「決めたこと」）
   | { equipsNamed: [CardRef, string] }          // そのキャラが、名前が prefix で始まるアイテムを装備している（《ファッション》の「衣装」FAQ:3819・3822）
   | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
@@ -239,7 +242,13 @@ export type Op =
   | { op: 'setBattleUsed'; what: Selector; used: boolean }       // バトルカードを使用済み／未使用にする（19-3。《猫寄せドラ》R4c G11a-2。reusable でも使用済みにする）
   /** お互いが同時に n 枚ドローする。引けなかった側が負け・両方なら引き分け（《心機一転》oldrule.txt:325。R4c G5b）。1つの action で行い、先に引けなかった側だけ負けにしない */
   | { op: 'drawBoth'; n: number }
-  | { op: 'draw'; player: PlayerRef; n: number | Expr }        // n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）
+  /** n は Expr（「同じ枚数」《記憶喪失》・D23・R4a-2）。into＝実際に引いたカード（引く前のデッキの上 n 枚）をこの名前の枠に入れる（《配達》《おみくじ》。デッキ切れで引けなければ枠は空・R4c G5d） */
+  | { op: 'draw'; player: PlayerRef; n: number | Expr; into?: string }
+  /** 「ランダムに選ぶ」「（相手の手札を）引く」（FAQ:963）。乱数は core に入れない＝engine が ctx.shuffle（候補の iid の並べ替え）の先頭 n 枚を取る。
+   *  候補が n 枚より少なければある分（0枚なら枠は空）。カードは動かさない（引いたカードは持ち主の手札のまま）。共有ログには枚数だけ・名前は reveal したときだけ（R4c G5d） */
+  | { op: 'pickRandom'; from: Selector; n: number; into: string }
+  /** 宣誓の公開（「キャラクター」「バトル」「イベント」「その他」から選んだ答えを共有ログに出す。slot＝選んだ答えの枠・R4c G5d） */
+  | { op: 'announce'; slot: string }
   // ── 進行中の処理を書き換える（MTG の置換効果の代わり。原典には置換効果という概念が無い）
   | { op: 'redirectDamage'; to: CardRef }                         // 進行中のダメージ1件の受け手を差し替える
   | { op: 'adjustDamage'; delta: Expr; scope: 'this' | 'allSimultaneous'; halve?: true }  // halve＝今のダメージを半分・端数切り上げ（《衣装・純白のドレス》。1以上のときだけ。delta は 0 にする。R4c G2b-2a）
