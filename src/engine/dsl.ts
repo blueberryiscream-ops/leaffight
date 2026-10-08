@@ -349,6 +349,8 @@ export interface ActionPattern {
   costIsZero?: boolean
   /** 印刷された使用代償のコストアイコンが n 個以上（《あきんどのそろばん》「装備するアイテムのコストが[WW]以上」NH-34⑤。costIsZero と同じく印刷値を読む）。costMod 専用。R4c G4a */
   printedCostMin?: number
+  /** 常に効果を発揮している特殊能力（Auto＝conditional）には掛からない（《ウェイスト》《浪費癖》「常に効果を発揮している特殊能力は対象にならない」。統括26・G4d の検証で見つけた）。costMod 専用 */
+  notAuto?: boolean
 }
 
 export type Continuous =

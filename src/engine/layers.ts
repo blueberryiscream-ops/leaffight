@@ -630,7 +630,7 @@ export function cannotGenerateIids(ctx: EngineCtx, state: BoardState): Set<strin
 
 /** 当てはまる costMod を全部（層の順）集めて足し合わせる。宣言前（declareOne）は decl がまだ無いので軽い形で渡す。
  *  printedCost: applies.costIsZero（《ライジング・コスト》）の判定に使う印刷値の使用代償 */
-export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern['kinds'][number], by: Seat, sourceIid: string | null, targets: string[] = [], printedCost?: Cost): { icons: Partial<Record<CostIcon, number>>; kiryoku: number } {
+export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern['kinds'][number], by: Seat, sourceIid: string | null, targets: string[] = [], printedCost?: Cost, auto = false): { icons: Partial<Record<CostIcon, number>>; kiryoku: number } {
   const icons: Partial<Record<CostIcon, number>> = {}
   let kiryoku = 0
   const pseudo = { by, sourceIid, targets } as ProcDecl
@@ -638,6 +638,7 @@ export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern
     const f = e.effect
     if (f.ce !== 'costMod' || !f.applies.kinds.includes(kind)) continue
     if (f.applies.costIsZero && (printedCost?.icons.length ?? 0) !== 0) continue
+    if (f.applies.notAuto && auto) continue
     if (f.applies.printedCostMin !== undefined && (printedCost?.icons.length ?? 0) < f.applies.printedCostMin) continue
     if (!patternHits(ctx, state, e, f.applies, pseudo)) continue
     for (const [icon, delta] of Object.entries(f.icons ?? {})) icons[icon as CostIcon] = (icons[icon as CostIcon] ?? 0) + (delta ?? 0)

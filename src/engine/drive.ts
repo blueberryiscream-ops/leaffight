@@ -590,7 +590,7 @@ function engineStep(ctx: EngineCtx, state: BoardState, top: ProcFrame, warnings:
       const d = top.decl!
       const { cost: printedCost } = costOfAbility(ctx, d.eng.cardId as string, abNameOf(d))
       // K6（D3）: 払う段で改めて評価する（declareOne と同じ effectiveCost）
-      const cost = effectiveCost(ctx, state, d.eng.actionItem ? 'actionItem' : d.kind, d.by, d.sourceIid, d.targets, printedCost)
+      const cost = effectiveCost(ctx, state, d.eng.actionItem ? 'actionItem' : d.kind, d.by, d.sourceIid, d.targets, printedCost, abilityOf(ctx, d)?.ab.kind === 'conditional') // Auto の支払い＝notAuto の costMod は掛からない（統括26）
       const r = payNow(ctx, state, top.id, d, cost)
       if (!r.ok) warnings.push(`${d.label}: ${r.reason}`)
       return [{ type: 'procPay', frameId: top.id, ok: r.ok, consume: r.consume, kiryoku: r.kiryoku, trash: r.trash, down: r.down }]
