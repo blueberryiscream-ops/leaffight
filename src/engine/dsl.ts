@@ -344,6 +344,8 @@ export interface ActionPattern {
   targetWhere?: Cond
   /** 印刷された使用代償にコストアイコンが無い（「０コストの～」《ライジング・コスト》FAQ:4225）。costMod（K6）専用。R4a で足した */
   costIsZero?: boolean
+  /** 印刷された使用代償のコストアイコンが n 個以上（《あきんどのそろばん》「装備するアイテムのコストが[WW]以上」NH-34⑤。costIsZero と同じく印刷値を読む）。costMod 専用。R4c G4a */
+  printedCostMin?: number
 }
 
 export type Continuous =

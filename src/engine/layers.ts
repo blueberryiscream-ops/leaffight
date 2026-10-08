@@ -636,6 +636,7 @@ export function costModOf(ctx: EngineCtx, state: BoardState, kind: ActionPattern
     const f = e.effect
     if (f.ce !== 'costMod' || !f.applies.kinds.includes(kind)) continue
     if (f.applies.costIsZero && (printedCost?.icons.length ?? 0) !== 0) continue
+    if (f.applies.printedCostMin !== undefined && (printedCost?.icons.length ?? 0) < f.applies.printedCostMin) continue
     if (!patternHits(ctx, state, e, f.applies, pseudo)) continue
     for (const [icon, delta] of Object.entries(f.icons ?? {})) icons[icon as CostIcon] = (icons[icon as CostIcon] ?? 0) + (delta ?? 0)
     kiryoku += f.kiryoku ?? 0
@@ -654,6 +655,17 @@ export function applyCostMod(cost: Cost, mod: { icons: Partial<Record<CostIcon, 
   for (const [icon, n] of Object.entries(counts)) for (let i = 0; i < Math.max(0, n ?? 0); i++) icons.push(icon as CostIcon)
   // D16: 可変の使用代償（kiryoku が Expr＝宣言時に選んだ数）は costMod の対象外（今のプールに両方が絡む例が無い。決めていない組み合わせ）
   const other = mod.kiryoku === 0 ? cost.other : cost.other?.map((o) => ('kiryoku' in o && typeof o.kiryoku === 'number' ? { ...o, kiryoku: Math.max(0, o.kiryoku + mod.kiryoku) } : o))
+  // NH-34⑥・FAQ:417・4092・3394: 下限＝使用代償がまったく無い状態にならない。印刷値に要素（コストアイコン・気力－N などの other）が1つ以上あったのに、増減の結果が0個になるときは、
+  // 減らす分を減らして1個残す（[W]−W→[W]・[RW]−W→[R]・[WW]−WWW→[W]）。印刷値が元から0個なら0のまま。増減は全部まとめて適用した後の最終値に掛ける（NH-16）
+  const elems = (ics: CostIcon[], oth: Cost['other']) => ics.length + (oth ?? []).filter((o) => !('kiryoku' in o) || typeof o.kiryoku !== 'number' || o.kiryoku > 0).length
+  if (elems(cost.icons, cost.other) > 0 && elems(icons, other) === 0) {
+    const reduced = (Object.keys(counts) as CostIcon[]).find((ic) => (counts[ic] ?? 0) < cost.icons.filter((x) => x === ic).length)
+    if (reduced) icons.push(reduced)
+    else if (other) {
+      const k = other.findIndex((o) => 'kiryoku' in o && typeof o.kiryoku === 'number')
+      if (k >= 0) other[k] = { ...(other[k] as object), kiryoku: 1 } as (typeof other)[number]
+    }
+  }
   return { ...cost, icons, other }
 }
 

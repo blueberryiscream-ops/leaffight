@@ -221,9 +221,9 @@ eq(runEntry(2), { hand: 1, phase: 'メイン' }, '⑥ 2ターン目: エント�
   let h = req(hist(two), { kind: 'declare', req: { by: 'A', source: 'Pay1', payPool: ['k2'] } })
   h = passUntil(h, (s) => s.proc.length === 0 && s.procMeta.base?.state === 'awaitActive')
   eq([h.present.costs.A.map((t) => t.id), h.present.cards.Pay1.zone], [['k1'], 'trash'], '⑩ payPool で選んだ k2 だけを使って払う（残りの k1 は使わない）')
-  let h2 = req(hist(two), { kind: 'declare', req: { by: 'A', source: 'Pay2', payPool: ['k1'] } })
-  h2 = passUntil(h2, (s) => s.proc.length === 0 && s.procMeta.base?.state === 'awaitActive')
-  eq([h2.present.costs.A.map((t) => t.id), h2.present.procMeta.aborted.length], [['k1', 'k2'], 1], '⑩ 指定した k1 だけでは WW に足りない → 指定していない k2 では払えず中断（FAQ:2959「指定した支払い方法以外で支払うことはできません」）')
+  // R4c G4a（NH-34・16-1[4]→[5]・FAQ:4225）: 指定した k1 だけでは WW に足りない → 宣言の段で断る（以前は宣言が通って [9] で中断していた）。カードは手札に残り、発生済みのコストも使われない
+  const h2 = applyEngineReq(hist(two), ctxAll, { kind: 'declare', req: { by: 'A', source: 'Pay2', payPool: ['k1'] } }, null)
+  eq([h2.ok, two.cards.Pay2.zone, two.costs.A.map((t) => t.id)], [false, 'hand', ['k1', 'k2']], '⑩ 指定した k1 だけでは WW に足りない → 宣言の段で断られ、Pay2 は手札に残る・コストは使われない（FAQ:4225・指定していない k2 では払えない FAQ:2959）')
   const same = drive(withCosts([['根'], ['根']]), ctxAll).state
   const auto = paymentNeed(same, ctxAll, { by: 'A', source: 'Pay1' })
   eq([auto.choose, auto.autoPool?.length], [false, 1], '⑩ 発生済みのコストだけで払え、組み合わせが1通り（根・根のどちらでも同じ）なら聞かない（§2-1 の例外）')
@@ -580,8 +580,8 @@ function battleStart(battleCard: string): History {
   // K6・R4a-2 単体テスト: costMod（0コスト＋追加アイコン・下限）。applyCostMod は純関数（layers.ts）
   {
     eq(applyCostMod({ icons: [], attrs: [] }, { icons: { W: 1 }, kiryoku: 0 }).icons, ['W'], 'costMod: 0コストのアイコンにアイコンを1枚足すと[W]になる')
-    eq(applyCostMod({ icons: ['W'], attrs: [] }, { icons: { W: -5 }, kiryoku: 0 }).icons, [], 'costMod: アイコンは種類ごとに0未満にならない（[W]1枚から5枚引いても0枚のまま）')
-    eq(applyCostMod({ icons: [], attrs: [], other: [{ kiryoku: 2 }] }, { icons: {}, kiryoku: -5 }).other, [{ kiryoku: 0 }], 'costMod: 気力コストの最終値も0未満にならない')
+    eq(applyCostMod({ icons: ['W'], attrs: [] }, { icons: { W: -5 }, kiryoku: 0 }).icons, ['W'], 'costMod: 下限（R4c G4a・NH-34⑥・FAQ:4092）使用代償がまったく無い状態にならない（[W]1枚から5枚引いても[W]が1枚残る）')
+    eq(applyCostMod({ icons: [], attrs: [], other: [{ kiryoku: 2 }] }, { icons: {}, kiryoku: -5 }).other, [{ kiryoku: 1 }], 'costMod: 気力コストだけの使用代償も、まったく無い状態にはならない（気力－2 から5引いても気力－1が残る。R4c G4a・FAQ:417）')
   }
 
   // D20・R4a-2 単体テスト: offer（払う／払わない）。払う→ generateCost の useAs で発生させたコストが使用者（you）のものになる。

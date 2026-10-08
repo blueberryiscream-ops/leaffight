@@ -222,7 +222,15 @@ export function planPayment(
     }
     const have = new Set(state.costs[by].map((t) => t.id))
     const poolIds = (payPool ?? []).filter((id) => have.has(id))
-    return { ok: true, costGens: srcs.length || hasEventPay ? [srcs] : [], usePool: false, poolIds, warn }
+    // 16-1[4]→[5]・FAQ:4225（NH-34・統括25の持ち越し）: 指定した発生源から発生するコストと payPool で、増減後の使用代償を払えなければ宣言を断る（カードは手札に残る）。
+    // 割込型のイベント（助太刀など）を指定したときは宣言の時点では数えられないので今のまま ok（その窓で払えなければ [9] で中断）
+    const toks = [
+      ...srcs.map((s, i) => ({ id: `new${i}`, icon: s.icon, attrs: s.attrs })),
+      ...state.costs[by].filter((t) => poolIds.includes(t.id)).map((t) => ({ id: t.id, icon: 'W' as CostIcon, attrs: t.attrs })),
+    ]
+    const resting = srcs.filter((s) => s.from === 'field').map((s) => s.iid)
+    const covers = hasEventPay || assignments(cost).some((asg) => matchTokens(asg.req, toks) !== null && readyAttrsOk(ctx, state, by, asg.readyAttrs, resting))
+    return { ok: covers, costGens: srcs.length || hasEventPay ? [srcs] : [], usePool: false, poolIds, warn }
   }
   // 8-2-1・FAQ:3399（統括25）: 属性アイコンだけの使用代償は、その属性の待機キャラが自分のフィールドにいなければ宣言できない（コストアイコンがあるときの assignments と同じ判定）
   if (cost.icons.length === 0) return readyAttrsOk(ctx, state, by, cost.attrs) ? { ok: true, costGens: [], usePool: true, poolIds: [], warn } : { ok: false, costGens: [], usePool: true, poolIds: [], warn }
@@ -243,6 +251,8 @@ export function planPayment(
       remaining = remaining.filter((x) => x !== r)
     }
     if (failed) continue
+    // FAQ:13（NH-34⑦）: 余った属性アイコンを満たす待機キャラが居ない割り当ては取らない（次の割り当てを試す）
+    if (!readyAttrsOk(ctx, state, by, asg.readyAttrs, gens.filter((g) => g.from === 'field').map((g) => g.iid))) continue
     if (gens.some((g) => g.icon !== 'R')) warn.push(`コストを発生させるキャラを自動で選んだ: ${gens.map((g) => g.iid).join('・')}`)
     return { ok: true, costGens: gens.length ? [gens] : [], usePool: true, poolIds: [], warn }
   }
