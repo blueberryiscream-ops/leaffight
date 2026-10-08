@@ -422,7 +422,6 @@ function reducesKiryokuOf(ctx: EngineCtx, state: BoardState, env: Env, ops: Op[]
   })
 }
 
-/** Op の列に、name の op が（forEach・if・simul・offer の中も含めて）含まれるか（D23「ドローする効果をもつ」の判定） */
 /**
  * 「手札やデッキを調べる効果」（規 1200・R4c G5f-2 F12）＝デッキや手札など非公開情報のカードを見る効果。
  * 当たる: lookTop／lookHand／pickRandom（相手の手札を引いて見る）／choose の候補がデッキ・相手の手札（chooser が相手でないもの＝探す）。
@@ -447,6 +446,7 @@ function looksAtHidden(ops: Op[], choices: Choice[]): boolean {
   })
 }
 
+/** Op の列に、name の op が（forEach・if・simul・offer の中も含めて）含まれるか（D23「ドローする効果をもつ」の判定） */
 function hasOpDeep(ops: Op[], name: string): boolean {
   return ops.some((o) => {
     if (o.op === name) return true

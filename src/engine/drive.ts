@@ -238,8 +238,8 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   }
 
   if (req.battle) return declareBattle(ctx, state, req, id)
-  // 横に置いたカード（強襲モード）は手札ではない＝ターン終了時まで使用できない。デッキ・ゴミ箱のカードも宣言できない（記述の欠けではない＝missingDef にしない。R4c G5e）
-  if (!req.ability && !req.option && !req.costGen && (src.zone === 'aside' || src.zone === 'deck' || src.zone === 'trash')) return { ok: false, reason: src.zone === 'aside' ? '横に置いたカードはターン終了時まで使用できない' : '手札にないカードは使用できない' }
+  // 横に置いたカード（強襲モード）は手札ではない＝ターン終了時まで使用できない。デッキ・ゴミ箱・提示エリア（pending＝呼び出し・使用の途中）のカードも宣言できない（記述の欠けではない＝missingDef にしない。R4c G5e）
+  if (!req.ability && !req.option && !req.costGen && (src.zone === 'aside' || src.zone === 'deck' || src.zone === 'trash' || src.zone === 'pending')) return { ok: false, reason: src.zone === 'aside' ? '横に置いたカードはターン終了時まで使用できない' : '手札にないカードは使用できない' }
   if (!req.ability && src.zone === 'hand' && info && ['c', 't', 'i', 'f', 'b'].includes(info.kind)) return declareCardUse(ctx, state, req, id)
 
   if (!ctx.defs[src.cardId]) return { ok: false, reason: `カードの記述が無い: ${nameOf(ctx, state, src.iid)}`, missingDef: true }

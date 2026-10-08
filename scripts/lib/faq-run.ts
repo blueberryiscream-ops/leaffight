@@ -310,6 +310,8 @@ function doDeclare(run: Run, i: number, req: DeclReq) {
       while (pj >= 0 && 'choose' in run.all[pj] && seatOf(run.all[pj].choose.by) === by) pj--
       const prev = pj >= 0 ? run.all[pj] : undefined
       const chained = !!prev && 'declare' in prev && prev.declare.by === req.by && !prev.declare.at && !req.at
+      // at: { proc: 'phase' } を明示した step は、相手の割り込みの後でも開き直したメインフェイズの窓で試す（《威圧》で手札に戻ったキャラをもう一度呼び出す FAQ:2635。統括29）
+        || req.at?.proc === 'phase'
       if (chained && !triedFresh && fresh && !fresh.frame && awaitingSeat(s) === by) {
         triedFresh = true
         const r = tryDeclare(run, req)
