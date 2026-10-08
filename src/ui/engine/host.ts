@@ -13,7 +13,7 @@ import { activeSeat, awaitingSeat, canDeclarePhaseEnd, currentWindow, phaseEndPe
 import type { CardInfo, EngineCtx } from '../../engine/ctx'
 import { declare, declareTargets, drive, validPick, type DeclareReq, type TargetSpec } from '../../engine/drive'
 import { grantedAbilities, type Violation } from '../../engine/layers'
-import { costOfAbility, paymentCovers, poolOnlyPayment } from '../../engine/cost'
+import { abilityCostText, costOfAbility, paymentCovers, poolOnlyPayment } from '../../engine/cost'
 import type { CardDef } from '../../engine/dsl'
 import type { EngineReq, PublicStep } from '../../net/session'
 
@@ -29,7 +29,7 @@ export interface PoolCardLike {
   stats: Record<string, number> | null
   cost: string
   attr: string
-  abilities: { header: string; cost: string }[]
+  abilities: { header: string; cost: string; text?: string }[]
   battleAtk?: string
   battleDef?: string
   cells?: string[]
@@ -46,7 +46,7 @@ export function cardInfoFromPool(p: PoolCardLike): CardInfo {
     stats: p.stats,
     cost: p.cost,
     attr: p.attr,
-    abilities: (p.abilities ?? []).map((a) => ({ header: a.header, cost: a.cost })),
+    abilities: (p.abilities ?? []).map((a) => ({ header: a.header, cost: abilityCostText(a) })),
     charTypes: p.charTypes ?? [],
     sex: (p.sex || (p.cells?.some((x) => x.includes('男性・女性')) ? '両方' : '')) as CardInfo['sex'],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),

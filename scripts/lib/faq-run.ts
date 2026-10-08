@@ -26,6 +26,7 @@ import { EMPTY_BOARD, type BoardState, type CardInstance, type Seat, type ZoneId
 import { awaitingSeat, currentWindow, startBattleAt, type ProcFrame, type ProcTrace } from '../../src/core/proc'
 import { applyAction } from '../../src/core/actions'
 import type { CardInfo, EngineCtx } from '../../src/engine/ctx'
+import { abilityCostText } from '../../src/engine/cost'
 import { currentStat, declare, drive, forceOp } from '../../src/engine/drive'
 import type { BoardSpec, CardSpec, Expect, FaqCase, Side, Step, WindowRef } from '../../src/engine/faqCase'
 
@@ -690,7 +691,7 @@ export function cardInfoOf(p: {
   stats: Record<string, number> | null
   cost: string
   attr: string
-  abilities: { header: string; cost: string }[]
+  abilities: { header: string; cost: string; text?: string }[]
   battleAtk?: string
   battleDef?: string
   cells?: string[]
@@ -705,7 +706,7 @@ export function cardInfoOf(p: {
     stats: p.stats,
     cost: p.cost,
     attr: p.attr,
-    abilities: p.abilities.map((a) => ({ header: a.header, cost: a.cost })),
+    abilities: p.abilities.map((a) => ({ header: a.header, cost: abilityCostText(a) })),
     charTypes: p.charTypes ?? [],
     sex: (p.sex || (p.cells?.some((x) => x.includes('男性・女性')) ? '両方' : '')) as CardInfo['sex'],
     ...(p.kind === 'b' ? { battleAtk: p.battleAtk ?? '', battleDef: p.battleDef ?? '', place: p.cells?.[1] ?? '' } : {}),

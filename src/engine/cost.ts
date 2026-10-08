@@ -18,6 +18,17 @@ import { evalExpr, resolveRef } from './eval'
 const ICONS = 'WRGLT'
 const ATTRS = '力早賢根感'
 
+/**
+ * pool.json の能力（E0 で分けた cost と本文）から使用代償の元表記を作る。
+ * 見出しのアイコンの次の行が「気力－N」だけのときは、それも使用代償（FAQ:1786「巻頭特集のように、気力を減らす使用代償」）。
+ * E0 の分割は見出しの1行だけを cost にするため本文の先頭に残る（巻頭特集 RG／気力－２・涙忘れるカクテル R／気力－１。pool で2件）。統括28
+ */
+export function abilityCostText(a: { cost: string; text?: string }): string {
+  const line = (a.text ?? '').split('\n')[0].trim()
+  if (!/^気力[－ー-][0-9０-９]+$/.test(line)) return a.cost
+  return a.cost ? `${a.cost}＋${line}` : line
+}
+
 /** 使用代償の元表記を読む。読めない部分は unknown に返す（呼び出し側が manual に倒す） */
 export function parseCostText(text: string): { cost: Cost; unknown: string[] } {
   const cost: Cost = { icons: [], attrs: [] }
