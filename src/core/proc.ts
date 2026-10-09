@@ -1337,7 +1337,9 @@ function enterPhase(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Bo
     if (frame.step === 3) {
       // [3] 手札の上限枚数（7）を超えていれば、上限になるように選んでゴミ箱送り
       const hand = cardsInZone(state, ap, 'hand')
-      const n = hand.length - HAND_LIMIT
+      // 上限は層から導き出された席ごとの値（null＝無限）。層が無ければ 7（NH-38・R4c G7）
+      const lim = state.layers.handLimit ? state.layers.handLimit[ap] : HAND_LIMIT
+      const n = lim === null ? 0 : hand.length - lim
       if (n <= 0) return setFrame(state, advance(frame))
       return coreChoice(state, frame, { by: ap, kind: 'select', purpose: 'handDiscard', prompt: `手札を${n}枚ゴミ箱送り（10-7[3]）`, options: hand.map((x) => ({ key: x.iid, label: x.cardId })), min: n, max: n })
     }
@@ -2079,6 +2081,8 @@ export type ProcAction =
       /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
       held?: string[]
       reseq?: string[]
+      /** 手札の上限（席ごと・null＝無限。エンジンが層から導き出す。R4c G7） */
+      limit?: { A: number | null; B: number | null }
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2151,7 +2155,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, held: a.held ?? s.layers.held } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

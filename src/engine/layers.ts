@@ -398,6 +398,30 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
   return null
 }
 
+/**
+ * 手札の上限枚数（席ごと・null＝無限）。4-2-1 の 7 を基準に、層の handLimit を計算する（R4c G7・NH-38）:
+ * 基準7 → set の数（層の連番が一番後ろのもの）→ delta を全部足す → set 'infinite' があれば無限 → 0 未満は 0。出た順には依らない（FAQ:4240）。
+ * who 'you'＝層の使用者（env.you＝controllerOf。装備先のキャラの使用者）／'both'＝両プレイヤー。core の procLayers.limit → handAdjust [3] が読む。
+ */
+export function handLimitsOf(ctx: EngineCtx, state: BoardState): { A: number | null; B: number | null } {
+  const out = { A: 7 as number | null, B: 7 as number | null }
+  for (const seat of ['A', 'B'] as const) {
+    let base = 7
+    let delta = 0
+    let infinite = false
+    for (const e of derived(ctx, state).effs) {
+      const f = e.effect
+      if (f.ce !== 'handLimit') continue
+      if (f.who === 'you' && e.env.you !== seat) continue
+      if (f.set === 'infinite') infinite = true
+      else if (typeof f.set === 'number') base = f.set
+      if (f.delta) delta += f.delta
+    }
+    out[seat] = infinite ? null : Math.max(0, base + delta)
+  }
+  return out
+}
+
 /** 《アンチ・ドロー》（R4c G5f-1）: 場にある間、カードの効果のドロー（draw／drawBoth）は行わない。どちらのプレイヤーのものにも及ぶ */
 export function drawCancelled(ctx: EngineCtx, state: BoardState): string | null {
   for (const e of derived(ctx, state).effs) if (e.effect.ce === 'noDraw') return e.layer.label
@@ -1077,9 +1101,12 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   // ── 二重人格（R4c G6b-3・NH-37）: copyOf の層が効いている間 cardId＝上のカード。層が無くなれば元に戻し、上のカードはゴミ箱へ
   const ps = personaSync(ctx, state, list.filter((l) => !remove.includes(l.id)))
   for (const id of ps.dropLayers) if (!remove.includes(id)) remove.push(id)
+  const limNow = handLimitsOf(ctx, state)
+  const limPrev = state.layers.handLimit ?? { A: 7, B: 7 }
+  const limChanged = limNow.A !== limPrev.A || limNow.B !== limPrev.B
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
-  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length) {
+  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length || limChanged) {
     acts.push({
       type: 'procLayers',
       ...(add.length ? { add } : {}),
@@ -1091,6 +1118,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
+      ...(limChanged ? { limit: limNow } : {}),
       ...(heldChanged ? { held: heldNow } : {}),
       ...(regainedLayers.length ? { reseq: regainedLayers.map((l) => l.id) } : {}),
     })
