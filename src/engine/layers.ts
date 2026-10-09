@@ -15,7 +15,7 @@
 import type { BoardAction } from '../core/actions'
 import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
 import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
-import { GRANT_BASE, abilityAt } from './abilities'
+import { COPY_BASE, GRANT_BASE, abilityAt, findAbilityOn } from './abilities'
 import type { Ability, ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
@@ -283,6 +283,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
       if (d.modLost.has(iid)) continue
       items.push({ seq: e.layer.seq, run: () => { if (!effectOn(ctx, state, e, iid)) return; const a = levelStatAttr(ctx, state, e, iid); if (a) v[a] += f.delta } })
     } else if (f.ce === 'statSwap') {
+      if (d.modLost.has(iid)) continue // 入れ替えも能力値修正（FAQ:455・1656。バトルの後は戻る FAQ:3816）
       items.push({ seq: e.layer.seq, run: () => { const keep = { ...v }; if (effectOn(ctx, state, e, iid) && swapStats(ctx, state, e, iid, v)) for (const st of imm.keys()) if (blocked(st, e.layer.source)) v[st] = keep[st] } })
     }
   }
@@ -320,7 +321,7 @@ function swapStats(ctx: EngineCtx, state: BoardState, e: Eff, iid: string, v: Re
   if (hiAttr === loAttr) return true // 全属性が同じ値: 入れ替えても変化なし
   if (hi.length > 1 || lo.length > 1) {
     const itemIid = e.layer.source
-    const answer = itemIid ? state.procMeta.answers[`swap:${itemIid}`] : undefined
+    const answer = itemIid ? state.procMeta.answers[`swap:${itemIid}:${c?.cardId ?? ''}`] : undefined
     const [pickHi, pickLo] = (answer?.[0]?.split(':') ?? []) as [Attr, Attr]
     if (pickHi && pickLo && hi.includes(pickHi) && lo.includes(pickLo)) {
       hiAttr = pickHi
@@ -344,11 +345,12 @@ export function swapChoiceFix(ctx: EngineCtx, state: BoardState): BoardAction | 
     if (e.effect.ce !== 'statSwap') continue
     const itemIid = e.layer.source
     if (!itemIid) continue
-    const key = `swap:${itemIid}`
-    if (state.procMeta.answers[key]) continue
     for (const iid of targetsOf(ctx, state, e)) {
       if (!effectOn(ctx, state, e, iid)) continue
       const c = state.cards[iid]
+      // 答えの鍵に装備先のカードも入れる: タッグ化・二重人格で元の値の出所が変われば指定し直す（FAQ:445・NH-37⑩）
+      const key = `swap:${itemIid}:${c?.cardId ?? ''}`
+      if (state.procMeta.answers[key]) continue
       const printed = c ? ctx.cards[c.cardId]?.stats : null
       if (!printed) continue
       const { hi, lo } = tiedHiLo(printed)
@@ -356,7 +358,8 @@ export function swapChoiceFix(ctx: EngineCtx, state: BoardState): BoardAction | 
       if (hi[0] === lo[0]) continue
       const opts: { key: string; label: string }[] = []
       for (const a of hi) for (const b of lo) if (a !== b) opts.push({ key: `${a}:${b}`, label: `${a}と${b}を入れ替える` })
-      const chooser = resolvePlayer(state, layerEnv(state, e.layer), e.effect.tieBreak.chooser)
+      // 「装備させたプレイヤー」＝アイテムの持ち主。層の you は装備先の使用者（controllerOf）なので、相手のキャラに付けたとき取り違える（G6a-2 のレベルダウンと同じ。NH-37⑩）
+      const chooser = e.effect.tieBreak.chooser === 'equipper' ? state.cards[itemIid]?.owner ?? resolvePlayer(state, layerEnv(state, e.layer), 'you') : resolvePlayer(state, layerEnv(state, e.layer), e.effect.tieBreak.chooser)
       return {
         type: 'procChoice',
         choice: { id: key, by: chooser, kind: 'select', prompt: `「${e.layer.label}」: 入れ替える能力値を選ぶ（元の能力値が並んでいる。FAQ:443）`, options: opts, min: 1, max: 1, frameId: null },
@@ -484,7 +487,44 @@ export function grantedAbilities(ctx: EngineCtx, state: BoardState, iid: string)
     const item = state.cards[e.layer.source]
     if (item) out.push({ ab: e.effect.ability, cardId: item.cardId, itemIid: item.iid, index: GRANT_BASE + e.layer.ability * 100 + (bodyOf(e.layer).ei ?? 0) })
   }
+  // 模写でコピーした起動型（元の cardId・番号のまま。使用回数はコピーしたキャラの分として別に数える FAQ:2179）
+  for (const k of copiedAbilities(ctx, state, iid)) if (k.ab.kind === 'activated') out.push({ ab: k.ab, cardId: k.cardId, itemIid: k.layerSource, index: k.index })
   return out
+}
+
+/** そのキャラが今コピーしている能力（模写。ce copiedAbility の層。特殊能力を失わせている層より前にコピーした能力は失われる FAQ:528 の考え。NH-37⑦: コピー元が場を離れても残る） */
+export function copiedAbilities(ctx: EngineCtx, state: BoardState, iid: string): { ab: Ability; cardId: string; index: number; layerSource: string }[] {
+  const d = derived(ctx, state)
+  const lostAt = d.lost.has(iid) ? d.lostSeq.get(iid) ?? Infinity : -1
+  const out: { ab: Ability; cardId: string; index: number; layerSource: string }[] = []
+  for (const l of state.layers.list) {
+    const f = bodyOf(l).effect
+    if (!f || f.ce !== 'copiedAbility' || !l.targets.includes(iid) || l.seq < lostAt) continue
+    const ab = abilityAt(ctx, f.cardId, f.index)
+    if (ab) out.push({ ab, cardId: f.cardId, index: f.index, layerSource: l.source ?? iid })
+  }
+  return out
+}
+
+/** 模写で選べる能力の名前: そのキャラが今持っている名前つきの特殊能力（印刷・得た能力。失っている能力は選べない rule:1177。使えない状態の能力は選べる FAQ:570） */
+export function copyableAbilityNames(ctx: EngineCtx, state: BoardState, iid: string): string[] {
+  const c = state.cards[iid]
+  if (!c || !isCharOnField(c) || derived(ctx, state).lost.has(iid)) return []
+  const names: string[] = []
+  for (const ab of ctx.defs[c.cardId]?.abilities ?? []) if ((ab.kind === 'activated' || ab.kind === 'static' || ab.kind === 'conditional') && ab.name) names.push(ab.name)
+  for (const g of grantedAbilities(ctx, state, iid)) if (g.ab.name) names.push(g.ab.name)
+  return [...new Set(names)]
+}
+
+/** 模写の処理: コピーする能力の層（ターン終了時まで）。新たな能力をコピーした時は前のコピーは失われる（remove） */
+export function copyLayer(ctx: EngineCtx, state: BoardState, env: Env, srcIid: string, name: string, label: string): { add: LayerSeed; remove: string[] } | null {
+  const card = state.cards[srcIid]
+  if (!card || !env.self || !copyableAbilityNames(ctx, state, srcIid).includes(name)) return null
+  const found = findAbilityOn(ctx, state, card, name)
+  if (!found) return null
+  const effect: Continuous = { ce: 'copiedAbility', who: { ref: 'self' }, cardId: found.cardId, index: found.index }
+  const remove = state.layers.list.filter((l) => bodyOf(l).effect?.ce === 'copiedAbility' && l.targets.includes(env.self!)).map((l) => l.id)
+  return { add: continuousSeed(ctx, state, env, effect, 'turn', label, 'ability'), remove }
 }
 
 /** そのアイテムが、効果を失っているキャラに装備されているか（《忘れ物》） */
@@ -882,6 +922,18 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
         if (effect.ce === 'manual' || effect.ce === 'exemptLimit') return
         want.set(`${c.iid}#${index}#${ei}`, { iid: c.iid, index, ei, host: c.attachedTo, effect, label: ab.name ?? def.name, costume: ab.effects.some((x) => x.ce === 'setSex' && x.costume) })
       })
+    })
+  }
+  // 模写でコピーした常時効果（ce copiedAbility）: コピーした時点から、コピーしたキャラの常時効果として働く（13-2・FAQ:2662）。exemptLimit は印刷の記述だけを見る＝コピーしても何も起きない（FAQ:2172）
+  for (const l of list) {
+    const f = bodyOf(l).effect
+    if (l.ability !== null || !f || f.ce !== 'copiedAbility') continue
+    const mei = l.targets[0]
+    const ab = abilityAt(ctx, f.cardId, f.index)
+    if (!mei || !isCharOnField(state.cards[mei]) || !ab || ab.kind !== 'static') continue
+    ab.effects.forEach((effect, ei) => {
+      if (effect.ce === 'manual' || effect.ce === 'exemptLimit') return
+      want.set(`${mei}#${COPY_BASE + f.index}#${ei}`, { iid: mei, index: COPY_BASE + f.index, ei, host: null, effect, label: ab.name ?? '模写' })
     })
   }
   const have = new Set<string>()

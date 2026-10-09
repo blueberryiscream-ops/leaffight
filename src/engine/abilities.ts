@@ -8,7 +8,7 @@ import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
 import { evalCond, resolveRef } from './eval'
-import { abilitiesLost, grantedAbilities, itemEffectsLostFor } from './layers'
+import { abilitiesLost, copiedAbilities, grantedAbilities, itemEffectsLostFor } from './layers'
 
 export type Activated = Extract<Ability, { kind: 'activated' }>
 export type Play = Extract<Ability, { kind: 'play' }>
@@ -16,6 +16,8 @@ export type Conditional = Extract<Ability, { kind: 'conditional' }>
 
 /** 得た能力（ce grantAbility。《釘バット》NH-31⑤）の番号の始まり。index = GRANT_BASE + 静的能力の番号*100 + その中の効果の番号。cardId は「得させるカード」（アイテム）の id */
 export const GRANT_BASE = 1000
+/** コピーした能力（模写。ce copiedAbility）の番号の始まり。index = COPY_BASE + コピー元の能力の番号（常時・誘発のコピーの層・誘発の再確認に使う。起動型は元の cardId・番号のまま宣言する） */
+export const COPY_BASE = 5000
 
 /** カード id と番号から能力を引く（得た能力の番号も引ける） */
 export function abilityAt(ctx: EngineCtx, cardId: string, idx: number): Ability | undefined {
@@ -119,7 +121,7 @@ export function conditionalHits(ctx: EngineCtx, state: BoardState, frame: ProcFr
   for (const c of cards) {
     const def = ctx.defs[c.cardId]
     if (!def || !abilitiesOn(ctx, state, c.iid)) continue
-    def.abilities.forEach((ab, index) => {
+    ;[...def.abilities.map((ab, index) => ({ ab, index })), ...copiedAbilities(ctx, state, c.iid).map((k) => ({ ab: k.ab as Ability, index: COPY_BASE + k.index }))].forEach(({ ab, index }) => {
       if (ab.kind !== 'conditional') return
       // フィールドカードの「お互いの」効果（eachPlayer）は AP→NAP の順にそれぞれのプレイヤーのものとして処理する（18-1・FAQ:4105）
       const ap = activeSeat(state)
@@ -146,7 +148,7 @@ export function stillMatches(ctx: EngineCtx, state: BoardState, iid: string, ind
   const c = state.cards[iid]
   if (!frame || !c || !sourceActive(state, iid) || !abilitiesOn(ctx, state, iid)) return false
   if (frame.kind === 'down' && frame.down?.canceled) return false
-  const ab = ctx.defs[c.cardId]?.abilities[index]
+  const ab = index >= COPY_BASE ? copiedAbilities(ctx, state, iid).find((k) => COPY_BASE + k.index === index)?.ab : ctx.defs[c.cardId]?.abilities[index]
   if (!ab || ab.kind !== 'conditional') return false
   const you = seat ?? controllerOf(state, iid) ?? c.owner
   return triggerMatches(ctx, state, { self: iid, you, slots: {}, trigger: triggerId, declId: null, declared: {} }, ab.trigger, frame)

@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -419,7 +419,12 @@ function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, 
     // NH-33④: 自分も対象にとれる（NH-20 を改めた）
     return (['A', 'B'] as Seat[]).map((seat) => ({ key: seat, label: `プレイヤー${seat}` }))
   }
-  return [] // 能力を選ぶ（模写など）は R4
+  // 模写でコピーする能力を選ぶ（R4c G6b-2）: 対象にとったキャラが今持っている名前つきの特殊能力（答えは能力の名前）
+  if ('ability' in p) {
+    const t = resolveRef(state, env, p.ability)[0]
+    return t ? copyableAbilityNames(ctx, state, t).filter((n) => !p.excludeNames?.includes(n)).map((n) => ({ key: n, label: n })) : []
+  }
+  return []
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -1693,6 +1698,15 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const origin = originOf(state, env)
       const add = refs(op.who).map((iid) => modSeed(iid, stat, delta, op.kind, until, env.you, env.self, op.mode === 'set' ? `${item.label} ${stat}=${delta}` : `${item.label} ${stat}${delta >= 0 ? '+' : ''}${delta}`, origin, op.mode === 'set', op.immune))
       return { tasks: rest, actions: add.length ? [{ type: 'procLayers', add }] : [] }
+    }
+    case 'grantAbility': {
+      // 模写（《メイフィア》R4c G6b-2）: 処理の時にその能力をもう持っていなければ何も得ない（使用代償は払い戻さない）
+      if (!('copyOf' in op.ability)) return manual('能力を与える op は未実装（ce grantAbility で書く）')
+      const srcIid = env.slots[op.ability.copyOf.from]?.[0]
+      const name = env.slots[op.ability.copyOf.slot]?.[0]
+      const seedAndOld = srcIid && name ? copyLayer(ctx, state, env, srcIid, name, item.label) : null
+      if (!seedAndOld) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: '模写: コピーする能力を持っていない（何も得ない）' } }] }
+      return { tasks: rest, actions: [{ type: 'procLayers', add: [seedAndOld.add], ...(seedAndOld.remove.length ? { remove: seedAndOld.remove } : {}) }] }
     }
     case 'addContinuous': {
       // 継続効果の層を足す（K3・R3）。対象は足したときに決まる（12-1）。期限: ターン終了時まで／バトル終了時まで／発生源がある間

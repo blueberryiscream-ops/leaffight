@@ -185,7 +185,7 @@ export type Cond =
 
 export type Pick =
   | { cards: Selector }
-  | { ability: Selector; excludeNames?: string[] }    // キャラの特殊能力を1つ選ぶ（模写）
+  | { ability: CardRef; excludeNames?: string[] }    // キャラ（ability の CardRef が指す1体）の特殊能力を1つ選ぶ（模写 R4c G6b-2。答えは能力の名前。失っている能力は選べない・使えない状態の能力は選べる）
   | { stat: CardRef; rule: 'any' | 'maxBase' | 'minBase'; excludeSlot?: string }  // excludeSlot＝その枠で選んだ能力値は選べない（《選り取りバトル》「[攻]／[防]は同じ能力値を使ってはならない」）
   /** 候補をあるキャラの属性に絞る（《アドバイス》「消耗させたキャラの属性と同じ能力値１つ」NH-27⑤。of＝そのキャラ・印刷の属性。R4c G2b-1b）。属性が1つなら選択を出さず、属性なしなら候補0＝選ばない */
   | { stat: CardRef; rule: 'attrOf'; of: CardRef }
@@ -315,7 +315,7 @@ export type Op =
       /** 「払わなければならない」（R4c G4c・アンチ・イベント／スキル NH-34⑩）: 払えるなら払わない選択は無い。発生済みのコストが足りれば問わずに払い、足りなければ「コストを発生させる」を断れない（min 1）。発生源も手札の候補も無ければ問わずに ifNot へ */
       mandatory?: boolean; ifPaid: Op[]; ifNot: Op[] }
   // ── 能力と実体
-  | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
+  | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string; from: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
   | { op: 'createToken'; token: TokenSpec; side: PlayerRef; orientation: 'ready' | 'rested' }
   | { op: 'addContinuous'; effect: Continuous; duration: Duration }
   // ── 制御
@@ -443,6 +443,8 @@ export type Continuous =
   | { ce: 'ignoreRecover'; who: CardRef }                                                 // 気力を回復させる効果（kiryoku recover:true）の影響を受けない（《腹ぺこ》NH-31②。対象には選べる）
   /** 常時の「以下の特殊能力を得る」（《釘バット》NH-31⑤・R4c G11b-2）。who（装備先）が、この効果がある間だけその能力を持つ。能力の名前は能力の name（FAQ:3327）。使用代償・宣言はそのキャラの特殊能力と同じ（15-13-1） */
   | { ce: 'grantAbility'; who: CardRef; ability: Extract<Ability, { kind: 'activated' }> }
+  /** 模写（《メイフィア》R4c G6b-2）でコピーした能力。who（メイフィア）が、cardId の能力 index をターン終了時まで持つ。op grantAbility { copyOf } が足す層の中身（カードの記述には書かない） */
+  | { ce: 'copiedAbility'; who: CardRef; cardId: string; index: number }
   | { ce: 'cannotEquip'; who: CardRef }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
