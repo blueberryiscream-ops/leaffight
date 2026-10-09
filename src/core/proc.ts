@@ -2084,6 +2084,10 @@ export type ProcAction =
     }
   /** 場の制限の是正（K12）: 選ぶ余地が無いときのゴミ箱送り（選ぶときは procChoice の purpose limitTrash） */
   | { type: 'procLimitTrash'; iids: string[]; reason: string }
+  /** 二重人格（R4c G6b-3）: 実体 iid の cardId を差し替える／戻す。kiryoku が数なら気力をそれにする（1以上から0以下ならダウンを積む）。null なら気力は触らない（場の外で元に戻すとき）。core はカード知識なし＝新しい cardId・気力はエンジンが計算して渡す */
+  | { type: 'procPersona'; iid: string; cardId: string; kiryoku: number | null }
+  /** 二重人格で上に乗せるカード top を aside へ（on＝乗せる先の iid）／null でゴミ箱へ送って印を外す */
+  | { type: 'procPersonaCard'; iid: string; on: string | null }
   /** アイテムを付け替える（《替え玉》の交換。同時に行う）。装備の手順ではない */
   | { type: 'procAttach'; moves: { item: string; to: string }[] }
   /** 効果でキャラをダウンさせる（15-5 のダウン処理を起こす。《サクリファイス》） */
@@ -2386,6 +2390,29 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     }
     case 'procLayers':
       return applyLayers(state, action, trace)
+    case 'procPersona': {
+      const c = state.cards[action.iid]
+      if (!c) return null
+      const base = c.baseCardId ?? c.cardId
+      if (action.cardId === c.cardId && c.baseCardId === (action.cardId === base ? undefined : base)) return null
+      const next: CardInstance = { ...c, cardId: action.cardId }
+      if (action.cardId === base) delete next.baseCardId
+      else next.baseCardId = base
+      let s: BoardState = { ...state, cards: { ...state.cards, [c.iid]: next } }
+      trace.push({ kind: 'name', text: `二重人格:${action.iid}→${action.cardId}` })
+      if (action.kiryoku !== null && c.kiryoku !== null) s = changeKiryoku(s, c.iid, action.kiryoku)
+      return { state: s, log: '二重人格: キャラが入れ替わった' }
+    }
+    case 'procPersonaCard': {
+      const c = state.cards[action.iid]
+      if (!c) return null
+      let s = moveTo(state, c.iid, action.on ? 'aside' : 'trash')
+      const moved = { ...s.cards[c.iid] }
+      if (action.on) moved.personaOf = action.on
+      else delete moved.personaOf
+      s = { ...s, cards: { ...s.cards, [c.iid]: moved } }
+      return { state: s, log: action.on ? '二重人格: カードを上に乗せた' : '二重人格: 上のカードをゴミ箱送りにした' }
+    }
     case 'procLimitTrash':
       return { state: limitTrash(state, action.iids, trace), log: `場の制限を満たすためにゴミ箱送り（${action.reason}）` }
     case 'procAttach': {

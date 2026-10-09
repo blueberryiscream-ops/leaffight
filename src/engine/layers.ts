@@ -1074,6 +1074,9 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     cs.sort((p, q) => at(p.iid) - at(q.iid))
     costumeTrash.push(...cs.slice(0, -1).map((x) => x.iid))
   }
+  // ── 二重人格（R4c G6b-3・NH-37）: copyOf の層が効いている間 cardId＝上のカード。層が無くなれば元に戻し、上のカードはゴミ箱へ
+  const ps = personaSync(ctx, state, list.filter((l) => !remove.includes(l.id)))
+  for (const id of ps.dropLayers) if (!remove.includes(id)) remove.push(id)
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
   if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length) {
@@ -1092,10 +1095,51 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(regainedLayers.length ? { reseq: regainedLayers.map((l) => l.id) } : {}),
     })
   }
+  acts.push(...ps.acts)
   if (costumeTrash.length) acts.push({ type: 'procLimitTrash', iids: costumeTrash, reason: '効果が戻った衣装は最後に装備した1枚だけ残る（FAQ:1642）' })
   // whenLost の Op は、どの宣言にも属さない効果として積む（その場で処理する）
   for (const x of lostOps) acts.push(lostEffect(x.ops, x.env, x.label, x.by))
   return acts
+}
+
+/**
+ * 二重人格（copyOf の層）の同期。キャラの実体（iid）はそのまま、cardId を上のカードに差し替える（FAQ:731・1554）。
+ *  - 同じキャラに複数の層があれば、一番新しい層の上のカードが有効（後の方が上）。新しい方が先に失われたら前のコピーに戻る
+ *  - cardId が変わったら、そのキャラの常時の能力の層（ability !== null・source が iid）は全部外して作り直す（NH-37⑫・FAQ:2649）。使って発揮した効果（ability === null）は残す（FAQ:1551）
+ *  - 気力＝新しい上限−ダメージ（ダメージ＝古い上限−気力）。0以下ならダウン（core の changeKiryoku）
+ *  - 場の外に出たキャラは元の cardId に戻す。層が無い・キャラが場にいない上のカードはゴミ箱へ（エクストリームで途中で失われたとき NH-37⑥・ターン終了時）
+ */
+function personaSync(ctx: EngineCtx, state: BoardState, layers: Layer[]): { acts: BoardAction[]; dropLayers: string[] } {
+  const acts: BoardAction[] = []
+  const dropLayers: string[] = []
+  const wantTop = new Map<string, { top: string; cardId: string }>()
+  const keep = new Set<string>()
+  const cos = layers.filter((l) => l.ability === null && bodyOf(l).effect?.ce === 'copyOf').sort((p, q) => q.seq - p.seq)
+  for (const l of cos) {
+    const f = bodyOf(l).effect as Extract<Continuous, { ce: 'copyOf' }>
+    const who = l.targets[0]
+    const top = resolveRef(state, layerEnv(state, l), f.top)[0]
+    const w = who ? state.cards[who] : undefined
+    const t = top ? state.cards[top] : undefined
+    if (!who || !w || !isCharOnField(w) || !t || t.zone !== 'aside' || t.personaOf !== who) continue
+    keep.add(top)
+    if (!wantTop.has(who)) wantTop.set(who, { top, cardId: t.cardId })
+  }
+  for (const c of Object.values(state.cards)) {
+    if (!c.baseCardId && !wantTop.has(c.iid)) continue
+    const target = wantTop.get(c.iid)?.cardId ?? c.baseCardId ?? c.cardId
+    if (c.cardId === target) continue
+    let kiryoku: number | null = null
+    if (isCharOnField(c) && c.kiryoku !== null) {
+      const oldMax = maxKiryokuOf(ctx, state, c.iid)
+      const newMax = maxKiryokuOf(ctx, { ...state, cards: { ...state.cards, [c.iid]: { ...c, cardId: target } } }, c.iid)
+      if (oldMax !== null && newMax !== null) kiryoku = newMax - (oldMax - c.kiryoku)
+    }
+    acts.push({ type: 'procPersona', iid: c.iid, cardId: target, kiryoku })
+    for (const l of layers) if (l.ability !== null && l.source === c.iid) dropLayers.push(l.id)
+  }
+  for (const c of Object.values(state.cards)) if (c.personaOf && !keep.has(c.iid)) acts.push({ type: 'procPersonaCard', iid: c.iid, on: null })
+  return { acts, dropLayers }
 }
 
 function rank(c: CardInstance): number {

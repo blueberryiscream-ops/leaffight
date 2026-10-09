@@ -318,6 +318,8 @@ export type Op =
   | { op: 'grantAbility'; to: CardRef; ability: Ability | { copyOf: { slot: string; from: string } }; duration: Duration; group?: string; onReplaced?: 'dropItsEffects' }
   | { op: 'createToken'; token: TokenSpec; side: PlayerRef; orientation: 'ready' | 'rested' }
   | { op: 'addContinuous'; effect: Continuous; duration: Duration }
+  /** 二重人格（R4c G6b-3）: ゴミ箱の top を味方キャラ who の上に乗せる（aside へ）＋ターン終了時までの copyOf の層。処理の時に top が自分のゴミ箱のキャラクターカードで who が場にいなければ何もしない */
+  | { op: 'persona'; who: CardRef; top: CardRef }
   // ── 制御
   | { op: 'choose'; choice: Choice }
   | { op: 'if'; cond: Cond; then: Op[]; else?: Op[] }
@@ -462,6 +464,8 @@ export type Continuous =
   | { ce: 'loseAbilities'; who: CardRef | Selector }
   /** 《忘れ物》: そのキャラが装備しているすべてのアイテムは効果を失う（キャラに掛かる効果＝効果を失っている間に装備したアイテムも・FAQ:1645）。装備の条件は残る（NH-37⑮）。R4c G6b-1 */
   | { ce: 'itemsLoseEffects'; who: CardRef | Selector }
+  /** 二重人格: who は top（上に乗ったキャラクターカード）のコピーとして扱う。layers.ts syncActions が cardId の差し替え・戻し・上のカードのゴミ箱送りを保つ（NH-37⑥⑫） */
+  | { ce: 'copyOf'; who: CardRef | Selector; top: CardRef }
   /** 「バトルに参加しているキャラに対して効果を発揮している、特殊能力、イベントカードは効果を失う。また使用することもできない」
    *  （R4b-3b-2・統括18。《エクストリーム》《ファッション》《能力禁止》FAQ:593・597・600・603・606・1013・1556・3070・3224・3732・3735・3738・3826）。
    *  who＝参加キャラ（when が真のあいだ）。from＝失わせる側。効き方は layers.ts:

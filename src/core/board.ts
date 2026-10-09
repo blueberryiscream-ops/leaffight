@@ -36,6 +36,10 @@ export interface CardInstance {
   /** バトルカードの未使用/使用済み（19-3）。待機/消耗(orientation)とは別の概念。
    *  🚨 プレイヤーが自由に変えられない。ルールと効果でのみ変わる（oldrule.txt:1016-1017） */
   used?: boolean
+  /** 二重人格（R4c G6b-3）: 別のキャラのコピーとして扱われているとき、元の cardId。cardId はコピー元のカードの id に差し替わる（core は意味を知らない） */
+  baseCardId?: string
+  /** 二重人格で上に乗せたカード（aside にある）が、どのキャラ（iid）の上に乗っているか */
+  personaOf?: string
 }
 
 /** 修正の切れ方の目印。自動消滅はしない（DESIGN.md §4.16）。人間が見て判断・削除する */

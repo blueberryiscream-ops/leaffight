@@ -873,6 +873,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
     for (const t of targets) {
       const c = state.cards[t]
       const nm = ctx.cards[c.cardId]?.name ?? ''
+      if (c.baseCardId) return { ok: false, reason: `二重人格で別のキャラとして扱われているキャラは構成要素にできない: ${nm}（FAQ:1539）` }
       if (c.owner !== req.by || !names.includes(nm) || used.includes(nm)) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
       used.push(nm)
       if (isCharOnField(c)) {
@@ -1736,6 +1737,17 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const until = op.duration === 'endOfBattle' ? 'battle' : op.duration === 'whileSource' ? 'whileSource' : 'turn'
       if (op.duration === 'instant' || typeof op.duration === 'object') warnings.push(`${item.label}: 期間「${JSON.stringify(op.duration)}」はターン終了時まで扱い`)
       return { tasks: rest, actions: [{ type: 'procLayers', add: [continuousSeed(ctx, state, env, op.effect, until, item.label, originOf(state, env))] }] }
+    }
+    case 'persona': {
+      // 二重人格（R4c G6b-3）: 上に乗せるカード（ゴミ箱のキャラクターカード）を味方キャラの上へ。処理の時に選べていなければ何も起きない（NH-37⑪）
+      const who = refs(op.who)[0]
+      const top = refs(op.top)[0]
+      const tc = top ? state.cards[top] : undefined
+      if (!who || !top || !tc || tc.zone !== 'trash' || ctx.cards[tc.cardId]?.kind !== 'c' || !isCharOnField(state.cards[who])) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: '二重人格: 乗せるカードを選べない（何も起きない）' } }] }
+      return { tasks: rest, actions: [
+        { type: 'procPersonaCard', iid: top, on: who },
+        { type: 'procLayers', add: [continuousSeed(ctx, state, env, { ce: 'copyOf', who: op.who, top: op.top }, 'turn', item.label, originOf(state, env))] },
+      ] }
     }
     case 'clearMods': {
       const ids = refs(op.who).flatMap((iid) => clearableMods(state, iid, op.kind))
