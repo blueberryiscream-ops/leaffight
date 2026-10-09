@@ -28,7 +28,7 @@ import { applyAction } from '../../src/core/actions'
 import type { CardInfo, EngineCtx } from '../../src/engine/ctx'
 import { abilityCostText } from '../../src/engine/cost'
 import { currentStat, declare, drive, forceOp } from '../../src/engine/drive'
-import { attrsNow } from '../../src/engine/layers'
+import { attrsNow, charTypesOf } from '../../src/engine/layers'
 import type { BoardSpec, CardSpec, Expect, FaqCase, Side, Step, WindowRef } from '../../src/engine/faqCase'
 
 export type Verdict = '✅' | '❌' | '保留'
@@ -582,6 +582,12 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const now = x ? attrsNow(run.ctx, s, x.iid) : []
     const v = ['力', '早', '賢', '根', '感'].filter((a) => now.includes(a as never)).join('')
     return { ok: v === e.attrs[1], msg: `今の属性 ${e.attrs[0]} = ${v || '（なし）'}（層から導き出した値）（期待 ${e.attrs[1] || '（なし）'}）` }
+  }
+  if ('types' in e) {
+    const x = card(e.types[0])
+    const v = (x ? charTypesOf(run.ctx, s, x.iid) : []).slice().sort().join(',')
+    const want = e.types[1].split(',').filter(Boolean).sort().join(',')
+    return { ok: v === want, msg: `今のキャラタイプ ${e.types[0]} = ${v || '（なし）'}（層から導き出した値）（期待 ${want || '（なし）'}）` }
   }
   if ('order' in e) {
     const names = run.trace.filter((t) => t.kind === 'name')

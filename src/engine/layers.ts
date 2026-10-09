@@ -70,6 +70,8 @@ interface Derived {
   effs: Eff[]
   /** 特殊能力を失っているキャラ（shieldParticipants from 特殊能力・loseAbilities） */
   lost: Set<string>
+  /** 特殊能力を失わせている層の連番（loseAbilities の最大 seq。shieldParticipants は Infinity）。これより後に得た能力は有効（《狸の置物》FAQ:528。R4c G6a-3） */
+  lostSeq: Map<string, number>
   /** イベントが効果を失う参加キャラ（shieldParticipants from イベント） */
   lostEv: Set<string>
   /** 能力値修正・攻防修正を発生源を問わず失う参加キャラ（shieldParticipants mods。鶴来屋温泉三本勝負） */
@@ -102,27 +104,28 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
     all.push({ layer: l, effect: b.effect, env: layerEnv(state, l) })
   }
   // 特殊能力を失う（《能力禁止》）: 失っているキャラの常時効果の層は効かない（常時効果の発生源が「特殊能力」＝キャラのものだけ）
-  const d0: Derived = { ctx, effs: all, lost: new Set(), lostEv: new Set(), modLost: new Set(), srcA: new Map(), srcE: new Map() }
+  const d0: Derived = { ctx, effs: all, lost: new Set(), lostSeq: new Map(), lostEv: new Set(), modLost: new Set(), srcA: new Map(), srcE: new Map() }
   cache.set(state, d0)
   const lost = new Set<string>()
+  const lostSeq = new Map<string, number>()
   const lostEv = new Set<string>()
   const modLost = new Set<string>()
   const srcA = new Map<string, Eff>()
   const srcE = new Map<string, Eff>()
   for (const e of all) {
-    if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) lost.add(x)
+    if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) { lost.add(x); lostSeq.set(x, Math.max(lostSeq.get(x) ?? -1, e.layer.seq)) }
     else if (e.effect.ce === 'shieldParticipants') {
       const f = e.effect
       if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
       for (const x of targetsOf(ctx, state, e)) {
-        if (f.from.includes('特殊能力')) { lost.add(x); srcA.set(x, e) }
+        if (f.from.includes('特殊能力')) { lost.add(x); lostSeq.set(x, Infinity); srcA.set(x, e) }
         if (f.from.includes('イベント')) { lostEv.add(x); srcE.set(x, e) }
         if (f.mods) modLost.add(x)
       }
     }
   }
   const effs = all.filter((e) => !(e.layer.ability !== null && e.layer.source && lost.has(e.layer.source) && isCharOnField(state.cards[e.layer.source])))
-  const d: Derived = { ctx, effs, lost, lostEv, modLost, srcA, srcE }
+  const d: Derived = { ctx, effs, lost, lostSeq, lostEv, modLost, srcA, srcE }
   cache.set(state, d)
   return d
 }
@@ -242,7 +245,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
     const f = e.effect
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
       if (d.modLost.has(iid)) continue
-      items.push({ seq: e.layer.seq, run: () => !(imm.has(f.stat) && blocked(f.stat, e.layer.source)) && effectOn(ctx, state, e, iid) && (v[f.stat] += evalExpr(ctx, state, e.env, f.delta)) })
+      items.push({ seq: e.layer.seq, run: () => !(imm.has(f.stat) && blocked(f.stat, e.layer.source)) && effectOn(ctx, state, e, iid) && (f.mode === 'set' ? (v[f.stat] = evalExpr(ctx, state, e.env, f.delta)) : (v[f.stat] += evalExpr(ctx, state, e.env, f.delta))) })
     } else if (f.ce === 'statByAttr') {
       // 《レベルアップ／ダウン》: 今の属性と同じ能力値を delta（R4c G6a-2）。属性が1つならそれ・複数なら指定した1つ・無ければ修正しない
       if (d.modLost.has(iid)) continue
@@ -441,10 +444,11 @@ export interface Granted {
 /** そのキャラが今得ている特殊能力（ce grantAbility。装備している間だけ・特殊能力を失っていなければ）。《釘バット》NH-31⑤ */
 export function grantedAbilities(ctx: EngineCtx, state: BoardState, iid: string): Granted[] {
   const d = derived(ctx, state)
-  if (d.lost.has(iid)) return []
+  // 特殊能力を失わせている層より後に得た能力は有効（FAQ:528）。失わせている層より前に得た能力は失われる
+  const lostAt = d.lost.has(iid) ? d.lostSeq.get(iid) ?? Infinity : -1
   const out: Granted[] = []
   for (const e of d.effs) {
-    if (e.effect.ce !== 'grantAbility' || e.layer.ability === null || !e.layer.source || !effectOn(ctx, state, e, iid)) continue
+    if (e.effect.ce !== 'grantAbility' || e.layer.ability === null || !e.layer.source || e.layer.seq < lostAt || !effectOn(ctx, state, e, iid)) continue
     const item = state.cards[e.layer.source]
     if (item) out.push({ ab: e.effect.ability, cardId: item.cardId, itemIid: item.iid, index: GRANT_BASE + e.layer.ability * 100 + (bodyOf(e.layer).ei ?? 0) })
   }
@@ -618,6 +622,10 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl, pr
     if (f.action.costIsZero && (!printedCost || printedCost.icons.length !== 0)) continue
     if (!patternHits(ctx, state, e, f.action, decl)) continue
     out.push({ kind: 'prohibit', text: `「${e.layer.label}」により${kind}を使えない`, source: e.layer.label, sourceIid: e.layer.source })
+  }
+  // 特殊能力を失っているキャラは、自分の特殊能力を宣言できない（《狸の置物》FAQ:522。参加キャラ自身の能力は使える FAQ:3735＝shieldParticipants は除く）。得た能力（GRANT_BASE 以上）は grantedAbilities が見る
+  if (decl.kind === 'ability' && decl.sourceIid && isCharSource(ctx, state, decl.sourceIid) && isCharOnField(state.cards[decl.sourceIid]) && d.lost.has(decl.sourceIid) && !d.srcA.has(decl.sourceIid) && ((decl.eng.index as number | undefined) ?? 0) < GRANT_BASE) {
+    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っているので、その特殊能力を使用できない`, source: '特殊能力を失う', sourceIid: null })
   }
   const allTargets = new Set([...decl.targets, ...implicitTargetsOf(ctx, state, decl)])
   for (const t of allTargets) {
@@ -891,6 +899,18 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     if (e.effect.ce !== 'receiveWhenRested') continue
     for (const x of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[x]) && !barNow.receiveRested.includes(x)) barNow.receiveRested.push(x)
   }
+  // 《衣装・バニースーツ》receiverPriority: 挑むキャラ → 受けることのできる相手側の指定の性別のキャラ（今の性別。「両方」を含む。リーダーを含む）。core の 20-4[11] の候補を絞る（R4c G6a-3・FAQ:187）
+  const receivePrefer: Record<string, string[]> = {}
+  for (const e of d.effs) {
+    if (e.effect.ce !== 'receiverPriority') continue
+    const want = e.effect.sex
+    for (const x of targetsOf(ctx, state, e)) {
+      if (!isCharOnField(state.cards[x])) continue
+      const seat = controllerOf(state, x) ?? state.cards[x].owner
+      const ys = Object.values(state.cards).filter((y) => isCharOnField(y) && (controllerOf(state, y.iid) ?? y.owner) !== seat && [want, '両方'].includes(sexOf(ctx, state, y.iid))).map((y) => y.iid)
+      receivePrefer[x] = [...new Set([...(receivePrefer[x] ?? []), ...ys])].sort()
+    }
+  }
   const noEntryReady: string[] = []
   for (const e of d.effs) {
     if (e.effect.ce !== 'noEntryReady') continue
@@ -907,7 +927,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
+  const barChanged = JSON.stringify(receivePrefer) !== JSON.stringify(state.layers.receivePrefer ?? {}) || JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -956,7 +976,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
-      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost } } : {}),
+      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
     })
@@ -1013,6 +1033,19 @@ export function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'c
       const env: Env = { self: iid, you: controllerOf(state, iid) ?? c!.owner, slots: {}, trigger: null, declId: null, declared: {} }
       const xs = 'zone' in f.who ? select(ctx, state, env, f.who) : resolveRef(state, env, f.who)
       if (xs.includes(iid)) return true
+    }
+  }
+  // 装備しているアイテムが与える例外（《狸の置物》「同名キャラ・構成要素キャラの制限に含まれない」FAQ:531・525。対象は装備先のキャラ。R4c G6a-3）
+  for (const it of Object.values(state.cards)) {
+    if (it.attachedTo !== iid || !staticSourceActive(state, it.iid) || equipProblem(ctx, state, it, iid)) continue
+    for (const ab of ctx.defs[it.cardId]?.abilities ?? []) {
+      if (ab.kind !== 'static') continue
+      for (const f of ab.effects) {
+        if (f.ce !== 'exemptLimit' || f.limit !== limit) continue
+        const env: Env = { self: it.iid, you: controllerOf(state, iid) ?? c!.owner, slots: {}, trigger: null, declId: null, declared: {}, host: iid }
+        const xs = 'zone' in f.who ? select(ctx, state, env, f.who) : resolveRef(state, env, f.who)
+        if (xs.includes(iid)) return true
+      }
     }
   }
   return false

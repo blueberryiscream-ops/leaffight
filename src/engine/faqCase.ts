@@ -93,6 +93,8 @@ export type Expect = (
   | { stat: [ref: string, attr: Attr, value: number] }
   /** 今の属性（層から導き出した値 attrsNow）が、力早賢根感の順に並べたこの文字列と同じ（R4c G6a-2）。属性なしは '' */
   | { attrs: [ref: string, attrs: string] }
+  /** 今のキャラタイプ（層から導き出した値 charTypesOf）が、コンマ区切りのこの集合と同じ（順は問わない。重ならない＝同じタイプは1つ）（R4c G6a-3）。タイプなしは '' */
+  | { types: [ref: string, types: string] }
   | { downs: [side: Side, value: number] }
   | { result: 'youWin' | 'opponentWins' | 'draw' | 'continues' }
   /** steps の index 番目の操作がルール違反（今は警告）になる */

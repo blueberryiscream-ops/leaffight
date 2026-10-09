@@ -399,7 +399,7 @@ export interface ActionPattern {
 
 export type Continuous =
   /** when: この条件を満たしている間だけ（《柏木千鶴》恐怖「このキャラが挑んだバトルに参加している間」。R3） */
-  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr | 'atk' | 'def'; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond }
+  | { ce: 'statMod'; who: CardRef | Selector; stat: Attr | 'atk' | 'def'; delta: Expr; kind: '能力値修正' | '攻防修正'; when?: Cond; mode?: 'add' | 'set' }  // mode 'set'＝能力値を delta に置き換える（《鈴のネックレス》「早は４、賢は１になり」。層の連番で前の修正は上書き・後の修正は足される。R4c G6a-3）
   /** 最高値と最低値を入れ替える。入れ替えるのは**印刷値（元の能力値）**で常に同じ（H-6・統括12 2026-09-26 D1: 元 力5・感1＋力+2 → 力1・感5）。
    *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
   /** [水中バトルペナルティ] 等、名前（能力の name）で指したペナルティの効果が who に及ばない（強化兵のさらなる修正も同じ能力の中なので丸ごと。R4c G2b-2b 水着・岩切） */
@@ -487,6 +487,10 @@ export type Continuous =
    *  core はカードを知らない: エンジンが layers で iid ごとの額（効果ごとの icons の数の合計）を導き出して core の LayerState.challengeCost に置く。候補の絞りと支払い（トークンを消す）は core が額だけを見て行う */
   | { ce: 'challengeCost'; who: CardRef | Selector; icons: CostIcon[] }
   | { ce: 'receiveWhenRested'; who: CardRef | Selector }
+  /** 「このキャラがバトルを挑んだとき、相手は優先的に〜の性別のキャラで受けなければならない」（《衣装・バニースーツ》R4c G6a-3・FAQ:187）: 20-4[11] の受けるキャラの候補を、
+   *  受けることのできる sex のキャラ（今の性別が sex か「両方」。リーダーを含む）がいればその中だけにする。いなければ通常どおり。
+   *  core はカードを知らない: エンジンが layers で（挑むキャラ iid → 相手側の sex のキャラの iid）を導き出して core の LayerState.receivePrefer に置く（receiveWhenRested と同じ流れ） */
+  | { ce: 'receiverPriority'; who: CardRef | Selector; sex: '男性' | '女性' }
   /** 「エントリー時に待機状態に戻すことができなくなる」（《病気》R4c G11a-2・FAQ:631）: 10-4[2] の規定の待機戻しの候補から外す（効果で待機にするのは可 FAQ:628）。
    *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.noEntryReady に置く（reusable と同じ流れ） */
   | { ce: 'noEntryReady'; who: CardRef | Selector }

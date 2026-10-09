@@ -119,9 +119,11 @@ export interface LayerState {
   noEntryReady: string[]
   /** 挑むキャラに選ぶ時に挑んだプレイヤーが発生済みのコストで払う [W] の数（iid ごと。challengeCost。マネージャー・やる気ナシ・ロゥ R4c G4d）。20-4[7] の候補は払える額のキャラだけ。エンジンが導き出して置く控え。中身の意味は持たない */
   challengeCost: Record<string, number>
+  /** 挑んだキャラ → そのキャラに優先して受けさせる相手側のキャラ（receiverPriority。《衣装・バニースーツ》R4c G6a-3・FAQ:187）。20-4[11] の候補に、受けることのできるこの中のキャラがいればその中だけにする。エンジンが導き出して置く控え。中身の意味は持たない */
+  receivePrefer: Record<string, string[]>
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {} }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {}, receivePrefer: {} }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
