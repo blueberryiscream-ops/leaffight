@@ -243,7 +243,7 @@ export type Duration =
 // ───────────────────────────────────────────────────────────────
 
 export type Op =
-  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set'; immune?: ('イベント' | '特殊能力')[] }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
+  | { op: 'statMod'; who: CardRef; stat: Attr | 'atk' | 'def' | { slot: string }; delta: Expr; kind: '能力値修正' | '攻防修正'; duration: Duration; mode?: 'add' | 'set'; immune?: ('イベント' | '特殊能力' | 'アイテム')[] }  // mode 'set'＝能力値を delta（処理時に決まる値）に置き換える（《お手本》「元の能力値をコピー」FAQ:2601・2604。R4c G2b-1b。この層より前の修正は上書き・後の修正は足す）。既定 add＝加算。攻防修正は stat に 'atk'|'def'（層の mod.stat。layers.ts battleMod が引く。R4c G1b-1）
   | { op: 'damage'; to: CardRef; amount: Expr }                  // 15-4-2 ダメージ処理を起動する（気力を直接いじらない）
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true; /** 実際に増えた点数（上限で切れた分・回復の影響を受けないキャラは数えない）をこの名前の枠に足す（《おもてなし》R4c G3b-1。{ chosen: 名前 } で読む） */ countTo?: string }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
@@ -458,6 +458,8 @@ export type Continuous =
   | { ce: 'stayRested'; who: CardRef | Selector; always?: boolean }
   /** 【特殊能力を失う】（oldrule.txt:1176-1177）。そのキャラの特殊能力が存在しないものとして扱う（《能力禁止》FAQ:593・597） */
   | { ce: 'loseAbilities'; who: CardRef | Selector }
+  /** 《忘れ物》: そのキャラが装備しているすべてのアイテムは効果を失う（キャラに掛かる効果＝効果を失っている間に装備したアイテムも・FAQ:1645）。装備の条件は残る（NH-37⑮）。R4c G6b-1 */
+  | { ce: 'itemsLoseEffects'; who: CardRef | Selector }
   /** 「バトルに参加しているキャラに対して効果を発揮している、特殊能力、イベントカードは効果を失う。また使用することもできない」
    *  （R4b-3b-2・統括18。《エクストリーム》《ファッション》《能力禁止》FAQ:593・597・600・603・606・1013・1556・3070・3224・3732・3735・3738・3826）。
    *  who＝参加キャラ（when が真のあいだ）。from＝失わせる側。効き方は layers.ts:

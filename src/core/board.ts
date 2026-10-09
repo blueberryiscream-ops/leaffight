@@ -121,6 +121,8 @@ export interface LayerState {
   challengeCost: Record<string, number>
   /** 挑んだキャラ → そのキャラに優先して受けさせる相手側のキャラ（receiverPriority。《衣装・バニースーツ》R4c G6a-3・FAQ:187）。20-4[11] の候補に、受けることのできるこの中のキャラがいればその中だけにする。エンジンが導き出して置く控え。中身の意味は持たない */
   receivePrefer: Record<string, string[]>
+  /** 効かなくなっている層の id（エンジンが導き出して置く。再び効き始めたら seq を取り直す＝NH-37⑯・FAQ:2199。core は中身を知らない） */
+  held?: string[]
 }
 
 export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {}, receivePrefer: {} }

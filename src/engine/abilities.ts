@@ -8,7 +8,7 @@ import type { Seat } from '../core/board'
 import type { Ability, Trigger } from './dsl'
 import { controllerOf, isCharOnField, type EngineCtx, type Env } from './ctx'
 import { evalCond, resolveRef } from './eval'
-import { abilitiesLost, grantedAbilities } from './layers'
+import { abilitiesLost, grantedAbilities, itemEffectsLostFor } from './layers'
 
 export type Activated = Extract<Ability, { kind: 'activated' }>
 export type Play = Extract<Ability, { kind: 'play' }>
@@ -98,7 +98,8 @@ export function sourceActive(state: BoardState, iid: string): boolean {
 /** キャラの特殊能力が今あるか（【特殊能力を失う】の層 R3）。アイテム・フィールドの効果は特殊能力でない */
 function abilitiesOn(ctx: EngineCtx, state: BoardState, iid: string): boolean {
   const c = state.cards[iid]
-  return !c || !!c.attachedTo || !isCharOnField(c) || !abilitiesLost(ctx, state, iid)
+  if (c?.attachedTo) return !itemEffectsLostFor(ctx, state, iid)
+  return !c || !isCharOnField(c) || !abilitiesLost(ctx, state, iid)
 }
 
 export interface CondHit {

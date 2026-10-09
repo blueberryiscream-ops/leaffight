@@ -2076,6 +2076,9 @@ export type ProcAction =
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
       bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]> }
+      /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
+      held?: string[]
+      reseq?: string[]
       clamp?: { iid: string; value: number }[]
       orient?: { iid: string; to: 'ready' | 'rested'; why: string }[]
     }
@@ -2129,6 +2132,12 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     list = [...list, { ...seed, id, seq: s.procMeta.seq, battleId }]
     if (seed.kind && seed.ability === null) trace.push({ kind: 'name', text: `修正:${seed.targets.join(',')}:${seed.label}` })
   }
+  for (const id of a.reseq ?? []) {
+    const [s2] = nextId(s, 'L')
+    s = s2
+    const seq = s.procMeta.seq
+    list = list.map((l) => (l.id === id ? { ...l, seq } : l))
+  }
   let bound = s.layers.bound
   if (a.bound) {
     bound = { ...bound }
@@ -2138,7 +2147,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, held: a.held ?? s.layers.held } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

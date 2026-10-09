@@ -32,7 +32,7 @@ export interface EnvLite {
 /** 層の中身（engine の持ち物） */
 interface LayerBody {
   /** 効果で足した修正（statMod の Op） */
-  mod?: { stat: string; delta: number; set?: true; immune?: ('イベント' | '特殊能力')[] }
+  mod?: { stat: string; delta: number; set?: true; immune?: ('イベント' | '特殊能力' | 'アイテム')[] }
   /** 継続効果 */
   effect?: Continuous
   /** 効果で足した継続効果の評価の環境（常時効果は毎回 self＝発生源・you＝その使用者） */
@@ -50,7 +50,7 @@ interface LayerBody {
 const bodyOf = (l: Layer) => l.body as LayerBody
 
 /** 効果で足した修正の層（statMod の Op・12-1）。期限: バトル終了時まで・攻防修正→ battle、それ以外→ turn */
-export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin'], set = false, immune?: ('イベント' | '特殊能力')[]): LayerSeed {
+export function modSeed(iid: string, stat: string, delta: number, kind: '能力値修正' | '攻防修正', until: 'turn' | 'battle', by: Seat, source: string | null, label: string, origin: LayerBody['origin'], set = false, immune?: ('イベント' | '特殊能力' | 'アイテム')[]): LayerSeed {
   // set＝その能力値を delta に置き換える層（《お手本》のコピー FAQ:2601。currentStats が連番の順に重ねる。R4c G2b-1b）
   return { source, ability: null, by, label, kind, until, targets: [iid], host: null, body: { mod: set ? { stat, delta, set: true, ...(immune ? { immune } : {}) } : { stat, delta }, origin } }
 }
@@ -76,6 +76,10 @@ interface Derived {
   lostEv: Set<string>
   /** 能力値修正・攻防修正を発生源を問わず失う参加キャラ（shieldParticipants mods。鶴来屋温泉三本勝負） */
   modLost: Set<string>
+  /** 装備しているアイテムが効果を失うキャラ（itemsLoseEffects。《忘れ物》R4c G6b-1） */
+  itemsLost: Set<string>
+  /** 効かなくなっている常時効果の層の id（失われたキャラの能力・効果を失ったアイテム。shieldParticipants 分は除く。戻ったら seq を取り直す NH-37⑯） */
+  held: Set<string>
   /** 参加キャラ → 失わせている shieldParticipants の効果（違反の根拠の表示用） */
   srcA: Map<string, Eff>
   srcE: Map<string, Eff>
@@ -104,7 +108,7 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
     all.push({ layer: l, effect: b.effect, env: layerEnv(state, l) })
   }
   // 特殊能力を失う（《能力禁止》）: 失っているキャラの常時効果の層は効かない（常時効果の発生源が「特殊能力」＝キャラのものだけ）
-  const d0: Derived = { ctx, effs: all, lost: new Set(), lostSeq: new Map(), lostEv: new Set(), modLost: new Set(), srcA: new Map(), srcE: new Map() }
+  const d0: Derived = { ctx, effs: all, lost: new Set(), lostSeq: new Map(), lostEv: new Set(), modLost: new Set(), itemsLost: new Set(), held: new Set(), srcA: new Map(), srcE: new Map() }
   cache.set(state, d0)
   const lost = new Set<string>()
   const lostSeq = new Map<string, number>()
@@ -112,9 +116,26 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
   const modLost = new Set<string>()
   const srcA = new Map<string, Eff>()
   const srcE = new Map<string, Eff>()
+  const itemsLost = new Set<string>()
+  // 「効果を失う」効果どうしは先に発揮した方が勝つ（FAQ:2196・NH-37⑯）: 連番の順に見て、その時点で自分が失われている層は働かない
+  const winners = new Set<string>()
+  const suppressedNow = (e: Eff): boolean => {
+    const s = e.layer.source
+    const sc = s ? state.cards[s] : undefined
+    if (e.layer.ability === null || !s || !sc) return false
+    if (isCharSource(ctx, state, s)) return isCharOnField(sc) && lost.has(s)
+    return !!sc.attachedTo && itemsLost.has(sc.attachedTo)
+  }
   for (const e of all) {
-    if (e.effect.ce === 'loseAbilities') for (const x of targetsOf(ctx, state, e)) { lost.add(x); lostSeq.set(x, Math.max(lostSeq.get(x) ?? -1, e.layer.seq)) }
-    else if (e.effect.ce === 'shieldParticipants') {
+    if (e.effect.ce === 'itemsLoseEffects') {
+      if (suppressedNow(e)) continue
+      winners.add(e.layer.id)
+      for (const x of targetsOf(ctx, state, e)) itemsLost.add(x)
+    } else if (e.effect.ce === 'loseAbilities') {
+      if (suppressedNow(e)) continue
+      winners.add(e.layer.id)
+      for (const x of targetsOf(ctx, state, e)) { lost.add(x); lostSeq.set(x, Math.max(lostSeq.get(x) ?? -1, e.layer.seq)) }
+    } else if (e.effect.ce === 'shieldParticipants') {
       const f = e.effect
       if (f.when && !evalCond(ctx, state, e.env, f.when)) continue
       for (const x of targetsOf(ctx, state, e)) {
@@ -124,8 +145,16 @@ function derived(ctx: EngineCtx, state: BoardState): Derived {
       }
     }
   }
-  const effs = all.filter((e) => !(e.layer.ability !== null && e.layer.source && lost.has(e.layer.source) && isCharOnField(state.cards[e.layer.source])))
-  const d: Derived = { ctx, effs, lost, lostSeq, lostEv, modLost, srcA, srcE }
+  const offLayer = (e: Eff): boolean => {
+    const s = e.layer.source
+    if (e.layer.ability === null || !s || winners.has(e.layer.id)) return false
+    const sc = state.cards[s]
+    if (lost.has(s) && isCharOnField(sc)) return true
+    return !!sc?.attachedTo && itemsLost.has(sc.attachedTo)
+  }
+  const effs = all.filter((e) => !offLayer(e))
+  const held = new Set(all.filter((e) => offLayer(e) && !(e.layer.source && lostSeq.get(e.layer.source) === Infinity)).map((e) => e.layer.id))
+  const d: Derived = { ctx, effs, lost, lostSeq, lostEv, modLost, itemsLost, held, srcA, srcE }
   cache.set(state, d)
   return d
 }
@@ -231,8 +260,11 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   for (const l of [...state.layers.list].sort((a, b) => a.seq - b.seq)) {
     const m = bodyOf(l).mod
     if (m?.set && m.immune && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) {
+      // 先に掛かった「影響を受けない」が、後から来る（その種類の）印つきの set も止める（FAQ:2495-2496・NH-37⑨）
+      const sk = ctx.cards[l.source ? state.cards[l.source]?.cardId ?? '' : '']?.kind ?? ''
+      if (imm.get(m.stat)?.has(sk)) continue
       v[m.stat] = m.delta
-      imm.set(m.stat, new Set(m.immune.flatMap((x) => (x === 'イベント' ? ['e'] : ['c', 't']))))
+      imm.set(m.stat, new Set(m.immune.flatMap((x) => (x === 'イベント' ? ['e'] : x === 'アイテム' ? ['i'] : ['c', 't']))))
     }
   }
   const blocked = (stat: string, src: string | null) => !!imm.get(stat)?.has(ctx.cards[src ? state.cards[src]?.cardId ?? '' : '']?.kind ?? '')
@@ -455,6 +487,12 @@ export function grantedAbilities(ctx: EngineCtx, state: BoardState, iid: string)
   return out
 }
 
+/** そのアイテムが、効果を失っているキャラに装備されているか（《忘れ物》） */
+export function itemEffectsLostFor(ctx: EngineCtx, state: BoardState, itemIid: string): boolean {
+  const c = state.cards[itemIid]
+  return !!c?.attachedTo && ctx.cards[c.cardId]?.kind === 'i' && derived(ctx, state).itemsLost.has(c.attachedTo)
+}
+
 /** 特殊能力を失っているか（《能力禁止》など） */
 export function abilitiesLost(ctx: EngineCtx, state: BoardState, iid: string): boolean {
   return derived(ctx, state).lost.has(iid)
@@ -626,6 +664,10 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl, pr
   // 特殊能力を失っているキャラは、自分の特殊能力を宣言できない（《狸の置物》FAQ:522。参加キャラ自身の能力は使える FAQ:3735＝shieldParticipants は除く）。得た能力（GRANT_BASE 以上）は grantedAbilities が見る
   if (decl.kind === 'ability' && decl.sourceIid && isCharSource(ctx, state, decl.sourceIid) && isCharOnField(state.cards[decl.sourceIid]) && d.lost.has(decl.sourceIid) && !d.srcA.has(decl.sourceIid) && ((decl.eng.index as number | undefined) ?? 0) < GRANT_BASE) {
     out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は特殊能力を失っているので、その特殊能力を使用できない`, source: '特殊能力を失う', sourceIid: null })
+  }
+  // 効果を失っているアイテム（《忘れ物》）の起動型の特殊能力・アクションアイテムは使えない（R4c G6b-1）
+  if ((decl.kind === 'ability' || (decl.kind === 'event' && (decl.eng as { actionItem?: boolean }).actionItem)) && decl.sourceIid && itemEffectsLostFor(ctx, state, decl.sourceIid)) {
+    out.push({ kind: 'lostAbility', text: `${name(decl.sourceIid)}は効果を失っているので、使用できない`, source: '効果を失う', sourceIid: null })
   }
   const allTargets = new Set([...decl.targets, ...implicitTargetsOf(ctx, state, decl)])
   for (const t of allTargets) {
@@ -965,9 +1007,24 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
     const max = maxKiryokuOf(ctx, state, c.iid)
     if (max !== null && c.kiryoku > max) clamp.push({ iid: c.iid, value: max })
   }
+  // 効かなくなっていた層が再び効き始めたら、その層の seq を今の一番後ろに取り直す（NH-37⑯・FAQ:2199）
+  const prevHeld = state.layers.held ?? []
+  const alive = new Set(list.filter((l) => !remove.includes(l.id)).map((l) => l.id))
+  const heldNow = [...d.held].filter((id) => alive.has(id)).sort()
+  const heldChanged = heldNow.join(',') !== [...prevHeld].sort().join(',')
+  const regainedLayers = list.filter((l) => alive.has(l.id) && prevHeld.includes(l.id) && !d.held.has(l.id)).sort((p, q) => p.seq - q.seq)
+  // 《忘れ物》の効果が戻ったとき、衣装は最後に装備した1枚を残してゴミ箱送り（FAQ:1642）
+  const costumeTrash: string[] = []
+  for (const h of new Set(regainedLayers.filter((l) => l.host && ctx.cards[state.cards[l.source ?? '']?.cardId ?? '']?.kind === 'i').map((l) => l.host!))) {
+    const cs = Object.values(state.cards).filter((x) => x.attachedTo === h && ctx.defs[x.cardId]?.abilities.some((a) => a.kind === 'conditional' && a.name === '衣装の置き換え'))
+    if (cs.length < 2) continue
+    const at = (iid: string) => Math.min(Infinity, ...list.filter((l) => l.source === iid && l.ability !== null).map((l) => l.seq))
+    cs.sort((p, q) => at(p.iid) - at(q.iid))
+    costumeTrash.push(...cs.slice(0, -1).map((x) => x.iid))
+  }
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
-  if (add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length) {
+  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length) {
     acts.push({
       type: 'procLayers',
       ...(add.length ? { add } : {}),
@@ -979,8 +1036,11 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
+      ...(heldChanged ? { held: heldNow } : {}),
+      ...(regainedLayers.length ? { reseq: regainedLayers.map((l) => l.id) } : {}),
     })
   }
+  if (costumeTrash.length) acts.push({ type: 'procLimitTrash', iids: costumeTrash, reason: '効果が戻った衣装は最後に装備した1枚だけ残る（FAQ:1642）' })
   // whenLost の Op は、どの宣言にも属さない効果として積む（その場で処理する）
   for (const x of lostOps) acts.push(lostEffect(x.ops, x.env, x.label, x.by))
   return acts
@@ -993,7 +1053,7 @@ function rank(c: CardInstance): number {
 
 /** 特殊能力を失っているキャラ（《能力禁止》が効いているバトルの参加キャラ＝層の loseAbilities の対象） */
 function abilityLostChars(ctx: EngineCtx, state: BoardState): Set<string> {
-  return derived(ctx, state).lost
+  return new Set(derived(ctx, state).srcA.keys())
 }
 
 /** 効果の Op を、どの宣言にも属さない効果として積む（drive の forceOp と同じ形） */
@@ -1037,7 +1097,7 @@ export function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'c
   }
   // 装備しているアイテムが与える例外（《狸の置物》「同名キャラ・構成要素キャラの制限に含まれない」FAQ:531・525。対象は装備先のキャラ。R4c G6a-3）
   for (const it of Object.values(state.cards)) {
-    if (it.attachedTo !== iid || !staticSourceActive(state, it.iid) || equipProblem(ctx, state, it, iid)) continue
+    if (it.attachedTo !== iid || !staticSourceActive(state, it.iid) || equipProblem(ctx, state, it, iid) || derived(ctx, state).itemsLost.has(iid)) continue
     for (const ab of ctx.defs[it.cardId]?.abilities ?? []) {
       if (ab.kind !== 'static') continue
       for (const f of ab.effects) {
