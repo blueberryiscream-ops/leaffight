@@ -306,7 +306,12 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
   const later: Choice[] = []
   for (const ch of declChoices) {
     const chooser = resolvePlayer(state, env, ch.chooser)
-    const opts = choiceOptions(ctx, state, { ...env, slots }, ch)
+    // 先の枠を読む選択（模写の「コピーする能力」は対象のキャラを読む）: 先の枠をあとで選ぶならこれもあとで。選べるかは先の枠の候補を withDependents で絞って確かめてある（統括33）
+    if (later.some((l) => readsSlot(ch, l.slot))) {
+      later.push(ch)
+      continue
+    }
+    const opts = withDependents(ctx, state, { ...env, slots }, ch, declChoices)
     const [lo, hi] = countOf(ctx, state, { ...env, slots }, ch)
     if (opts.length < lo) return { ok: false, reason: `対象を指定できない（空打ち 11-3）: ${ch.slot}` }
     if (chooser !== req.by || given.length === 0) {
@@ -381,9 +386,27 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
   if (!found || (found.ab.kind !== 'activated' && found.ab.kind !== 'play')) return []
   const ab = found.ab as Activated | Play
   const env: Env = { self: src.iid, you: req.by, slots: {}, trigger: currentWindow(state)?.frame?.id ?? null, declId: null, declared: {} }
-  return ab.choices
-    .filter((c) => c.when === 'declare' && resolvePlayer(state, env, c.chooser) === req.by)
-    .map((c) => ({ slot: c.slot, min: countOf(ctx, state, env, c)[0], max: countOf(ctx, state, env, c)[1], options: choiceOptions(ctx, state, env, c).map((o) => o.key) }))
+  const mine = ab.choices.filter((c) => c.when === 'declare' && resolvePlayer(state, env, c.chooser) === req.by)
+  // 先の枠を読む選択（模写の「コピーする能力」）は出さない＝先の枠だけ渡せば、その選択は宣言のあとの問いになる（統括33）
+  return mine
+    .filter((c) => !mine.some((p) => p !== c && readsSlot(c, p.slot)))
+    .map((c) => ({ slot: c.slot, min: countOf(ctx, state, env, c)[0], max: countOf(ctx, state, env, c)[1], options: withDependents(ctx, state, env, c, mine).map((o) => o.key) }))
+}
+
+/** その選択の候補が、別の枠（slot）で選んだ物を読むか（例: 模写 pick.ability = slot('t')） */
+function readsSlot(ch: Choice, slot: string): boolean {
+  return ch.slot !== slot && JSON.stringify(ch.pick).includes(`"slot":"${slot}"`)
+}
+
+/** 候補のうち、この枠を読むあとの選択（others の中）がどれも下限以上選べるものだけ残す（模写: コピーできる能力の無いキャラは対象に選べない＝空打ち 11-3。統括33） */
+function withDependents(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, others: Choice[]): { key: string; label: string }[] {
+  const opts = choiceOptions(ctx, state, env, ch)
+  const deps = others.filter((c) => readsSlot(c, ch.slot))
+  if (!deps.length) return opts
+  return opts.filter((o) => {
+    const e2: Env = { ...env, slots: { ...env.slots, [ch.slot]: [o.key] } }
+    return deps.every((dc) => choiceOptions(ctx, state, e2, dc).length >= countOf(ctx, state, e2, dc)[0])
+  })
 }
 
 function choiceOptions(ctx: EngineCtx, state: BoardState, env: Env, ch: Choice, withPrefer = true): { key: string; label: string }[] {
@@ -587,7 +610,7 @@ function declPatch(ctx: EngineCtx, state: BoardState): BoardAction[] | null {
     }
     if (!ch) return [{ type: 'procDeclPatch', declId: d.id, eng: { later: later.slice(1) } }]
     const env: Env = { self: d.sourceIid, you: d.by, slots, trigger: d.trigger, declId: d.id, declared: {} }
-    const options = choiceOptions(ctx, state, env, ch)
+    const options = withDependents(ctx, state, env, ch, ab!.choices.filter((c) => later.includes(c.slot)))
     return [{ type: 'procChoice', choice: { id: cid, by: resolvePlayer(state, env, ch.chooser), kind: 'select', prompt: `${d.label}: ${pickPrompt(ch)}（対象）`, options, min: countOf(ctx, state, env, ch)[0], max: countOf(ctx, state, env, ch)[1], frameId: null } }]
   }
   return null
