@@ -297,6 +297,16 @@ export type Op =
   | { op: 'callByEffect'; what: CardRef; orientation: 'ready' | 'rested' }
   // ── バトル
   | { op: 'setParticipants'; side: 'challenger' | 'challenged'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
+  /**
+   * バトル参加キャラを**指名する**（挑戦状・決闘・挑発・挑発アタック。R4c G8a-1・NH-39。「変更」＝setParticipants とは別。しらんぷり・指名手配は指名だけを見る rule:1207-1211）。
+   * 処理の順: ①指名手配の付け替え（指名されたキャラの使用者の味方に nominationRedirect を持つキャラがいて、指名した側がその相手なら。2体以上は AP が選ぶ）
+   * ②しらんぷり（最終の指名先が ignoreNomination を持てば打ち消し＝参加キャラは決まらず消耗しない）③duel があれば相手が最終の指名先の気力−N を払って打ち消せる（H-7b）
+   * ④通ったら挑まれた側の参加キャラ＝指名先・消耗（待機だったら joinedReady）。打ち消されたら 20-4[11] で普通に選ぶ。
+   * 宣言の時点で、同じバトルの [10] ではもう指名の効果を宣言できない（NH-39②・battle.nominated）
+   */
+  | { op: 'nominate'; who: CardRef; duel?: { prompt: string; kiryoku: number } }
+  /** nominate の内部の続き（②③④）。カードには書かない */
+  | { op: 'nominateStep'; slot: string; duel?: { prompt: string; kiryoku: number }; commit?: true }
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }
   // ── 相手（や他者）に選ばせる・払わせる
   | { op: 'offer'; to: PlayerRef; prompt: string; pay: Op[]; payableIf?: Cond; ifPaid: Op[]; ifDeclined: Op[] }
@@ -505,6 +515,10 @@ export type Continuous =
   /** 「エントリー時に待機状態に戻すことができなくなる」（《病気》R4c G11a-2・FAQ:631）: 10-4[2] の規定の待機戻しの候補から外す（効果で待機にするのは可 FAQ:628）。
    *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.noEntryReady に置く（reusable と同じ流れ） */
   | { ce: 'noEntryReady'; who: CardRef | Selector }
+  /** 《フランク長瀬》しらんぷり（R4c G8a-1・NH-39⑦）: このキャラがバトル参加キャラを指名する効果の指名先になったら、その指名を打ち消す（強制）。「変更」「指定」には効かない */
+  | { ce: 'ignoreNomination'; who: CardRef | Selector }
+  /** 《指名手配》（R4c G8a-1・NH-39⑧）: 味方キャラ（リーダーを含む）に対する相手のバトル参加キャラの指名は、常にこの who（装備先）を対象とする。層の使用者＝装備先のキャラの使用者。付け替え先は対象をとり直さない */
+  | { ce: 'nominationRedirect'; who: CardRef | Selector }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）

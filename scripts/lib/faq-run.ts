@@ -69,7 +69,7 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
       ...extra,
     }
     refs[cs.ref] = cs.ref
-    cs.equips?.forEach((e, i) => put(e, owner, 'char', 100 + i, { attachedTo: cs.ref, kiryoku: null }))
+    cs.equips?.forEach((e, i) => put(e, e.owner ? seatOf(e.owner) : owner, 'char', 100 + i, { attachedTo: cs.ref, kiryoku: null }))
   }
   const costs: BoardState['costs'] = { A: [], B: [] }
   const downs: BoardState['downs'] = { A: 0, B: 0 }
@@ -615,6 +615,17 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
     const last = s.procMeta.battles[s.procMeta.battles.length - 1]
     const got = !!last?.aborted
     return { ok: !!last && got === e.battleAborted, msg: `バトルの中断 = ${last ? (last.aborted ?? 'なし') : '（バトルが終わっていない）'}（期待 ${e.battleAborted ? '中断' : '中断しない'}）` }
+  }
+  if ('participants' in e || 'joinedReady' in e) {
+    // 進行中のバトルがあればそれ、無ければ（steps の後の自動処理で終わった）最後に終わったバトルの記録
+    const fr = [...s.proc].reverse().find((f) => f.kind === 'battle' && f.battle)
+    const last = s.procMeta.battles[s.procMeta.battles.length - 1]
+    const src = fr?.battle ?? last
+    if (!src) return { ok: false, msg: 'バトルが無い' }
+    const want = ('participants' in e ? e.participants[1] : e.joinedReady).map((r) => card(r)?.iid)
+    const got = 'participants' in e ? src.participants[seatOf(e.participants[0])] : (src.joinedReady ?? [])
+    const ok = got.length === want.length && want.every((w) => !!w && got.includes(w))
+    return { ok, msg: `${'participants' in e ? '参加キャラ' : '待機で参加'} = ${got.join('・') || '無し'}（期待 ${want.join('・') || '無し'}）` }
   }
   if ('note' in e) return { ok: 'pending', msg: `型で書けない期待（note）: ${e.note}` }
   void c

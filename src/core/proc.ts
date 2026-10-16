@@ -148,6 +148,8 @@ export interface BattleState {
   joinedReady: string[]
   battleCard: string | null
   cardDecided: boolean
+  /** 20-4[10]: 指名の効果をもう宣言した（同じバトルでは1つまで。R4c G8a-1・NH-39②）。打ち消されても残る */
+  nominated?: boolean
   /**
    * [23] 攻撃能力値・防御能力値（参加キャラ・iid ごと。K9・統括16で複数参加に広げた。その席の値が丸ごと null＝人が入れる。
    * 単数参加なら参加キャラ1体ぶんの1エントリ）
@@ -199,6 +201,7 @@ export interface BattleLog {
   challenger: Seat
   battleCard: string | null
   aborted: string | null
+  joinedReady?: string[]
   participants: Record<Seat, string[]>
 }
 
@@ -1652,7 +1655,7 @@ function popFrame(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boar
   }
   if (frame.kind === 'battle') {
     const b = frame.battle!
-    s = setMeta(s, { battles: [...s.procMeta.battles, { id: frame.id, challenger: b.challenger, battleCard: b.battleCard, aborted: b.aborted, participants: b.participants }] })
+    s = setMeta(s, { battles: [...s.procMeta.battles, { id: frame.id, challenger: b.challenger, battleCard: b.battleCard, aborted: b.aborted, participants: b.participants, joinedReady: b.joinedReady }] })
     trace.push({ kind: 'name', text: b.aborted ? `バトル終了（中断）` : 'バトル終了' })
   }
   // ターンの進行: エントリーが終わったらメインフェイズ（13-3-1 の窓を開き直す）。手札調整が終わったらターン終了（10-8）
@@ -2057,9 +2060,11 @@ export type ProcAction =
       dmgCap?: number
       /** 漫画 R4b-3c-1: 結果ダメージを半分にする（battle.dmgHalf） */
       dmgHalf?: 'ceil'
+      /** R4c G8a-1（NH-39②）: 指名の効果を宣言した印 */
+      nominated?: true
     }
   /** K9: 参加キャラを差し替える（鬼ごっこ系「待機状態の味方キャラ全てに変更」）。previous: 'readyIfWasReady' は未実装（人が処理・報告） */
-  | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
+  | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady'; /** R4c G8a-1: 「指名」で決めた（待機だったキャラは joinedReady に入る H-7e）。「変更」ではない */ nominate?: boolean }
   /** 効果でバトルを始める（《抜き打ち》「相手にバトルを挑む」）。[3] から */
   | { type: 'procStartBattle'; by: Seat; id: string }
   /** 効果でアイテムを移し替える（「アイテムの装備と同じ扱い」FAQ:804・2874）。17-3[11] から */
@@ -2337,6 +2342,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
           trace.push({ kind: 'name', text: `結果ダメージの増減:${action.edit.seat}:${action.edit.set !== undefined ? `=${action.edit.set}` : action.edit.delta}` })
         } else b = { ...b, pendingEdits: [...b.pendingEdits, action.edit] }
       }
+      if (action.nominated) b = { ...b, nominated: true }
       if (action.firstStrike) b = { ...b, firstStrike: [...b.firstStrike, action.firstStrike] }
       if (action.skipActions) b = { ...b, skipActions: true }
       if (action.battleCard) {
@@ -2380,7 +2386,9 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // 「,」で1段に複数 iid を詰めると画面がカード名に置き換えられず iid のまま出てしまう＝R4b-2c 🔸1）
       trace.push({ kind: 'name', text: action.to.length ? `参加キャラを変更:${action.seat}:${action.to.join(':')}` : `参加キャラを変更:${action.seat}:無し` })
       const s = { ...state, cards }
-      return { state: setFrame(s, { ...f, battle: { ...b, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 } } }), log: '' }
+      const joined = action.nominate ? [...b.joinedReady, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : b.joinedReady
+      if (action.nominate) trace.push({ kind: 'name', text: '指名が通った:' + action.seat + ':' + action.to.join(':') })
+      return { state: setFrame(s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 } } }), log: '' }
     }
     case 'procStartBattle': {
       const decl = battleDecl(action.id, action.by)

@@ -428,6 +428,26 @@ export function drawCancelled(ctx: EngineCtx, state: BoardState): string | null 
   return null
 }
 
+/**
+ * 指名手配（R4c G8a-1・NH-39⑧）: nominee（指名されたキャラ）の使用者の味方キャラで nominationRedirect を持つもの（リーダー含む）。
+ * 指名した側（nominator）がその使用者の相手であるときだけ（自分の味方への指名は替えない）。層の使用者 e.env.you＝装備先のキャラの使用者。
+ */
+export function nominationHolders(ctx: EngineCtx, state: BoardState, nominee: string, nominator: Seat): string[] {
+  const user = controllerOf(state, nominee)
+  const out: string[] = []
+  if (!user || user === nominator) return out
+  for (const e of derived(ctx, state).effs) {
+    if (e.effect.ce !== 'nominationRedirect' || e.env.you !== user) continue
+    for (const t of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[t]) && controllerOf(state, t) === user && !out.includes(t)) out.push(t)
+  }
+  return out.sort()
+}
+
+/** しらんぷり（R4c G8a-1・NH-39⑦）: そのキャラが指名の効果を打ち消す（特殊能力を失っていなければ） */
+export function ignoresNomination(ctx: EngineCtx, state: BoardState, iid: string): boolean {
+  return derived(ctx, state).effs.some((e) => e.effect.ce === 'ignoreNomination' && effectOn(ctx, state, e, iid))
+}
+
 /** W の発生を変える常時効果（R4c G3b-1・NH-33⑥）: 'none'＝《エンプティ》／'extra'＝《ブースト》／null＝なし。両方のプレイヤーに効く。18-2 で同時には場に無い */
 export function wGenMode(ctx: EngineCtx, state: BoardState): 'none' | 'extra' | null {
   let m: 'none' | 'extra' | null = null

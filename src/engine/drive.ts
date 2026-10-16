@@ -42,7 +42,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -290,6 +290,7 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
       return { ok: false, reason: `使用タイミング《${ab.trigger.timing}》でない（今は ${frame.kind}[${frame.step}]《${STEP_TIMINGS[frame.kind][frame.step]?.names.join('・')}》）` }
     }
   }
+  if ((ab.kind === 'play' || ab.kind === 'activated') && ab.effect.some((o) => o.op === 'nominate') && frame?.battle?.nominated) return { ok: false, reason: '同じバトルの 20-4[10] で指名の効果は1つしか宣言できない（NH-39②・FAQ:1509）' }
   const usageKey = !isEvent && (ab as Activated).perTurn ? `${src.iid}:${(ab as Activated).name}` : null
   if (usageKey && (state.procMeta.used[usageKey] ?? 0) >= (ab as Activated).perTurn!) return { ok: false, reason: '【１ターンにｎ回まで】を使い切った（宣言時に使用したと見なされる 15-13-1[3]）' }
   if (ab.usableIf && !evalCond(ctx, state, env, ab.usableIf)) return { ok: false, reason: '宣言時の条件を満たさない' }
@@ -353,7 +354,9 @@ function declareOne(state: BoardState, ctx: EngineCtx, req: DeclareReq): Declare
     usageKey,
     eng: { cardId: found.cardId, ...(frame?.declPhase && frame.decl && frame.decl.kind !== 'costGen' && frame.decl.kind !== 'battle' ? { bindTo: frame.declPhase.forDecl } : {}), index, slots, ...(found.cardId !== src.cardId ? { granted: true } : {}), ...(isAI ? { actionItem: true, abName: (ab as Activated).name, host: holder!.iid } : isAF ? { actionItem: true, actionField: true, abName: (ab as Activated).name } : {}), usePool: plan.usePool, poolIds: plan.poolIds, ...(plan.usePool ? {} : { preIds: state.costs[req.by].map((t) => t.id) }), declared: env.declared, later: later.map((c) => c.slot) },
   }
-  const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }]
+  // R4c G8a-1（NH-39②）: 同じバトルの [10] で指名の効果は1つしか宣言できない（打ち消されても数える FAQ:1509）
+  const nominates = (ab.kind === 'play' || ab.kind === 'activated') && ab.effect.some((o) => o.op === 'nominate')
+  const actions: BoardAction[] = [{ type: 'procDeclare', by: req.by, decl }, ...(nominates && frame?.battle ? [{ type: 'procBattle', frameId: frame.id, nominated: true } as BoardAction] : [])]
   return { ok: true, actions, decl, warnings }
 }
 
@@ -1821,6 +1824,44 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const seat: Seat = op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
       const to = 'zone' in op.to ? select(ctx, state, env, op.to) : refs(op.to)
       return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to, exhaust: op.exhaust, previous: op.previous }] }
+    }
+    // ── R4c G8a-1（NH-39）: 指名。①指名手配の付け替え（2体以上は AP が選ぶ）→ nominateStep（②しらんぷり ③決闘の気力 ④通す）
+    case 'nominate': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const nominee = refs(op.who)[0]
+      if (!nominee || !(nominee in state.cards)) return { tasks: rest, actions: [] }
+      const holders = nominationHolders(ctx, state, nominee, env.you)
+      const next: Task = { op: { op: 'nominateStep', slot: 'nominee', ...(op.duel ? { duel: op.duel } : {}) }, bind: task.bind }
+      if (holders.length >= 2) {
+        const id = frame.id + ':' + item.key + ':nominee' + eng.seq
+        return {
+          tasks: [next, ...rest],
+          patch: { awaiting: { id, kind: 'choose', slot: 'nominee' } },
+          actions: [{ type: 'procChoice', choice: { id, by: state.turn.active, kind: 'select', prompt: '指名手配のキャラから、最終の指名先をアクティブプレイヤーが選ぶ（FAQ:387）', options: holders.map((h) => ({ key: h, label: state.cards[h].cardId })), min: 1, max: 1, frameId: frame.id } }],
+        }
+      }
+      return { tasks: [next, ...rest], patch: { env: { ...eng.env, slots: { ...eng.env.slots, nominee: [holders[0] ?? nominee] } } }, actions: [] }
+    }
+    case 'nominateStep': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const fin = env.slots[op.slot]?.[0]
+      if (!fin || !(fin in state.cards)) return { tasks: rest, actions: [] }
+      if (!op.commit) {
+        if (ignoresNomination(ctx, state, fin)) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: 'しらんぷり:指名を打ち消す:' + fin } }] }
+        // 決闘: 最終の指名先の気力1以上なら、相手が気力−N を払って打ち消せる（H-7b）。払えなければ（気力0以下）そのまま通る
+        if (op.duel && (state.cards[fin].kiryoku ?? 0) >= 1) {
+          const to = resolvePlayer(state, env, 'opponent')
+          const id = frame.id + ':' + item.key + ':offer' + eng.seq
+          return {
+            tasks: rest,
+            patch: { awaiting: { id, kind: 'offer', payOps: [{ op: 'kiryoku', who: { ref: 'slot', slot: op.slot }, delta: -op.duel.kiryoku }], ifPaidOps: [], ifDeclinedOps: [{ op: 'nominateStep', slot: op.slot, commit: true }] } },
+            actions: [{ type: 'procChoice', choice: { id, by: to, kind: 'use', prompt: op.duel.prompt, options: [{ key: 'pay', label: op.duel.prompt }], min: 0, max: 1, purpose: 'offer', frameId: frame.id } }],
+          }
+        }
+      }
+      return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat: other(bf.battle.challenger), to: [fin], exhaust: true, previous: 'keepState', nominate: true }] }
     }
     case 'setBattleChoice': {
       const bf = nearestBattle(state)

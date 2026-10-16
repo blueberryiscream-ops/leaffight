@@ -26,6 +26,8 @@ export interface CardSpec {
   kiryoku?: number        // 省略時はカードの気力（リーダーは原典どおり元×2）
   ready?: boolean         // 省略時は待機
   equips?: CardSpec[]     // 装備しているアイテム
+  /** 装備のアイテムだけ: 持ち主（装備させたプレイヤー）。省略＝装備先と同じ側。《指名手配》を相手のキャラに装備させた形（R4c G8a-1） */
+  owner?: Side
 }
 
 export interface SideSpec {
@@ -118,6 +120,9 @@ export type Expect = (
   /** 処理された順（ログに出る処理の名前の並び） */
   | { order: string[] }
   | { battleAborted: boolean }
+  /** 進行中のバトルのその席の参加キャラ（ref の集合。順は問わない）。joinedReady＝待機状態で参加したキャラ（H-7e・R4c G8a-1） */
+  | { participants: [side: Side, refs: string[]] }
+  | { joinedReady: string[] }
   /** 型で書けない期待（実行器は「保留」と数える。増えたら型を足す） */
   | { note: string }
 ) & {
