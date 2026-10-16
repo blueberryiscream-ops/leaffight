@@ -1838,7 +1838,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         return {
           tasks: [next, ...rest],
           patch: { awaiting: { id, kind: 'choose', slot: 'nominee' } },
-          actions: [{ type: 'procChoice', choice: { id, by: state.turn.active, kind: 'select', prompt: '指名手配のキャラから、最終の指名先をアクティブプレイヤーが選ぶ（FAQ:387）', options: holders.map((h) => ({ key: h, label: state.cards[h].cardId })), min: 1, max: 1, frameId: frame.id } }],
+          actions: [{ type: 'procChoice', choice: { id, by: state.turn?.active ?? 'A', kind: 'select', prompt: '指名手配のキャラから、最終の指名先をアクティブプレイヤーが選ぶ（FAQ:387）', options: holders.map((h) => ({ key: h, label: state.cards[h].cardId })), min: 1, max: 1, frameId: frame.id } }],
         }
       }
       return { tasks: [next, ...rest], patch: { env: { ...eng.env, slots: { ...eng.env.slots, nominee: [holders[0] ?? nominee] } } }, actions: [] }
