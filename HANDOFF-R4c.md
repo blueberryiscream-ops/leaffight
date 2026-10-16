@@ -2060,7 +2060,7 @@ turnEnd [1] は同時の項目の順を **AP が選ぶ**（13-2・proc.ts nextIt
 - 画面（実機）は確かめていない
 - ツール呼び出し: 約68回
 
-## 統括35の検証（G8a-1）— 合格（統括が4か所直した）
+## 統括35の検証（G8a-1）— 合格（統括が3か所直した）
 - 現物: verify 緑（exit 0）・test:faq R4c ✅**1017**（986＋サブ30＋統括が移した faq-2590）・R2a〜R4b 変わらず・保留0・❌0／**tested 285**（＋挑戦状〔manual→tested〕・坂下好恵・イビル＆エビル・新城沙織・指名手配）／draft 7（＋フランク長瀬＝faq-347 が《指名バトル》＝G8b で保留のため。正しい）／manual 45。cases 1231。サブのツール 71（上限70）
 - 差分を読んだ: core は BattleState `nominated`・procSetParticipants `nominate`（待機だったら joinedReady）・BattleLog joinedReady だけ＝カード知識なし。engine は op `nominate`→`nominateStep`（①指名手配 `nominationHolders`＝層の you＝装備先の使用者・2体以上は AP の選択 ②しらんぷり `ignoresNomination` ③決闘 offer は最終の指名先の気力 ④通す）。1つまで＝宣言の判定で battle.nominated
 - 🚨 統括が直した:
