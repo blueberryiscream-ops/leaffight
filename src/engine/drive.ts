@@ -1891,10 +1891,13 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
   }
 }
 
-/** 《人気イベント》: 付いているバトルカードは、発生源がそのバトルカード自身でないゴミ箱送りの効果を受けない（NH-40②・FAQ:427。ルールの処理は op を通らない＝止めない） */
+/** 《人気イベント》: 付いているバトルカードは、発生源がバトルカードでないゴミ箱送りの効果を受けない（NH-40②・FAQ:427。ルールの処理は op を通らない＝止めない） */
 function trashImmune(ctx: EngineCtx, state: BoardState, iid: string, source: string | null): boolean {
   const bc = state.cards[iid]
-  if (!bc || bc.zone !== 'battle' || source === iid) return false
+  if (!bc || bc.zone !== 'battle') return false
+  // 発生源がバトルカード（自身でも他のバトルカードでも）なら受ける＝「バトルカード以外」の効果だけ止める（統括36）
+  const src = source ? state.cards[source] : undefined
+  if (!src || src.zone === 'battle' || src.cardId.startsWith('b_')) return false
   return Object.values(state.cards).some((i) => i.attachedTo === iid && staticSourceActive(state, i.iid) && ctx.defs[i.cardId]?.abilities.some((a) => a.kind === 'static' && a.effects.some((e) => e.ce === 'noTrashByOthers')))
 }
 
