@@ -416,6 +416,8 @@ export type Continuous =
    *  その2つの能力値に先に掛かっていた修正は消え、後から来た修正は上に乗る（層の順）。最高・最低が並んだら装備させたプレイヤーが装備するたびに選ぶ（FAQ:443） */
   /** [水中バトルペナルティ] 等、名前（能力の name）で指したペナルティの効果が who に及ばない（強化兵のさらなる修正も同じ能力の中なので丸ごと。R4c G2b-2b 水着・岩切） */
   | { ce: 'ignorePenalty'; who: CardRef | Selector; name: string; when?: Cond }
+  /** バトルカードの場所を上書きする（from の場所のカードだけ to のみにする。上書きは層の連番の順に、その時点の場所を見て当てる＝後が勝つ FAQ:253・256・4125・431。who 無し＝全てのバトルカード）。R4c G8b-2 */
+  | { ce: 'placeOverride'; who?: CardRef; from: '屋内' | '屋外' | '水中' | '暗闇'; to: '屋内' | '屋外' | '水中' | '暗闇' }
   /** 性別を1つに置き換える（規 15-8。後から発揮された効果が勝つ 12-2）。場のキャラだけ今の値（FAQ:1468・2625）。costume＝衣装の置き換え（次の衣装が装備された時点の判定から除く NH-36①）。R4c G6a-1 */
   | { ce: 'setSex'; who: CardRef | Selector; sex: '男性' | '女性' | '両方'; costume?: boolean }
   /** キャラタイプを足す（元のタイプは残る 15-9・FAQ:219）。読み口は G6a-1・カードは G6a-3 */
@@ -631,7 +633,7 @@ export interface CardDef {
    * 装備対象（17-1）。notLeader＝リーダーには装備できない／leaderOnly＝リーダーのみ／friendlyOnly＝味方キャラのみ（持ち主の味方。使用権の移動 K8 は後）／
    * bound＝装備対象がそのアイテムを使って選んだ1枚に決まる（《電波での復活》「ゴミ箱のキャラクター」。付け替え・タッグの引き継ぎで満たさなくなる FAQ:550・559）。R3 で足した
    */
-  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean; leaderOnly?: boolean; friendlyOnly?: boolean; bound?: boolean; sex?: '男性' | '女性' }
+  equip?: { targetKind: 'キャラ' | 'バトルカード' | 'フィールド'; notLeader?: boolean; leaderOnly?: boolean; friendlyOnly?: boolean; bound?: boolean; sex?: '男性' | '女性'; place?: '屋内' | '屋外' }
   battle?: {
     atk: BattleExpr
     def: BattleExpr

@@ -217,6 +217,23 @@ export function sexOf(ctx: EngineCtx, state: BoardState, iid: string, opts?: { e
   return s
 }
 
+/**
+ * バトルカードの今の場所（屋内・屋外・水中・暗闇）。印刷の場所から、場所を上書きする効果（placeOverride: 水中戦・シーサイド・ダークネス）を層の連番の順に当てる（後から発揮された効果が勝つ FAQ:253・256・NH-36④）。
+ * 各上書きは**その時点までの場所**が from のときだけ当たる（ダークネスで暗闇になった元屋外はもう屋外でない FAQ:4125。水中のみ FAQ:431・NH-27②）。
+ * before＝この連番より前の層だけ当てる（水中戦の装備対象「屋外」を、自分の効果とそれより後の効果を除いて見る F⑩）。R4c G8b-2
+ */
+export function battlePlaceNow(ctx: EngineCtx, state: BoardState, battleIid: string, opts?: { before?: number }): string | undefined {
+  let place = ctx.cards[state.cards[battleIid]?.cardId ?? '']?.place
+  for (const e of derived(ctx, state).effs) {
+    const f = e.effect
+    if (f.ce !== 'placeOverride') continue
+    if (opts?.before !== undefined && e.layer.seq >= opts.before) continue
+    if (f.who && !resolveRef(state, e.env, f.who).includes(battleIid)) continue
+    if (place === f.from) place = f.to
+  }
+  return place
+}
+
 /** キャラの今のキャラタイプ（元のタイプは残り、足したタイプが増える 15-9。同名は1つ FAQ:3365） */
 export function charTypesOf(ctx: EngineCtx, state: BoardState, iid: string): string[] {
   const c = state.cards[iid]
@@ -269,6 +286,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   }
   const blocked = (stat: string, src: string | null) => !!imm.get(stat)?.has(ctx.cards[src ? state.cards[src]?.cardId ?? '' : '']?.kind ?? '')
   const items: { seq: number; run: () => void }[] = []
+  const penaltySeen = new Set<string>()
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
     if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => { if (imm.has(m.stat) && (m.immune || blocked(m.stat, l.source))) return; if (m.set) v[m.stat] = m.delta; else v[m.stat] += m.delta } }) // set＝置き換え: この層より前の修正は上書き・後の層は足される（swapStats と同じ考え方 H-6。FAQ:2601）
@@ -277,7 +295,17 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
     const f = e.effect
     if (f.ce === 'statMod' && f.kind === '能力値修正') {
       if (d.modLost.has(iid)) continue
-      items.push({ seq: e.layer.seq, run: () => !(imm.has(f.stat) && blocked(f.stat, e.layer.source)) && effectOn(ctx, state, e, iid) && (f.mode === 'set' ? (v[f.stat] = evalExpr(ctx, state, e.env, f.delta)) : (v[f.stat] += evalExpr(ctx, state, e.env, f.delta))) })
+      items.push({ seq: e.layer.seq, run: () => {
+        if ((imm.has(f.stat) && blocked(f.stat, e.layer.source)) || !effectOn(ctx, state, e, iid)) return
+        // 同名の「〜バトルペナルティ」は1回だけ（同じ名前・同じ番号の効果。蛍狩り＋ダークネス FAQ:3892・水球＋シーサイド FAQ:4113・水中戦＋シーサイド。R4c G8b-2）
+        if (e.layer.ability !== null && e.layer.label.endsWith('バトルペナルティ')) {
+          const pk = `${e.layer.label}#${bodyOf(e.layer).ei ?? 0}`
+          if (penaltySeen.has(pk)) return
+          penaltySeen.add(pk)
+        }
+        if (f.mode === 'set') v[f.stat] = evalExpr(ctx, state, e.env, f.delta)
+        else v[f.stat] += evalExpr(ctx, state, e.env, f.delta)
+      } })
     } else if (f.ce === 'statByAttr') {
       // 《レベルアップ／ダウン》: 今の属性と同じ能力値を delta（R4c G6a-2）。属性が1つならそれ・複数なら指定した1つ・無ければ修正しない
       if (d.modLost.has(iid)) continue
@@ -895,7 +923,16 @@ function equipProblem(ctx: EngineCtx, state: BoardState, item: CardInstance | un
   const eq = def?.equip
   const host = state.cards[hostIid]
   if (!eq || !host) return null
-  if (eq.targetKind === 'バトルカード') return host.zone === 'battle' ? null : 'バトルカードに装備させるアイテム'
+  if (eq.targetKind === 'バトルカード') {
+    if (host.zone !== 'battle') return 'バトルカードに装備させるアイテム'
+    // 「屋外」バトルカードに装備する（水中戦）: 自分の効果とそれより後の効果を除いた今の場所で見る（F⑩。ダークネス／シーサイドで既に暗闇・水中の元屋外には装備できない）
+    if (eq.place) {
+      const own = Math.min(Infinity, ...state.layers.list.filter((l) => l.source === item.iid && l.ability !== null).map((l) => l.seq))
+      const p = battlePlaceNow(ctx, state, hostIid, { before: own })
+      if (p !== eq.place) return `「${eq.place}」バトルカードに装備するアイテム（今は「${p ?? ''}」）`
+    }
+    return null
+  }
   if (eq.targetKind === 'キャラ') {
     if (!isCharOnField(host)) return 'フィールドのキャラでない'
     if (eq.notLeader && host.zone === 'leader') return 'リーダーには装備できない'

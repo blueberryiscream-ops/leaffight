@@ -8,7 +8,7 @@ import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
-import { attrsNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
+import { attrsNow, battlePlaceNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
   if (typeof p === 'string') {
@@ -187,10 +187,10 @@ export function select(ctx: EngineCtx, state: BoardState, env: Env, sel: Selecto
 
 /**
  * バトルカードの今の場所（屋内・屋外・水中・暗闇）。場所を読む所はここだけ（NH-27②: 《屋内競技場》《水中戦》《シーサイド》《ダークネス》の上書き＝G8b は、後でここだけ直す）。
- * 今は印刷の place を返す
+ * 印刷の place に上書き（placeOverride）を層の連番の順に当てる（layers.ts battlePlaceNow。R4c G8b-2）
  */
 export function battlePlaceOf(ctx: EngineCtx, state: BoardState, battleIid: string): string | undefined {
-  return ctx.cards[state.cards[battleIid]?.cardId ?? '']?.place
+  return battlePlaceNow(ctx, state, battleIid)
 }
 
 export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): boolean {
