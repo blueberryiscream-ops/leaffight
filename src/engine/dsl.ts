@@ -306,7 +306,7 @@ export type Op =
    */
   | { op: 'nominate'; who: CardRef; duel?: { prompt: string; kiryoku: number } }
   /** nominate の内部の続き（②③④）。カードには書かない */
-  | { op: 'nominateStep'; slot: string; duel?: { prompt: string; kiryoku: number }; commit?: true }
+  | { op: 'nominateStep'; slot: string; duel?: { prompt: string; kiryoku: number }; commit?: true; /** 受けられない効果との矛盾を AP が選び終えた（NH-39①） */ apChose?: true }
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }
   // ── 相手（や他者）に選ばせる・払わせる
   | { op: 'offer'; to: PlayerRef; prompt: string; pay: Op[]; payableIf?: Cond; ifPaid: Op[]; ifDeclined: Op[] }
@@ -438,7 +438,6 @@ export type Continuous =
   | { ce: 'costSet'; applies: ActionPattern; icons: CostIcon[] }
   | { ce: 'prohibit'; action: ActionPattern; when?: Cond }                                // 「～できない」
   /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
-  | { ce: 'mandate'; what: 'mustReceiveBattle'; who: CardRef; overrides?: 'prohibit' }
   | { ce: 'cannotGenerateCost'; who: CardRef }
   /** 《ブースト》（R4c G3b-1）: W（その他のコスト）が1つ発生するごとに、属性無しの W が1つ多く発生する（両方のプレイヤー・G/R/L/T は増えない FAQ:4186） */
   | { ce: 'extraW' }
@@ -519,6 +518,15 @@ export type Continuous =
   | { ce: 'ignoreNomination'; who: CardRef | Selector }
   /** 《指名手配》（R4c G8a-1・NH-39⑧）: 味方キャラ（リーダーを含む）に対する相手のバトル参加キャラの指名は、常にこの who（装備先）を対象とする。層の使用者＝装備先のキャラの使用者。付け替え先は対象をとり直さない */
   | { ce: 'nominationRedirect'; who: CardRef | Selector }
+  /** 《攻撃一本槍》（R4c G8a-2）: このキャラは20-4[11] の受けるキャラの候補から外れる（挑むことはできる。「変更」には効かない FAQ:3199）。リーダーは他に受けられるキャラがいないときだけ候補に残る。
+   *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.barReceive に置く */
+  | { ce: 'barReceive'; who: CardRef | Selector }
+  /** 《対強化兵用隠蔽装置》（R4c G8a-2）: who（装備先）が挑むバトルでは、相手の今のタイプが type のキャラ（リーダーを除く FAQ:514）は[11]の候補から外れる。
+   *  core はカードを知らない: エンジンが（挑むキャラ iid → 受けられない相手のキャラ iid）を導き出して core の LayerState.receiveDeny に置く */
+  | { ce: 'denyReceiveType'; who: CardRef | Selector; type: string }
+  /** 《イケナイ恋》（R4c G8a-2・NH-39⑪）: who は相手フィールドに同性のキャラ（リーダー含む）がいるときだけ挑める（barChallenge に導く）／挑むキャラと同性のときだけ受けられる（receiveDeny に導く）。
+   *  同性＝今の性別。「両方」は誰とでも同性・「無し」は誰とも同性でない */
+  | { ce: 'sameSexOnly'; who: CardRef | Selector }
 
 // ───────────────────────────────────────────────────────────────
 // §8 誘発（正規タイミング）

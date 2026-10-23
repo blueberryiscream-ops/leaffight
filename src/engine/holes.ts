@@ -29,7 +29,7 @@ export const HOLES = {
   'H-7a': { options: ['target', 'select'], value: 'target', status: 'decided', note: '決闘の指名は対象にとる' },
   'H-7b': { options: ['likeAllocation', 'likeCost'], value: 'likeCost', status: 'decided', note: '決闘の気力−2 は使用代償型: 気力1以上なら払え、0未満ならただちにダウン（利用者 2026-09-25・FAQ:3263）' },
   'H-7c': { options: ['notAction', 'action'], value: 'notAction', status: 'provisional', note: '決闘の気力−2 の支払いはアクションでない' },
-  'H-7d': { options: ['mandateWins'], value: 'mandateWins', status: 'decided', note: '決闘（いかなる場合でも）は「受けられない」に勝つ' },
+  'H-7d': { options: ['apChooses'], value: 'apChooses', status: 'decided', note: '指名と「受けられない」効果が矛盾したら AP が優先する方を選ぶ（NH-39①・FAQ:1506。普通のバトルでは指名した側＝AP）' },
   'H-7e': { options: ['noExhaust', 'exhaust'], value: 'exhaust', status: 'decided', note: '決闘が通ったら指名されたキャラを消耗させる（利用者 2026-09-25）' },
   'H-8': { options: ['perProcedure'], value: 'perProcedure', status: 'decided', note: '打ち消し: 行き先は手順どおり・代償は戻らない・範囲は「その効果」だけ' },
   'H-9a': { options: ['includeLeader', 'excludeLeader'], value: 'includeLeader', status: 'decided', note: '鬼ごっこ系の「待機状態の味方キャラ全て」に待機のリーダーも入る' },

@@ -33,6 +33,7 @@ import {
   type ProcFrame,
   type ProcTrace,
   type SimulItem,
+  receiveBlockedByEffect,
 } from '../core/proc'
 import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
@@ -1850,6 +1851,16 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (!fin || !(fin in state.cards)) return { tasks: rest, actions: [] }
       if (!op.commit) {
         if (ignoresNomination(ctx, state, fin)) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: 'しらんぷり:指名を打ち消す:' + fin } }] }
+        // NH-39①: 最終の指名先が「受けられない」効果（一本槍・イケナイ恋・隠蔽装置・参加できない）に当たるなら、優先する方を AP（ターンプレイヤー）が選ぶ。
+        // 「指名を優先」＝先へ進む／「受けられない方を優先」＝指名は参加キャラを決めない（打ち消しと同じ＝[11] で普通に選ぶ・消耗しない）。判定は指名の処理の時だけ
+        if (!op.apChose && receiveBlockedByEffect(state, other(bf.battle.challenger), bf.battle.participants[bf.battle.challenger], fin)) {
+          const id = frame.id + ':' + item.key + ':apchoose' + eng.seq
+          return {
+            tasks: rest,
+            patch: { awaiting: { id, kind: 'offer', payOps: [], ifPaidOps: [{ op: 'nominateStep', slot: op.slot, apChose: true, ...(op.duel ? { duel: op.duel } : {}) }], ifDeclinedOps: [] } },
+            actions: [{ type: 'procChoice', choice: { id, by: state.turn?.active ?? 'A', kind: 'use', prompt: '指名を優先するか（受けられない効果と矛盾。優先する方をアクティブプレイヤーが選ぶ NH-39①）', options: [{ key: 'pay', label: '指名を優先する（選ばなければ受けられない効果を優先）' }], min: 0, max: 1, purpose: 'offer', frameId: frame.id } }],
+          }
+        }
         // 決闘: 最終の指名先の気力1以上なら、相手が気力−N を払って打ち消せる（H-7b）。払えなければ（気力0以下）そのまま通る
         if (op.duel && (state.cards[fin].kiryoku ?? 0) >= 1) {
           const to = resolvePlayer(state, env, 'opponent')

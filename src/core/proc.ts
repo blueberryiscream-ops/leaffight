@@ -724,6 +724,31 @@ export function challengeCandidates(state: BoardState, seat: Seat): CardInstance
   return fieldChars(state, seat).filter((x) => x.orientation === 'ready' && !state.layers.barChallenge.includes(x.iid) && !state.layers.barAny.includes(x.iid) && (cc[x.iid] ?? 0) <= pool)
 }
 
+/**
+ * 20-4[11] の受けるキャラの候補（待機状態のキャラ＋消耗状態でも受けられるキャラ＋リーダー）から、効果で受けられないキャラを除いたもの。
+ * 除く効果: 参加できない（barAny）／挑むキャラのバトルを受けられない（receiveDeny。参加キャラのどれかが挑むキャラ）／受けられない（barReceive。リーダーは他に受けられるキャラがいないときだけ残す）
+ */
+export function receiveCandidates(state: BoardState, d: Seat, challengers: string[]): CardInstance[] {
+  const L = state.layers
+  const deny = new Set(challengers.flatMap((p) => L.receiveDeny?.[p] ?? []))
+  const barRecv = L.barReceive ?? []
+  const chars = fieldChars(state, d)
+  const free = (x: CardInstance): boolean => !L.barAny.includes(x.iid) && !deny.has(x.iid)
+  const others = chars.filter((x) => x.zone !== 'leader' && (x.orientation === 'ready' || L.receiveRested.includes(x.iid)) && free(x) && !barRecv.includes(x.iid))
+  const leader = chars.find((x) => x.zone === 'leader')
+  const leaderOk = leader !== undefined && free(leader) && (!barRecv.includes(leader.iid) || others.length === 0)
+  return [...others, ...(leader && leaderOk ? [leader] : [])]
+}
+
+/** 指名先が「受けられない」効果（参加できない・挑むキャラのバトルを受けられない・受けられない）に当たるか（NH-39①。消耗状態はルールの制限で効果でない）。指名の処理の時だけ見る */
+export function receiveBlockedByEffect(state: BoardState, d: Seat, challengers: string[], iid: string): boolean {
+  const L = state.layers
+  if (L.barAny.includes(iid) || challengers.some((p) => L.receiveDeny?.[p]?.includes(iid))) return true
+  if (!(L.barReceive ?? []).includes(iid)) return false
+  if (state.cards[iid]?.zone !== 'leader') return true
+  return receiveCandidates(state, d, challengers).some((x) => x.iid !== iid)
+}
+
 export function battleDecl(id: string, challenger: Seat): ProcDecl {
   return {
     id,
@@ -1143,11 +1168,10 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 11: {
       if (b.decided[d]) return setFrame(state, advance(frame))
       // 20-8: 待機状態のキャラか、リーダー（消耗状態でもよい）
-      const chars = fieldChars(state, d)
       // 効果で「バトルに参加することができない」キャラは候補から外す。候補が0なら[12]で自動的にリーダーが参加する（FAQ:1165）
       // 効果で「消耗状態でもバトルを受けることができる」キャラ（《坂神蝉丸》守る者）は消耗状態でも候補に足す（待機状態の他のキャラ・リーダーは今どおり選べる）。
       // 選ばれたら[11]の「その後、そのキャラを消耗させる」は消耗済みなので変化なし
-      const base = [...chars.filter((x) => x.zone !== 'leader' && (x.orientation === 'ready' || state.layers.receiveRested.includes(x.iid))), ...chars.filter((x) => x.zone === 'leader')].filter((x) => !state.layers.barAny.includes(x.iid))
+      const base = receiveCandidates(state, d, b.participants[c])
       // 挑んだキャラに「優先的に〜のキャラで受けさせる」効果（《衣装・バニースーツ》FAQ:187）: 受けることのできるそのキャラがいれば候補をその中だけにする（いなければ通常どおり）
       const pref = b.participants[c].flatMap((p) => state.layers.receivePrefer?.[p] ?? [])
       const prefOpts = pref.length ? base.filter((x) => pref.includes(x.iid)) : base
@@ -2082,7 +2106,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
-      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]> }
+      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]>; barReceive?: string[]; receiveDeny?: Record<string, string[]> }
       /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
       held?: string[]
       reseq?: string[]
@@ -2160,7 +2184,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

@@ -620,7 +620,7 @@ export function damagePrevented(ctx: EngineCtx, state: BoardState, frame: ProcFr
 // ───────────────────────────────────────────────────────────────
 
 export interface Violation {
-  kind: 'prohibit' | 'mandate' | 'untargetable' | 'lostAbility' | 'equipTarget'
+  kind: 'prohibit' | 'untargetable' | 'lostAbility' | 'equipTarget'
   /** 画面に出す文（根拠つき） */
   text: string
   /** 根拠の層（効果）の名前 */
@@ -1049,6 +1049,29 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       receivePrefer[x] = [...new Set([...(receivePrefer[x] ?? []), ...ys])].sort()
     }
   }
+  // 《攻撃一本槍》barReceive／《対強化兵用隠蔽装置》denyReceiveType／《イケナイ恋》sameSexOnly（R4c G8a-2・NH-39①⑪）
+  const barReceive: string[] = []
+  const receiveDeny: Record<string, string[]> = {}
+  const sameSex = (a: string, b: string): boolean => (a === '両方' || b === '両方') ? (a !== '' && b !== '') : (a !== '' && a === b)
+  const foes = (x: string) => { const seat = controllerOf(state, x) ?? state.cards[x].owner; return Object.values(state.cards).filter((y) => isCharOnField(y) && (controllerOf(state, y.iid) ?? y.owner) !== seat) }
+  const deny = (key: string, v: string) => { receiveDeny[key] = [...new Set([...(receiveDeny[key] ?? []), v])].sort() }
+  for (const e of d.effs) {
+    const f = e.effect
+    if (f.ce !== 'barReceive' && f.ce !== 'denyReceiveType' && f.ce !== 'sameSexOnly') continue
+    for (const x of targetsOf(ctx, state, e)) {
+      if (!isCharOnField(state.cards[x])) continue
+      if (f.ce === 'barReceive') { if (!barReceive.includes(x)) barReceive.push(x) }
+      else if (f.ce === 'denyReceiveType') { for (const y of foes(x)) if (y.zone !== 'leader' && charTypesOf(ctx, state, y.iid).includes(f.type)) deny(x, y.iid) }
+      else {
+        const mine = sexOf(ctx, state, x)
+        // 挑む: 相手フィールドに同性のキャラがいなければ挑めない／受ける: 異性のキャラが挑んでくるなら受けられない
+        if (!foes(x).some((y) => sameSex(mine, sexOf(ctx, state, y.iid))) && !barNow.challenge.includes(x)) barNow.challenge.push(x)
+        for (const y of foes(x)) if (!sameSex(mine, sexOf(ctx, state, y.iid))) deny(y.iid, x)
+      }
+    }
+  }
+  barReceive.sort()
+  for (const k of Object.keys(receiveDeny)) receiveDeny[k].sort()
   const noEntryReady: string[] = []
   for (const e of d.effs) {
     if (e.effect.ce !== 'noEntryReady') continue
@@ -1065,7 +1088,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = JSON.stringify(receivePrefer) !== JSON.stringify(state.layers.receivePrefer ?? {}) || JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
+  const barChanged = JSON.stringify(receiveDeny) !== JSON.stringify(state.layers.receiveDeny ?? {}) || barReceive.join(',') !== [...(state.layers.barReceive ?? [])].sort().join(',') || JSON.stringify(receivePrefer) !== JSON.stringify(state.layers.receivePrefer ?? {}) || JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -1135,7 +1158,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
-      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer } } : {}),
+      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer, barReceive, receiveDeny } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
       ...(limChanged ? { limit: limNow } : {}),

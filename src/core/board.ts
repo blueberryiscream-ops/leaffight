@@ -125,13 +125,17 @@ export interface LayerState {
   challengeCost: Record<string, number>
   /** 挑んだキャラ → そのキャラに優先して受けさせる相手側のキャラ（receiverPriority。《衣装・バニースーツ》R4c G6a-3・FAQ:187）。20-4[11] の候補に、受けることのできるこの中のキャラがいればその中だけにする。エンジンが導き出して置く控え。中身の意味は持たない */
   receivePrefer: Record<string, string[]>
+  /** 受けるキャラの候補から外すキャラ（barReceive。《攻撃一本槍》R4c G8a-2）。リーダーは他に受けられるキャラがいないときだけ残る。エンジンが導き出して置く控え。中身の意味は持たない */
+  barReceive: string[]
+  /** 挑むキャラ → そのキャラのバトルを受けられない相手側のキャラ（denyReceiveType・sameSexOnly。《対強化兵用隠蔽装置》《イケナイ恋》R4c G8a-2）。エンジンが導き出して置く控え。中身の意味は持たない */
+  receiveDeny: Record<string, string[]>
   /** 手札調整 [3] の上限枚数（席ごと。null＝無限。無ければ 7＝4-2-1。エンジンが層から導き出して置く控え。core は中身を知らない。R4c G7・NH-38） */
   handLimit?: { A: number | null; B: number | null }
   /** 効かなくなっている層の id（エンジンが導き出して置く。再び効き始めたら seq を取り直す＝NH-37⑯・FAQ:2199。core は中身を知らない） */
   held?: string[]
 }
 
-export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {}, receivePrefer: {} }
+export const EMPTY_LAYERS: LayerState = { list: [], bound: {}, unusable: [], reusable: [], oncePerChar: [], barChallenge: [], barAny: [], receiveRested: [], noEntryReady: [], challengeCost: {}, receivePrefer: {}, barReceive: [], receiveDeny: {} }
 
 /**
  * デッキで始めたときの開始準備の進み具合（DESIGN.md §4.21「対戦卓での使用」・PHASE5b.md §1-1）。
