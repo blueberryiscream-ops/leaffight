@@ -2122,3 +2122,15 @@ turnEnd [1] は同時の項目の順を **AP が選ぶ**（13-2・proc.ts nextIt
    - 一本槍のリーダーの例外は「他に受けられるキャラ」＝他の制限を当てた後の候補（待機または闘志で消耗でも受けられる）。receivePrefer（バニースーツ）の絞りは「他に」に入れていない
    - 実機（画面）は確かめていない: [10] の AP への「指名を優先するか」の問い（offer の文言・誰に出るか）を統括が 2タブで
 7. ツール呼び出し: 約51回
+
+## 統括36の検証（G8a-2）— 合格（統括が改行コードとコメントを直した）
+- 現物: verify 緑・test:faq R4c ✅**1059**（1017＋42）・R2a〜R4b 変わらず・保留0・❌0／**tested 289**（＋闘志・攻撃一本槍・対強化兵用隠蔽装置・イケナイ恋）／draft 7／manual 45。cases 1273（authored の id に重なりなし）。サブのツール 55（上限70）
+- 差分を読んだ: core は LayerState `barReceive`・`receiveDeny`（iid の控え）と proc.ts `receiveCandidates`（[11] の候補を1か所に）・`receiveBlockedByEffect` だけ＝カード知識なし。engine は ce barReceive／denyReceiveType／sameSexOnly（layers.ts syncActions で控えを導く。イケナイ恋の「挑めない」は barChallenge）・drive.ts nominateStep で しらんぷり→**矛盾なら AP（state.turn.active）に offer**→決闘 offer→通す。ce 'mandate' と Violation の kind 'mandate' を削除・holes.ts H-7d＝apChooses
+- ❌ の取り直し（統括・サブと別の1か所）: イケナイ恋の「両方は誰とでも同性」を外す（sameSex を a===b だけに）→`❌4（faq-41・text-i_イケナイ恋-6・-7・-8）`。戻す→test:faq ✅1059→tested.ts（_tested.json 差分なし）
+- 各カードに本体の側と断る側がある（闘志の無い消耗キャラ・一本槍のリーダーの例外の両側・隠蔽装置が挑むキャラでない味方に付いているだけ・異性／同性・両方・選ばせない側＝制限に当たらない指名／消耗状態への指名・抜き打ちで AP＝受ける側）。カードの書き方は faqReview の ok→case だけ（記述は変えていない）
+- 🚨 統括が直した: **サブが layers.ts を LF→CRLF で書き直していた**（中身の差 26行なのに diff が2847行）→ LF に戻した。dsl.ts の消した mandate の宙に浮いたコメント1行を消した
+- 🔸 穏形法（barAny）×挑戦状のケースは書けない（穏形法は [10] で使えない通常型。矛盾は指名手配の付け替え経由だけ）。判定には入っている
+- 🔸 性別「無し」のケースは無い（pool の sex 空は混成タッグ3枚だけ＝pool の sex の確認と一緒に）
+- 🔸 **FAQ:310（一本槍×指名バトル＝受けられるキャラでなければ指名できない）は G8b で決める**（faq-310 は 'ok' と why）
+- 🔸 画面の束へ: [10] で AP に出る「指名を優先するか」の問いの文言（2タブ未確認）
+- ✅ **G8a-2 合格＝G8a 完了**

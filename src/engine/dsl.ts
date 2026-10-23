@@ -437,7 +437,6 @@ export type Continuous =
    *  effectiveCost が costMod より先に当てる（置き換えてから他の増減を足して下限） */
   | { ce: 'costSet'; applies: ActionPattern; icons: CostIcon[] }
   | { ce: 'prohibit'; action: ActionPattern; when?: Cond }                                // 「～できない」
-  /** 「～しなければならない」。overrides: 'prohibit' は「いかなる場合でも」＝「できない」より優先（決闘 H-7d） */
   | { ce: 'cannotGenerateCost'; who: CardRef }
   /** 《ブースト》（R4c G3b-1）: W（その他のコスト）が1つ発生するごとに、属性無しの W が1つ多く発生する（両方のプレイヤー・G/R/L/T は増えない FAQ:4186） */
   | { ce: 'extraW' }
