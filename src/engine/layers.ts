@@ -286,7 +286,7 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
   }
   const blocked = (stat: string, src: string | null) => !!imm.get(stat)?.has(ctx.cards[src ? state.cards[src]?.cardId ?? '' : '']?.kind ?? '')
   const items: { seq: number; run: () => void }[] = []
-  const penaltySeen = new Set<string>()
+  const penaltyFrom = new Map<string, string | null>() // 同名ペナルティ: 名前 → 効かせる発生源（最初に当たったもの）
   for (const l of state.layers.list) {
     const m = bodyOf(l).mod
     if (m && l.kind === '能力値修正' && l.targets.includes(iid) && m.stat in v && !d.modLost.has(iid)) items.push({ seq: l.seq, run: () => { if (imm.has(m.stat) && (m.immune || blocked(m.stat, l.source))) return; if (m.set) v[m.stat] = m.delta; else v[m.stat] += m.delta } }) // set＝置き換え: この層より前の修正は上書き・後の層は足される（swapStats と同じ考え方 H-6。FAQ:2601）
@@ -297,11 +297,12 @@ export function currentStats(ctx: EngineCtx, state: BoardState, iid: string): Re
       if (d.modLost.has(iid)) continue
       items.push({ seq: e.layer.seq, run: () => {
         if ((imm.has(f.stat) && blocked(f.stat, e.layer.source)) || !effectOn(ctx, state, e, iid)) return
-        // 同名の「〜バトルペナルティ」は1回だけ（同じ名前・同じ番号の効果。蛍狩り＋ダークネス FAQ:3892・水球＋シーサイド FAQ:4113・水中戦＋シーサイド。R4c G8b-2）
+        // 同名の「〜バトルペナルティ」は1回だけ＝同じ名前のペナルティは最初に当たった発生源の分だけ丸ごと効かせる（蛍狩り＋ダークネス FAQ:3892・水球＋シーサイド FAQ:4113・水中戦＋シーサイド。R4c G8b-2。
+        // 統括36: 効果の番号で突き合わせると、並びの違うカードどうしで別の能力値を潰す・同じカードの「強化兵はさらに−1」とぶつかる）
         if (e.layer.ability !== null && e.layer.label.endsWith('バトルペナルティ')) {
-          const pk = `${e.layer.label}#${bodyOf(e.layer).ei ?? 0}`
-          if (penaltySeen.has(pk)) return
-          penaltySeen.add(pk)
+          const first = penaltyFrom.get(e.layer.label)
+          if (first === undefined) penaltyFrom.set(e.layer.label, e.layer.source)
+          else if (first !== e.layer.source) return
         }
         if (f.mode === 'set') v[f.stat] = evalExpr(ctx, state, e.env, f.delta)
         else v[f.stat] += evalExpr(ctx, state, e.env, f.delta)
