@@ -129,6 +129,8 @@ export interface LayerState {
   barReceive: string[]
   /** 挑むキャラ → そのキャラのバトルを受けられない相手側のキャラ（denyReceiveType・sameSexOnly。《対強化兵用隠蔽装置》《イケナイ恋》R4c G8a-2）。エンジンが導き出して置く控え。中身の意味は持たない */
   receiveDeny: Record<string, string[]>
+  /** バトルカード → そのカードに付いたアイテム（battleAttrSwap／Set）を装備した順に当てた [攻][防] の属性（無ければ元のまま）。種目を指定した時点（[16]）で core が BattleState に写して固定する（FAQ:292・295。R4c G8b-1・エンジンが導き出して置く控え。中身の意味は持たない） */
+  battleFix?: Record<string, { atk: string | null; def: string | null }>
   /** 手札調整 [3] の上限枚数（席ごと。null＝無限。無ければ 7＝4-2-1。エンジンが層から導き出して置く控え。core は中身を知らない。R4c G7・NH-38） */
   handLimit?: { A: number | null; B: number | null }
   /** 効かなくなっている層の id（エンジンが導き出して置く。再び効き始めたら seq を取り直す＝NH-37⑯・FAQ:2199。core は中身を知らない） */

@@ -78,7 +78,7 @@ export function isCharOnField(c: CardInstance | undefined): c is CardInstance {
 export function controllerOf(state: BoardState, iid: string): Seat | null {
   const c = state.cards[iid]
   if (!c) return null
-  if (c.attachedTo) return controllerOf(state, c.attachedTo)
+  if (c.attachedTo) return state.cards[c.attachedTo]?.zone === 'battle' ? c.owner : controllerOf(state, c.attachedTo) // バトルカードには使用者がいない＝アイテムの持ち主（F⑫・R4c G8b-1）
   return c.owner
 }
 

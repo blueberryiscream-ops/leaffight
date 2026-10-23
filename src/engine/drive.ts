@@ -43,7 +43,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -759,8 +759,10 @@ export function battleValues(ctx: EngineCtx, state: BoardState, frame: ProcFrame
   const one = (x: string | undefined): Attr | null => (x && x.length === 1 && '力早賢根感'.includes(x) ? (x as Attr) : null)
   const atkAttr = one(info?.battleAtk)
   const defAttr = one(info?.battleDef)
-  const atkExpr: BattleExpr | null = cardDef?.battle?.atk ?? (atkAttr ? { attr: atkAttr } : null)
-  const defExpr: BattleExpr | null = cardDef?.battle?.def ?? (defAttr ? { attr: defAttr } : null)
+  // [16] で固定した [攻][防]（イカサマ・極寒。FAQ:292・295・20-9）があればそれを読む
+  const fx = b.fixedAttrs
+  const atkExpr: BattleExpr | null = fx?.atk ? { attr: fx.atk as Attr } : cardDef?.battle?.atk ?? (atkAttr ? { attr: atkAttr } : null)
+  const defExpr: BattleExpr | null = fx?.def ? { attr: fx.def as Attr } : cardDef?.battle?.def ?? (defAttr ? { attr: defAttr } : null)
   if (!atkExpr || !defExpr) {
     warnings.push(`manual: バトルの攻防の値（${info?.name ?? 'バトル種目なし'}: 攻 ${info?.battleAtk ?? '?'}・防 ${info?.battleDef ?? '?'}）を人が入れる`)
     return out
@@ -891,7 +893,9 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   } else if (kind === 'equip') {
     // 17-3[3] 装備対象（フィールドのキャラ。装備対象の種類の制限 17-1 は K4＝R3）
     equipTo = targets[0] ?? null
-    if (!equipTo || !isCharOnField(state.cards[equipTo])) return { ok: false, reason: '装備対象を指定できない（17-3[5]）' }
+    // 装備対象の種類（17-1・記述の equip.targetKind。R4c G8b-1）: 'バトルカード' は場（zone battle）のバトルカード（自分のも相手のも・F⑪）、それ以外はフィールドのキャラ
+    const hostOk = ctx.defs[src.cardId]?.equip?.targetKind === 'バトルカード' ? state.cards[equipTo ?? '']?.zone === 'battle' && !state.cards[equipTo ?? ''].attachedTo : isCharOnField(state.cards[equipTo ?? ''])
+    if (!equipTo || !hostOk) return { ok: false, reason: '装備対象を指定できない（17-3[5]）' }
     if (Object.values(state.cards).some((c) => c.attachedTo === equipTo && c.cardId === src.cardId)) return { ok: false, reason: '同名のアイテムを装備している（17-2・宣言時の制限）' }
   } else if (kind === 'battleCard') {
     if (Object.values(state.cards).filter((c) => c.zone === 'battle' && c.owner === req.by).length >= 3) return { ok: false, reason: 'バトルカードは3枚まで（19-1・宣言時の制限）' }
@@ -1318,7 +1322,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'setBattleUsed':
       return { tasks: rest, actions: [{ type: 'procBattleUsed', iids: select(ctx, state, env, op.what), used: op.used }] }
     case 'trash':
-      return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
+      return { tasks: rest, actions: refs(op.what).filter((iid) => !trashImmune(ctx, state, iid, env.self)).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
     case 'mustUse': {
@@ -1885,6 +1889,13 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     default:
       return manual(`R2a の範囲外の操作 ${op.op}`)
   }
+}
+
+/** 《人気イベント》: 付いているバトルカードは、発生源がそのバトルカード自身でないゴミ箱送りの効果を受けない（NH-40②・FAQ:427。ルールの処理は op を通らない＝止めない） */
+function trashImmune(ctx: EngineCtx, state: BoardState, iid: string, source: string | null): boolean {
+  const bc = state.cards[iid]
+  if (!bc || bc.zone !== 'battle' || source === iid) return false
+  return Object.values(state.cards).some((i) => i.attachedTo === iid && staticSourceActive(state, i.iid) && ctx.defs[i.cardId]?.abilities.some((a) => a.kind === 'static' && a.effects.some((e) => e.ce === 'noTrashByOthers')))
 }
 
 /** 効果の層を足した行動の種類（《能力禁止》FAQ:606: 特殊能力の効果は失われる） */

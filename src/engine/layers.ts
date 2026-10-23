@@ -941,7 +941,45 @@ function onFieldAny(c: CardInstance | undefined): boolean {
 }
 
 /**
- * 状態に合わせて層を足し外しする BoardAction（無ければ空）:
+ * バトルカードに付いたアイテムの battleAttrSwap（イカサマ）・battleAttrSet（極寒）を、装備した順（層の seq）に当てた [攻][防] の属性。R4c G8b-1・NH-40①。
+ * 入れ替えは [攻][防] が両方とも属性アイコンだけのときだけ（テキストのあるバトルでも欄が属性だけなら可。FAQ:28・37）。置き換えはその側が属性だけのときだけ（極寒は [防] だけ見る）。
+ * 記述の無いテキスト付きバトルは何もしない（battleValues が manual にする）。値が変わらないカードは載せない
+ */
+function computeBattleFix(ctx: EngineCtx, state: BoardState): Record<string, { atk: string | null; def: string | null }> {
+  const out: Record<string, { atk: string | null; def: string | null }> = {}
+  const one = (x: string | undefined): string | null => (x && x.length === 1 && '力早賢根感'.includes(x) ? x : null)
+  const pure = (e: { attr?: string } | undefined): string | null => (e && 'attr' in e && typeof e.attr === 'string' ? e.attr : null)
+  for (const bc of Object.values(state.cards)) {
+    if (bc.zone !== 'battle' || bc.attachedTo) continue
+    const items = Object.values(state.cards)
+      .filter((i) => i.attachedTo === bc.iid && staticSourceActive(state, i.iid) && !equipProblem(ctx, state, i, bc.iid))
+      .map((i) => ({ i, seq: state.layers.list.find((l) => l.source === i.iid && l.ability !== null)?.seq ?? 1e9 + i.index }))
+      .sort((p, q) => p.seq - q.seq)
+    if (items.length === 0) continue
+    const info = ctx.cards[bc.cardId]
+    const bd = ctx.defs[bc.cardId]
+    if (info && info.abilities.length > 0 && !bd) continue
+    let a = bd?.battle ? pure(bd.battle.atk as { attr?: string }) : one(info?.battleAtk)
+    let d = bd?.battle ? pure(bd.battle.def as { attr?: string }) : one(info?.battleDef)
+    let touched = false
+    for (const { i } of items) {
+      for (const ab of ctx.defs[i.cardId]?.abilities ?? []) {
+        if (ab.kind !== 'static') continue
+        for (const ef of ab.effects) {
+          if (ef.ce === 'battleAttrSwap' && a && d) { [a, d] = [d, a]; touched = true }
+          if (ef.ce === 'battleAttrSet') {
+            if (ef.side === 'def' && d) { d = ef.to; touched = true }
+            if (ef.side === 'atk' && a) { a = ef.to; touched = true }
+          }
+        }
+      }
+    }
+    if (touched) out[bc.iid] = { atk: a, def: d }
+  }
+  return out
+}
+
+/** 状態に合わせて層を足し外しする BoardAction（無ければ空）:
  *  - 常時効果: 発生源がフィールドにある（アイテムは装備対象を満たす 17-5）間だけ層がある。装備先が変わったら古い層を外して新しい層を足す
  *  - 効果で足した層: 効果を得ていたカードが全部失われたら外す（12-1）。whileSource は発生源が失われたら外す（12-2）
  *  - whenLost: 常時効果の層が「発生源が離れた・装備先が変わった」で外れたら、その Op を処理する（装備対象を満たせずに外れたときは処理しない FAQ:550）
@@ -1088,7 +1126,8 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   barNow.receiveRested.sort()
   barNow.challenge.sort()
   barNow.any.sort()
-  const barChanged = JSON.stringify(receiveDeny) !== JSON.stringify(state.layers.receiveDeny ?? {}) || barReceive.join(',') !== [...(state.layers.barReceive ?? [])].sort().join(',') || JSON.stringify(receivePrefer) !== JSON.stringify(state.layers.receivePrefer ?? {}) || JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
+  const battleFix = computeBattleFix(ctx, state)
+  const barChanged = JSON.stringify(battleFix) !== JSON.stringify(state.layers.battleFix ?? {}) || JSON.stringify(receiveDeny) !== JSON.stringify(state.layers.receiveDeny ?? {}) || barReceive.join(',') !== [...(state.layers.barReceive ?? [])].sort().join(',') || JSON.stringify(receivePrefer) !== JSON.stringify(state.layers.receivePrefer ?? {}) || JSON.stringify(challengeCost) !== JSON.stringify(state.layers.challengeCost ?? {}) || noEntryReady.join(',') !== [...state.layers.noEntryReady].sort().join(',') || barNow.challenge.join(',') !== [...state.layers.barChallenge].sort().join(',') || barNow.any.join(',') !== [...state.layers.barAny].sort().join(',') || barNow.receiveRested.join(',') !== [...state.layers.receiveRested].sort().join(',')
   const reuseNow = { reusable: [] as string[], oncePerChar: [] as string[] }
   for (const c of Object.values(state.cards)) {
     const bd = c.zone === 'battle' ? ctx.defs[c.cardId]?.battle : undefined
@@ -1158,7 +1197,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
-      ...(barChanged ? { bar: { ...barNow, noEntryReady, challengeCost, receivePrefer, barReceive, receiveDeny } } : {}),
+      ...(barChanged ? { bar: { ...barNow, battleFix, noEntryReady, challengeCost, receivePrefer, barReceive, receiveDeny } } : {}),
       ...(clamp.length ? { clamp } : {}),
       ...(orient.length ? { orient } : {}),
       ...(limChanged ? { limit: limNow } : {}),

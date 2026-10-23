@@ -148,6 +148,8 @@ export interface BattleState {
   joinedReady: string[]
   battleCard: string | null
   cardDecided: boolean
+  /** [16] で種目を指定した時点の [攻][防] の属性（layers.battleFix を写したもの。バトルの最後まで固定 20-9・FAQ:292/295。無ければ印刷の攻防）。バトルチェンジ（G8b-3）は変更先を指定した時点で fixAttrsOf を呼び直す */
+  fixedAttrs?: { atk: string | null; def: string | null } | null
   /** 20-4[10]: 指名の効果をもう宣言した（同じバトルでは1つまで。R4c G8a-1・NH-39②）。打ち消されても残る */
   nominated?: boolean
   /**
@@ -563,6 +565,16 @@ function setFrame(state: BoardState, frame: ProcFrame): BoardState {
 
 function setMeta(state: BoardState, patch: Partial<ProcMeta>): BoardState {
   return { ...state, procMeta: { ...state.procMeta, ...patch } }
+}
+
+/** 種目に指定したバトルカードの [攻][防] を固定する（layers.battleFix＝エンジンが導いた控えを写す。core はカードの知識を持たない）。G8b-3 のバトルチェンジも変更先を指定した時点でこれを呼ぶ */
+export function fixAttrsOf(state: BoardState, bc: string | null): { atk: string | null; def: string | null } | null {
+  return (bc && state.layers.battleFix?.[bc]) || null
+}
+
+/** 装備先が場にある（キャラ・バトルカード。どちらに装備できるかは装備宣言のときにエンジンが見た。R4c G8b-1） */
+function equipHostAlive(c: CardInstance | undefined): boolean {
+  return !!c && c.attachedTo === null && (c.zone === 'char' || c.zone === 'leader' || c.zone === 'battle')
 }
 
 function onField(c: CardInstance | undefined): c is CardInstance {
@@ -1041,14 +1053,14 @@ function enterCardUse(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): 
       if (k === 'tag') return setFrame(state, advance(frame)) // 窓（STEP_TIMINGS）
       if (!frame.represented) return trashCard(state, '再提示できない')
       if (frame.paid === false) return trashCard(state, '使用代償を支払えない')
-      if (k === 'equip' && !onField(state.cards[decl.equipTo ?? ''])) return trashCard(state, '装備対象が失われている')
+      if (k === 'equip' && !equipHostAlive(state.cards[decl.equipTo ?? ''])) return trashCard(state, '装備対象が失われている')
       return setFrame(state, advance(frame))
     case 11:
       if (k === 'tag') return tagComponentsOk(state) && state.cards[iid]?.zone === 'pending' ? setFrame(state, advance(frame)) : trashCard(state, '構成要素が満たされていない')
       if (k === 'equip') {
         // [11] 装備対象に装備される
         const target = decl.equipTo!
-        if (!onField(state.cards[target])) return frame.transfer ? abortFrame(state, frame, '移し替え先が失われている', trace) : trashCard(state, '装備対象が失われている')
+        if (!equipHostAlive(state.cards[target])) return frame.transfer ? abortFrame(state, frame, '移し替え先が失われている', trace) : trashCard(state, '装備対象が失われている')
         const c = state.cards[iid]
         // 置き場 char は枠の入れ替え式（moveCard は同じ index の札と入れ替える）＝アイテムは持ち主の char の 100 以上の空いた番号に置く。
         // いつも 100 に置くと、先に装備したアイテム（index 100）が提示エリアへ押し出されていた（統括30が見つけた・text-i_ピンクのル-ジュ-6）
@@ -1415,7 +1427,7 @@ function applyCoreChoice(state: BoardState, ch: ProcChoice, pick: string[], trac
       return setFrame(s, { ...advance(frame), battle: { ...b!, participants: { ...b!.participants, [seat]: pick }, decided: { ...b!.decided, [seat]: pick.length > 0 }, joinedReady } })
     }
     case 'battleCard':
-      return setFrame(state, { ...advance(frame), battle: { ...b!, battleCard: pick[0] ?? null, cardDecided: pick.length > 0 } })
+      return setFrame(state, { ...advance(frame), battle: { ...b!, battleCard: pick[0] ?? null, cardDecided: pick.length > 0, fixedAttrs: fixAttrsOf(state, pick[0] ?? null) } })
     case 'battleLoop':
       if (pick[0] === 'back') return setFrame(state, { ...frame, step: 19, status: 'enter', battle: { ...b!, abilityUsed: false, reopen: false } })
       return setFrame(state, advance(frame))
@@ -2106,7 +2118,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
-      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]>; barReceive?: string[]; receiveDeny?: Record<string, string[]> }
+      bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]>; barReceive?: string[]; receiveDeny?: Record<string, string[]>; battleFix?: Record<string, { atk: string | null; def: string | null }> }
       /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
       held?: string[]
       reseq?: string[]
@@ -2184,7 +2196,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
+  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, battleFix: a.bar?.battleFix ?? s.layers.battleFix, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {
@@ -2370,7 +2382,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (action.firstStrike) b = { ...b, firstStrike: [...b.firstStrike, action.firstStrike] }
       if (action.skipActions) b = { ...b, skipActions: true }
       if (action.battleCard) {
-        b = { ...b, battleCard: action.battleCard, cardDecided: true }
+        b = { ...b, battleCard: action.battleCard, cardDecided: true, fixedAttrs: fixAttrsOf(state, action.battleCard) }
         trace.push({ kind: 'name', text: `バトル種目を決めた:${action.battleCard}` })
       }
       if (action.endTrash) b = { ...b, endTrash: [...b.endTrash, action.endTrash] }
