@@ -34,6 +34,7 @@ import {
   type ProcTrace,
   type SimulItem,
   receiveBlockedByEffect,
+  receiveCandidates,
 } from '../core/proc'
 import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
@@ -1844,8 +1845,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       if (!bf?.battle) return manual('バトル中でない')
       const nominee = refs(op.who)[0]
       if (!nominee || !(nominee in state.cards)) return { tasks: rest, actions: [] }
-      const holders = nominationHolders(ctx, state, nominee, env.you)
-      const next: Task = { op: { op: 'nominateStep', slot: 'nominee', ...(op.duel ? { duel: op.duel } : {}) }, bind: task.bind }
+      const holders = nominationHolders(ctx, state, nominee, op.nom?.by ?? env.you)
+      const next: Task = { op: { op: 'nominateStep', slot: 'nominee', ...(op.duel ? { duel: op.duel } : {}), ...(op.nom ? { nom: op.nom } : {}) }, bind: task.bind }
       if (holders.length >= 2) {
         const id = frame.id + ':' + item.key + ':nominee' + eng.seq
         return {
@@ -1865,7 +1866,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
         if (ignoresNomination(ctx, state, fin)) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: 'しらんぷり:指名を打ち消す:' + fin } }] }
         // NH-39①: 最終の指名先が「受けられない」効果（一本槍・イケナイ恋・隠蔽装置・参加できない）に当たるなら、優先する方を AP（ターンプレイヤー）が選ぶ。
         // 「指名を優先」＝先へ進む／「受けられない方を優先」＝指名は参加キャラを決めない（打ち消しと同じ＝[11] で普通に選ぶ・消耗しない）。判定は指名の処理の時だけ
-        if (!op.apChose && receiveBlockedByEffect(state, other(bf.battle.challenger), bf.battle.participants[bf.battle.challenger], fin)) {
+        if (!op.nom && !op.apChose && receiveBlockedByEffect(state, other(bf.battle.challenger), bf.battle.participants[bf.battle.challenger], fin)) {
           const id = frame.id + ':' + item.key + ':apchoose' + eng.seq
           return {
             tasks: rest,
@@ -1884,7 +1885,47 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
           }
         }
       }
+      if (op.nom) {
+        // 指名バトルの再指名（G8b-4）。指名先の席は指名した側の相手。挑む側の席で、指名手配の付け替え先が消耗していたら挑むキャラはいない（FAQ:381）
+        const seat: Seat = other(op.nom.by)
+        const bad = seat === bf.battle.challenger && state.cards[fin].orientation !== 'ready'
+        return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to: bad ? [] : [fin], exhaust: !bad, previous: 'keepState', nominate: true, rejoin: true }] }
+      }
       return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat: other(bf.battle.challenger), to: [fin], exhaust: true, previous: 'keepState', nominate: true }] }
+    }
+    // ── R4c G8b-4（NH-40④⑤⑥）: 指名バトルの再指名
+    case 'renominate': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle || !env.self) return manual('バトル中でない')
+      const b = bf.battle
+      // 1ターンに1回はカード（発生源の iid）ごと（NH-40④）。ターン終了の処理で marks は消える
+      if ((state.procMeta.marks[env.self] ?? []).includes('renominate')) return { tasks: rest, actions: [{ type: 'procTrace', entry: { kind: 'name', text: '指名バトル:今ターンは使用済み:' + env.self } }] }
+      const ap: Seat = state.turn?.active ?? 'A'
+      const orig = [...b.participants[b.challenger]]
+      const tasks: Task[] = [ap, other(ap)].flatMap((by, i): Task[] => [
+        { op: { op: 'renominateAsk', by, slot: 'renom' + i }, bind: task.bind },
+        { op: { op: 'nominate', who: { ref: 'slot', slot: 'renom' + i }, nom: { by } }, bind: task.bind },
+      ])
+      return {
+        tasks: [...tasks, ...rest],
+        patch: { env: { ...eng.env, slots: { ...eng.env.slots, origCh: orig } } },
+        actions: ([b.challenger, other(b.challenger)] as Seat[]).map((seat, i) => ({ type: 'procSetParticipants', frameId: bf.id, seat, to: [], exhaust: false, previous: 'readyIfWasReady', ...(i === 0 ? { mark: env.self! } : {}) }) as BoardAction),
+      }
+    }
+    case 'renominateAsk': {
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      const b = bf.battle
+      const target: Seat = other(op.by)
+      // 受けるキャラは元の挑むキャラで判定（NH-40⑥）。挑めるキャラは今の盤面（待機・挑むときの[W]を払える）
+      const cands = target === b.challenger ? challengeCandidates(state, target) : receiveCandidates(state, target, env.slots.origCh ?? [])
+      if (cands.length === 0) return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.slot]: [] } } }, actions: [] }
+      const id = frame.id + ':' + item.key + ':' + op.slot + eng.seq
+      return {
+        tasks: rest,
+        patch: { awaiting: { id, kind: 'choose', slot: op.slot } },
+        actions: [{ type: 'procChoice', choice: { id, by: op.by, kind: 'select', prompt: '指名バトル: 参加させる相手キャラを指名する（NH-40）', options: cands.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1, frameId: frame.id } }],
+      }
     }
     case 'setBattleChoice': {
       const bf = nearestBattle(state)

@@ -308,9 +308,16 @@ export type Op =
    * ④通ったら挑まれた側の参加キャラ＝指名先・消耗（待機だったら joinedReady）。打ち消されたら 20-4[11] で普通に選ぶ。
    * 宣言の時点で、同じバトルの [10] ではもう指名の効果を宣言できない（NH-39②・battle.nominated）
    */
-  | { op: 'nominate'; who: CardRef; duel?: { prompt: string; kiryoku: number } }
+  | { op: 'nominate'; who: CardRef; duel?: { prompt: string; kiryoku: number }; /** 指名バトルの再指名（G8b-4）: 指名する側。指名先の席はその相手。候補から外してあるので AP の選択（NH-39①）は起きない */ nom?: { by: 'A' | 'B' } }
+  /**
+   * 指名バトルの再指名（R4c G8b-4・NH-40④⑤⑥）。カード1枚（発生源の iid）ごとに1ターン1回。今の参加キャラを全部無効にして（参加前に待機だったキャラは待機に戻す）、
+   * AP→NAP の順に相手の参加キャラを指名する（candidates＝受けられる／挑めるキャラ。受けるキャラは元の挑むキャラで判定）。通れば参加・消耗・《バトルに参加したとき》
+   */
+  | { op: 'renominate' }
+  /** renominate の内部（候補を出して by が1体選ぶ）。カードには書かない */
+  | { op: 'renominateAsk'; by: 'A' | 'B'; slot: string }
   /** nominate の内部の続き（②③④）。カードには書かない */
-  | { op: 'nominateStep'; slot: string; duel?: { prompt: string; kiryoku: number }; commit?: true; /** 受けられない効果との矛盾を AP が選び終えた（NH-39①） */ apChose?: true }
+  | { op: 'nominateStep'; slot: string; duel?: { prompt: string; kiryoku: number }; nom?: { by: 'A' | 'B' }; commit?: true; /** 受けられない効果との矛盾を AP が選び終えた（NH-39①） */ apChose?: true }
   | { op: 'setBattleChoice'; side: 'challenger' | 'challenged'; key: string; value: CardRef | Attr | { slot: string } }
   // ── 相手（や他者）に選ばせる・払わせる
   | { op: 'offer'; to: PlayerRef; prompt: string; pay: Op[]; payableIf?: Cond; ifPaid: Op[]; ifDeclined: Op[] }

@@ -152,6 +152,9 @@ export interface BattleState {
   fixedAttrs?: { atk: string | null; def: string | null } | null
   /** バトルチェンジ（G8b-3）: 種目を変更した→効果が済んだら [17] からやり直す（resumeFrame）。変更先を指定したので [17]〜[18] を新しい種目でもう一度行う（NH-40⑦・F㉔） */
   rewind?: boolean
+  /** 指名バトルの再指名（G8b-4）: 指名が通ったキャラ。[17] の窓が済んだら《バトルに参加したとき》の窓（rejoinPhase）を開く（FAQ:635・641） */
+  rejoin?: string[]
+  rejoinPhase?: string[]
   /** 20-4[10]: 指名の効果をもう宣言した（同じバトルでは1つまで。R4c G8a-1・NH-39②）。打ち消されても残る */
   nominated?: boolean
   /**
@@ -490,6 +493,7 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
  * 'ability'/'event' 以外と、アクションアイテムでない宣言は STEP_TIMINGS のまま
  */
 export function stepNames(frame: ProcFrame): string[] {
+  if (frame.kind === 'battle' && frame.step === 17 && frame.battle?.rejoinPhase) return ['バトルに参加したとき']
   const names = STEP_TIMINGS[frame.kind]?.[frame.step]?.names ?? []
   if (frame.decl?.eng.actionItem && frame.kind === 'event' && (frame.step === 8 || frame.step === 11)) return []
   return names
@@ -950,6 +954,8 @@ function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
       const lost = battleLost(state, b)
       if (lost) return abortBattle(state, frame, lost, trace)
     }
+    // 20-6・FAQ:347: [19] で参加キャラがいない側があれば中断（指名バトルの再指名で打ち消された／挑むキャラがいない）
+    if (!b.aborted && frame.step === 19 && (['A', 'B'] as Seat[]).some((seat) => b.participants[seat].length === 0)) return abortBattle(state, frame, 'バトル参加キャラがいない（20-6・[19]）', trace)
     // 《出会い頭》: バトルカードを選択した後、[19]〜[22] の機会を得ずに結果を出す（FAQ:1375）
     if (b.skipActions && frame.step >= 19 && frame.step <= 22) return setFrame(state, advance(frame))
     if (frame.step === 28) state = battleEndCleanup(state, frame, trace)
@@ -1670,6 +1676,13 @@ function resumeFrame(state: BoardState, frame: ProcFrame): BoardState {
         return setFrame(state, { ...frame, step: 17, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rewind: false, reopen: false, abilityUsed: false } })
       }
       // 20-4[19][20][22]「イベントカードを複数回使用できる機会」: 宣言があったら同じ段の機会をもう一度開く（両者が続けて見送るまで）
+      // 指名バトルの再指名（G8b-4）: 指名が通ったキャラの《バトルに参加したとき》の窓（[17] の中。済んだら [18] へ）
+      if (frame.kind === 'battle' && frame.battle?.rejoinPhase) {
+        return setFrame(state, { ...advance(frame), resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: undefined } })
+      }
+      if (frame.kind === 'battle' && frame.battle?.rejoin?.length && !frame.battle.aborted) {
+        return setFrame(state, { ...frame, step: 17, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: frame.battle.rejoin, rejoin: [] } })
+      }
       if (frame.kind === 'battle' && frame.battle?.reopen && !frame.battle.aborted) {
         return setFrame(state, { ...frame, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, reopen: false } })
       }
@@ -2116,7 +2129,7 @@ export type ProcAction =
       nominated?: true
     }
   /** K9: 参加キャラを差し替える（鬼ごっこ系「待機状態の味方キャラ全てに変更」）。previous: 'readyIfWasReady' は未実装（人が処理・報告） */
-  | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady'; /** R4c G8a-1: 「指名」で決めた（待機だったキャラは joinedReady に入る H-7e）。「変更」ではない */ nominate?: boolean }
+  | { type: 'procSetParticipants'; frameId: string; seat: Seat; to: string[]; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady'; /** R4c G8a-1: 「指名」で決めた（待機だったキャラは joinedReady に入る H-7e）。「変更」ではない */ nominate?: boolean; /** G8b-4: 指名バトルの再指名で通った（《バトルに参加したとき》をもう一度開く） */ rejoin?: boolean; /** G8b-4: 指名バトルのカード1枚ごとの1ターン1回の印（このカードの iid） */ mark?: string }
   /** 効果でバトルを始める（《抜き打ち》「相手にバトルを挑む」）。[3] から */
   | { type: 'procStartBattle'; by: Seat; id: string }
   /** 効果でアイテムを移し替える（「アイテムの装備と同じ扱い」FAQ:804・2874）。17-3[11] から */
@@ -2314,7 +2327,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // NH-17（D15・R4a-2）: engine が「合成の宣言」（decl 付き）として渡した項目は type:'action'（14段の処理を
       // 通す＝アクション宣言の窓を持たせる）。それ以外はこれまでどおり type:'effect'
       const items: SimulItem[] = [...decls.map(declItem), ...action.items.map((it) => ({ ...it, type: (it.decl ? 'action' : 'effect') as SimulItem['type'], status: 'pending' as const }))]
-      if (items.length === 0) return { state: setFrame(s0, { ...advance({ ...g, battle }), window: null }), log: '' }
+      if (items.length === 0) return { state: setFrame(s0, { ...advance({ ...g, battle: battle && battle.rejoinPhase ? { ...battle, rejoinPhase: undefined } : battle }), window: null }), log: '' }
       const s1 = setFrame(s0, { ...g, battle, status: 'resume', resume: 'afterTiming' })
       const label = `《${stepNames(f).join('》《')}》の処理`
       return { state: pushSimul(s1, items, label, f.id, items.length > 1)[0], log: label }
@@ -2436,8 +2449,27 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const f = findFrame(state, action.frameId)
       if (!f || f.kind !== 'battle' || !f.battle) return null
       const b = f.battle
-      if (action.previous === 'readyIfWasReady') trace.push({ kind: 'manual', text: '人が処理: previous:readyIfWasReady は未実装（K9・報告）' })
       let cards = state.cards
+      let joinedBase = b.joinedReady
+      let st0 = state
+      // 指名バトル（G8b-4・FAQ:344・359・371）: 今の参加キャラを無効にして、参加前に待機だった（joinedReady）キャラは待機に戻す。参加前から消耗だったキャラは消耗のまま
+      if (action.previous === 'readyIfWasReady') {
+        const back = b.participants[action.seat].filter((iid) => b.joinedReady.includes(iid) && cards[iid])
+        cards = { ...cards }
+        for (const iid of back) cards[iid] = { ...cards[iid], orientation: 'ready' }
+        joinedBase = b.joinedReady.filter((iid) => !b.participants[action.seat].includes(iid))
+        if (action.mark) st0 = setMeta(st0, { marks: { ...st0.procMeta.marks, [action.mark]: [...(st0.procMeta.marks[action.mark] ?? []), 'renominate'] } })
+        trace.push({ kind: 'name', text: '参加キャラを無効に:' + action.seat + (back.length ? ':待機に戻す:' + back.join(':') : '') })
+      }
+      // 指名で挑むキャラになったら、挑むときの[W]を払う（マネージャー FAQ:341。20-2・NH-34④）
+      if (action.nominate && action.seat === b.challenger && action.to.length) {
+        const n = action.to.reduce((acc, iid) => acc + (state.layers.challengeCost?.[iid] ?? 0), 0)
+        if (n > 0) {
+          const pool = st0.costs[action.seat]
+          const gone = new Set([...pool].sort((p, q) => p.attrs.length - q.attrs.length).slice(0, n).map((t) => t.id))
+          st0 = { ...st0, costs: { ...st0.costs, [action.seat]: pool.filter((t) => !gone.has(t.id)) } }
+        }
+      }
       if (action.exhaust) {
         cards = { ...cards }
         for (const iid of action.to) if (cards[iid]) cards[iid] = { ...cards[iid], orientation: 'rested' }
@@ -2445,10 +2477,10 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // iid はそれぞれ独立した ':' 区切りの段にする（画面の toPublicSteps が段ごとに1個の iid しか拾えないため。
       // 「,」で1段に複数 iid を詰めると画面がカード名に置き換えられず iid のまま出てしまう＝R4b-2c 🔸1）
       trace.push({ kind: 'name', text: action.to.length ? `参加キャラを変更:${action.seat}:${action.to.join(':')}` : `参加キャラを変更:${action.seat}:無し` })
-      const s = { ...state, cards }
-      const joined = action.nominate ? [...b.joinedReady, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : b.joinedReady
+      const s = { ...st0, cards }
+      const joined = action.nominate ? [...joinedBase, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : joinedBase
       if (action.nominate) trace.push({ kind: 'name', text: '指名が通った:' + action.seat + ':' + action.to.join(':') })
-      return { state: setFrame(s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 } } }), log: '' }
+      return { state: setFrame(s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 }, ...(action.rejoin && action.to.length ? { rejoin: [...(b.rejoin ?? []), ...action.to] } : {}) } }), log: '' }
     }
     case 'procStartBattle': {
       const decl = battleDecl(action.id, action.by)

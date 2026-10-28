@@ -291,7 +291,13 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     // 20-4[8]＝挑んだ側・[13]＝挑まれた側の参加キャラが「バトルに参加したとき」
     const f = triggerFrame(state, env)
     const b = f?.battle
-    if (!f || !b || (f.step !== 8 && f.step !== 13)) return false
+    if (!f || !b) return false
+    // 指名バトルの再指名で通ったキャラの《バトルに参加したとき》（G8b-4・FAQ:635・641。[17] の中の窓）
+    if (f.step === 17 && b.rejoinPhase) {
+      const ys = resolveRef(state, env, c.joined)
+      return ys.length > 0 && ys.every((x) => b.rejoinPhase!.includes(x))
+    }
+    if (f.step !== 8 && f.step !== 13) return false
     const seat = f.step === 8 ? b.challenger : other(b.challenger)
     const xs = resolveRef(state, env, c.joined)
     return xs.length > 0 && xs.every((x) => b.participants[seat].includes(x))
