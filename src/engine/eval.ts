@@ -4,7 +4,8 @@
  */
 
 import type { BoardState, CardInstance, Seat } from '../core/board'
-import { activeSeat, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
+import { activeSeat, battleSelectable, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
+import { costOfAbility, planPayment } from './cost'
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
@@ -233,6 +234,20 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
   if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
+  if ('battleUsed' in c) {
+    const xs = resolveRef(state, env, c.battleUsed)
+    return xs.length > 0 && xs.every((x) => state.cards[x]?.zone === 'battle' && !!state.cards[x]?.used)
+  }
+  if ('battleSelectable' in c) {
+    const xs = resolveRef(state, env, c.battleSelectable)
+    const bf = nearestBattle(state)
+    const challenging = bf?.battle ? bf.battle.participants[bf.battle.challenger] : []
+    return xs.length > 0 && xs.every((x) => !!state.cards[x] && battleSelectable(state, state.cards[x], challenging, true))
+  }
+  if ('payableCost' in c) {
+    const xs = resolveRef(state, env, c.payableCost)
+    return xs.length > 0 && xs.every((x) => !!state.cards[x] && planPayment(ctx, state, env.you, null, costOfAbility(ctx, state.cards[x].cardId, null).cost, null).ok)
+  }
   if ('mustUnused' in c) {
     const xs = resolveRef(state, env, c.mustUnused)
     const p = state.procMeta.presented ?? {}

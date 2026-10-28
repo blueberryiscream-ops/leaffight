@@ -138,6 +138,9 @@ export type Cond =
   | { oathMatch: [CardRef, string] }
   /** 使う義務を負ったまま、まだ使用していない（R4c G5e・コリン／突発イベント）: そのカードが**持ち主の手札にあり**、義務を負った後に宣言で提示されていない。手札から別の場所へ移っていたら当たらない（FAQ:938 の線） */
   | { mustUnused: CardRef }
+  | { battleUsed: CardRef }                    // 使用済みのバトルカード（プロジェクト）
+  | { battleSelectable: CardRef }             // バトルチェンジの変更先: [16] と同じ判定で未使用（ビッグプロジェクトの使用済みは除く）。R4c G8b-3
+  | { payableCost: CardRef }                   // そのカードの使用代償を今の盤面で払える（再企画。planPayment と同じ判定）。R4c G8b-3
   // ── R2a で足した（HANDOFF-R2a「決めたこと」）
   | { equipsNamed: [CardRef, string] }          // そのキャラが、名前が prefix で始まるアイテムを装備している（《ファッション》の「衣装」FAQ:3819・3822）
   | { nameIs: [CardRef, string] }             // カード名が一致する（『黒うさぎの絵皿』など）
@@ -248,6 +251,7 @@ export type Op =
   | { op: 'kiryoku'; who: CardRef; delta: Expr; recover?: true; /** 実際に増えた点数（上限で切れた分・回復の影響を受けないキャラは数えない）をこの名前の枠に足す（《おもてなし》R4c G3b-1。{ chosen: 名前 } で読む） */ countTo?: string }  // 「気力－N」「気力をN点回復」＝ダメージではない（FAQ oldfaq.txt:908-909）
   | { op: 'orient'; who: CardRef; to: 'ready' | 'rested' }
   | { op: 'trash'; what: CardRef }
+  | { op: 'changeBattleCard'; card: CardRef }                  // バトルチェンジ: 種目を変更する（変更前を未使用に戻す・攻防を固定し直す・[17] からやり直す。NH-40⑦。R4c G8b-3）
   | { op: 'setBattleUsed'; what: Selector; used: boolean }       // バトルカードを使用済み／未使用にする（19-3。《猫寄せドラ》R4c G11a-2。reusable でも使用済みにする）
   /** お互いが同時に n 枚ドローする。引けなかった側が負け・両方なら引き分け（《心機一転》oldrule.txt:325。R4c G5b）。1つの action で行い、先に引けなかった側だけ負けにしない */
   | { op: 'drawBoth'; n: number }
@@ -321,7 +325,7 @@ export type Op =
    */
   // addToBattlePaid（R4b-3a-2・交渉売買）: amount { chosen:true } のとき、払った数を今のバトルの battle.paid[who] に積む（BattleExpr { paid:true } が読む）。
   // amount { chosen:true } では ifPaid/ifNot は「1枚以上払った／0枚だった（＝どちらかが支払わなくなった）」の分岐になる
-  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true }; giveTo?: PlayerRef; recordAs?: string; addToBattlePaid?: boolean;
+  | { op: 'payByPlayer'; who: PlayerRef; amount: CostIcon[] | { chosen: true } | { costOf: CardRef }; giveTo?: PlayerRef; recordAs?: string; addToBattlePaid?: boolean;
       /** 「払わなければならない」（R4c G4c・アンチ・イベント／スキル NH-34⑩）: 払えるなら払わない選択は無い。発生済みのコストが足りれば問わずに払い、足りなければ「コストを発生させる」を断れない（min 1）。発生源も手札の候補も無ければ問わずに ifNot へ */
       mandatory?: boolean; ifPaid: Op[]; ifNot: Op[] }
   // ── 能力と実体
@@ -495,6 +499,8 @@ export type Continuous =
   | { ce: 'whenLost'; do: Op[] }
   /** 使用できないバトルカード（「使用できなくなる」《大雨》ではなく《大嵐》。使用済みにはしない FAQ:1499） */
   | { ce: 'battleCardUnusable'; who: CardRef | Selector }
+  /** 使用済みでも使用できる（ビッグプロジェクト。F⑮。unusable・百物語の oncePerChar には勝たない）。R4c G8b-3 */
+  | { ce: 'usableWhenUsed'; who: CardRef | Selector }
   /** 《人気イベント》: バトルカード以外が発生源のゴミ箱送りの効果を受けない（R4c G8b-1・NH-40②。バトルカード自身の文・ルールの処理は止めない） */
   | { ce: 'noTrashByOthers'; who: CardRef }
   /** バトルを挑めない・参加できないキャラ（R4c G1a-2）。

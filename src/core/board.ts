@@ -109,6 +109,8 @@ export interface LayerState {
   bound: Record<string, string>
   /** 使用できないバトルカード（効果による。20-3・20-4[5][16] の「選択可能な」から除く） */
   unusable: string[]
+  /** 使用済みでも選択できるバトルカード（ビッグプロジェクト。20-3・[5][16] の「選択可能な」に使用済みでも入れる。unusable・oncePerChar は今のまま勝つ。R4c G8b-3） */
+  usedUsable?: string[]
   /** 使用済みにならないバトルカード（battle.reusable。[18] で used にしない） */
   reusable: string[]
   /** 一度挑んだキャラはこのターン中挑めないバトルカード（battle.oncePerCharPerTurn。procMeta.marks に印を控える） */

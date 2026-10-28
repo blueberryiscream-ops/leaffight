@@ -1103,6 +1103,8 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const unusable = new Set<string>()
   const d = derived(ctx, state)
   for (const e of d.effs) if (e.effect.ce === 'battleCardUnusable') for (const x of targetsOf(ctx, state, e)) unusable.add(x)
+  const usedUsable = new Set<string>()
+  for (const e of d.effs) if (e.effect.ce === 'usableWhenUsed') for (const x of targetsOf(ctx, state, e)) usedUsable.add(x)
   const barNow = { challenge: [] as string[], any: [] as string[], receiveRested: [] as string[] }
   for (const e of d.effs) {
     if (e.effect.ce !== 'barFromBattle') continue
@@ -1175,6 +1177,8 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const reuseChanged = reuseNow.reusable.join(',') !== state.layers.reusable.join(',') || reuseNow.oncePerChar.join(',') !== state.layers.oncePerChar.join(',')
   const unusableList = [...unusable].sort()
   const unusableChanged = unusableList.join(',') !== [...state.layers.unusable].sort().join(',')
+  const usedUsableList = [...usedUsable].sort()
+  const usedUsableChanged = usedUsableList.join(',') !== [...(state.layers.usedUsable ?? [])].sort().join(',')
   // ── 常に消耗状態（stayRested）
   const orient: { iid: string; to: 'ready' | 'rested'; why: string }[] = []
   const update: { id: string; body: Record<string, unknown> }[] = []
@@ -1226,7 +1230,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const limChanged = limNow.A !== limPrev.A || limNow.B !== limPrev.B
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
-  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || reuseChanged || barChanged || clamp.length || orient.length || limChanged) {
+  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || usedUsableChanged || reuseChanged || barChanged || clamp.length || orient.length || limChanged) {
     acts.push({
       type: 'procLayers',
       ...(add.length ? { add } : {}),
@@ -1234,6 +1238,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(update.length ? { update } : {}),
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
+      ...(usedUsableChanged ? { usedUsable: usedUsableList } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
       ...(barChanged ? { bar: { ...barNow, battleFix, noEntryReady, challengeCost, receivePrefer, barReceive, receiveDeny } } : {}),
       ...(clamp.length ? { clamp } : {}),

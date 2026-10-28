@@ -150,6 +150,8 @@ export interface BattleState {
   cardDecided: boolean
   /** [16] で種目を指定した時点の [攻][防] の属性（layers.battleFix を写したもの。バトルの最後まで固定 20-9・FAQ:292/295。無ければ印刷の攻防）。バトルチェンジ（G8b-3）は変更先を指定した時点で fixAttrsOf を呼び直す */
   fixedAttrs?: { atk: string | null; def: string | null } | null
+  /** バトルチェンジ（G8b-3）: 種目を変更した→効果が済んだら [17] からやり直す（resumeFrame）。変更先を指定したので [17]〜[18] を新しい種目でもう一度行う（NH-40⑦・F㉔） */
+  rewind?: boolean
   /** 20-4[10]: 指名の効果をもう宣言した（同じバトルでは1つまで。R4c G8a-1・NH-39②）。打ち消されても残る */
   nominated?: boolean
   /**
@@ -570,6 +572,14 @@ function setMeta(state: BoardState, patch: Partial<ProcMeta>): BoardState {
 /** 種目に指定したバトルカードの [攻][防] を固定する（layers.battleFix＝エンジンが導いた控えを写す。core はカードの知識を持たない）。G8b-3 のバトルチェンジも変更先を指定した時点でこれを呼ぶ */
 export function fixAttrsOf(state: BoardState, bc: string | null): { atk: string | null; def: string | null } | null {
   return (bc && state.layers.battleFix?.[bc]) || null
+}
+
+/** バトルカードが [16] で選択可能か（20-3・20-4[16]。使用済みでないか使用済みでも使用できる・使用できなくない・百物語の挑んだキャラ）。strict＝使用済みは必ず除く（バトルチェンジの変更先 NH-40⑦。R4c G8b-3） */
+export function battleSelectable(state: BoardState, x: CardInstance, challenging: string[], strict = false): boolean {
+  if (x.zone !== 'battle') return false
+  if (x.used && (strict || !(state.layers.usedUsable ?? []).includes(x.iid))) return false
+  if (state.layers.unusable.includes(x.iid)) return false
+  return !(state.layers.oncePerChar.includes(x.iid) && (state.procMeta.marks[x.iid] ?? []).some((m) => challenging.includes(m)))
 }
 
 /** 装備先が場にある（キャラ・バトルカード。どちらに装備できるかは装備宣言のときにエンジンが見た。R4c G8b-1） */
@@ -1161,7 +1171,7 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
     case 5: {
       // [5] バトルを行うための条件（20-3）: 選択可能なバトルカードが1枚以上・自分のフィールドに待機状態のキャラが1体以上
       // 使用できないバトルカード（効果による・R3）は「選択可能な」に入れない
-      const card = Object.values(state.cards).some((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid))
+      const card = Object.values(state.cards).some((x) => x.zone === 'battle' && (!x.used || (state.layers.usedUsable ?? []).includes(x.iid)) && !state.layers.unusable.includes(x.iid))
       const ready = challengeCandidates(state, c).length > 0
       if (!card) return abortBattle(state, frame, '選択可能なバトルカードが無い（20-3・20-4[5]）', trace)
       if (!ready) return abortBattle(state, frame, '待機状態のキャラがいない（20-3・20-4[5]）', trace)
@@ -1208,7 +1218,7 @@ function enterBattle(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
       if (b.cardDecided) return setFrame(state, advance(frame))
       // 《百物語》: 一度このバトルを挑んだキャラ（このターン）は、このバトルカードを選べない
       const challenging = b.participants[c]
-      const opts = Object.values(state.cards).filter((x) => x.zone === 'battle' && !x.used && !state.layers.unusable.includes(x.iid) && !(state.layers.oncePerChar.includes(x.iid) && (state.procMeta.marks[x.iid] ?? []).some((m) => challenging.includes(m))))
+      const opts = Object.values(state.cards).filter((x) => battleSelectable(state, x, challenging))
       if (opts.length === 0) return abortBattle(state, frame, 'バトルカードが選択できない（20-4[16]）', trace)
       return coreChoice(state, frame, { by: c, kind: 'select', purpose: 'battleCard', prompt: 'バトル種目（20-4[16]）', options: opts.map((x) => ({ key: x.iid, label: x.cardId })), min: 1, max: 1 })
     }
@@ -1655,6 +1665,10 @@ function resumeFrame(state: BoardState, frame: ProcFrame): BoardState {
       if (frame.kind === 'damage' && frame.damage!.rerun) {
         return setFrame(state, { ...frame, status: 'enter', resume: undefined, window: null, damage: { ...frame.damage!, rerun: false } })
       }
+      // バトルチェンジ（G8b-3）: 種目を変更したら [17]（バトルカードを選択したとき）からやり直す
+      if (frame.kind === 'battle' && frame.battle?.rewind && !frame.battle.aborted) {
+        return setFrame(state, { ...frame, step: 17, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rewind: false, reopen: false, abilityUsed: false } })
+      }
       // 20-4[19][20][22]「イベントカードを複数回使用できる機会」: 宣言があったら同じ段の機会をもう一度開く（両者が続けて見送るまで）
       if (frame.kind === 'battle' && frame.battle?.reopen && !frame.battle.aborted) {
         return setFrame(state, { ...frame, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, reopen: false } })
@@ -2085,6 +2099,8 @@ export type ProcAction =
       skipActions?: boolean
       abort?: string
       battleCard?: string
+      /** バトルチェンジ（G8b-3）: 種目の変更先（変更前を未使用に戻し、攻防を固定し直し、[17] からやり直す） */
+      changeCard?: string
       endTrash?: string
       /** K13: 隠し芸などの「各陣営が能力値を1つ選ぶ」の答え（chosenStat）。key は今は使っていない（1つだけの枠） */
       battleChoice?: { seat: Seat; key: string; value: string }
@@ -2117,6 +2133,7 @@ export type ProcAction =
       update?: { id: string; body: Record<string, unknown> }[]
       bound?: Record<string, string | null>
       unusable?: string[]
+      usedUsable?: string[]
       reuse?: { reusable: string[]; oncePerChar: string[] }
       bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]>; barReceive?: string[]; receiveDeny?: Record<string, string[]>; battleFix?: Record<string, { atk: string | null; def: string | null }> }
       /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
@@ -2196,7 +2213,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, battleFix: a.bar?.battleFix ?? s.layers.battleFix, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
+  s = { ...s, layers: { list, bound, unusable, usedUsable: a.usedUsable ?? s.layers.usedUsable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, battleFix: a.bar?.battleFix ?? s.layers.battleFix, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {
@@ -2384,6 +2401,13 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       if (action.battleCard) {
         b = { ...b, battleCard: action.battleCard, cardDecided: true, fixedAttrs: fixAttrsOf(state, action.battleCard) }
         trace.push({ kind: 'name', text: `バトル種目を決めた:${action.battleCard}` })
+      }
+      if (action.changeCard) {
+        // バトルチェンジ（NH-40⑦・FAQ:1034）: 今の種目のカードが場にあって使用済みなら未使用に戻す（ゴミ箱へ行ったものは戻らない）。変更先を種目にして攻防を固定し直し、[17] からやり直す
+        const old = b.battleCard ? s.cards[b.battleCard] : undefined
+        if (old && old.zone === 'battle' && old.used) s = { ...s, cards: { ...s.cards, [old.iid]: { ...old, used: false } } }
+        b = { ...b, battleCard: action.changeCard, cardDecided: true, fixedAttrs: fixAttrsOf(s, action.changeCard), rewind: true }
+        trace.push({ kind: 'name', text: `バトル種目を変更した:${action.changeCard}` })
       }
       if (action.endTrash) b = { ...b, endTrash: [...b.endTrash, action.endTrash] }
       if (action.battleChoice) {

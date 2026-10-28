@@ -840,7 +840,7 @@ function declareBattle(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: s
   if (!cur || cur.frame) return { ok: false, reason: 'バトルの宣言はメインフェイズにアクションとしてのみ（20-2）' }
   if (req.by !== activeSeat(state) || state.turn?.phase !== 'メイン') return { ok: false, reason: '自分のメインフェイズでない（20-2・20-3）' }
   if (state.turn?.n === 1) return { ok: false, reason: '先攻の1ターン目はバトルを行えない（10-2-4）' }
-  if (!Object.values(state.cards).some((c) => c.zone === 'battle' && !c.used && !state.layers.unusable.includes(c.iid))) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
+  if (!Object.values(state.cards).some((c) => c.zone === 'battle' && (!c.used || (state.layers.usedUsable ?? []).includes(c.iid)) && !state.layers.unusable.includes(c.iid))) return { ok: false, reason: '選択可能なバトルカードが無い（20-3）' }
   if (challengeCandidates(state, req.by).length === 0) return { ok: false, reason: '待機状態のキャラがいない、またはバトルを挑める（参加できる）キャラがいない（20-3・20-4[7]）' }
   void ctx
   const decl = battleDecl(id, req.by)
@@ -1695,7 +1695,9 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // PHASE-R4b §2(D): who にコストを発生させるアクションを行うか問う（7-2）。段階は itemStep の eng.awaiting.pay.stage で進める
       const who = resolvePlayer(state, env, op.who)
       const giveTo = op.giveTo ? resolvePlayer(state, env, op.giveTo) : null
-      const amount: CostIcon[] | 'chosen' = Array.isArray(op.amount) ? op.amount : 'chosen'
+      // 再企画（G8b-3・FAQ:1311）: amount { costOf } ＝そのカードの使用代償のアイコン（属性アイコンは「その属性の待機キャラがいる」条件で、選ぶ前の payableCost が見る）
+      const costCard = !Array.isArray(op.amount) && 'costOf' in op.amount ? refs(op.amount.costOf)[0] : undefined
+      const amount: CostIcon[] | 'chosen' = Array.isArray(op.amount) ? op.amount : 'costOf' in op.amount ? [...(costCard && state.cards[costCard] ? costOfAbility(ctx, state.cards[costCard].cardId, null).cost.icons : [])] : 'chosen'
       const id = `${frame.id}:${item.key}:payByPlayer${eng.seq}`
       // R4c G4c（mandatory）: 発生済みのコストで足りる／発生させる手段が何も無い→ 問わずに払う（足りなければ ifNot）。手段があるのに足りない→ 「発生させる」を断れない（min 1）
       let forced = false
@@ -1800,6 +1802,12 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const card = refs(op.card)[0]
       if (!bf || !card) return { tasks: rest, actions: [] }
       return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, battleCard: card }] }
+    }
+    case 'changeBattleCard': {
+      const bf = nearestBattle(state)
+      const card = refs(op.card)[0]
+      if (!bf || !card) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, changeCard: card }] }
     }
     case 'putBattleCard':
       return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: 'battle', owner: env.you }) as BoardAction) }
