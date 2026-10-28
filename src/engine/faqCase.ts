@@ -73,7 +73,7 @@ export type Step =
   | { pass: Side | { side: Side; at?: WindowRef } }
   | { choose: { by: Side; pick: string[] | string } }
   | { answer: { by: Side; accept: boolean } }
-  | { challenge: { by: Side; participant: string; battleCard?: string } }
+  | { challenge: { by: Side; participant: string; battleCard?: string; /** 統括38: 前のバトルが済んでメインの窓に戻ってから挑む（同じターンの2戦目） */ at?: WindowRef } }
   | { force: Op }
 
 /** FAQ の答えに書いてある結果だけ */

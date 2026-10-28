@@ -660,7 +660,7 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
       } else if ('declare' in step) doDeclare(run, i, step.declare)
       else if ('challenge' in step) {
         run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
-        doDeclare(run, i, { by: step.challenge.by, source: step.challenge.participant, battle: true })
+        doDeclare(run, i, { by: step.challenge.by, source: step.challenge.participant, battle: true, ...(step.challenge.at ? { at: step.challenge.at } : {}) })
         run.intent[seatOf(step.challenge.by)] = { participant: step.challenge.participant, battleCard: step.challenge.battleCard }
       } else if ('generateCost' in step) doDeclare(run, i, { by: step.generateCost.by, source: step.generateCost.source, at: step.generateCost.at, costGen: true, ...(step.generateCost.also ? { payWith: step.generateCost.also } : {}) })
       else if ('advancePhase' in step) {

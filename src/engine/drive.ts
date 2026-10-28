@@ -981,6 +981,8 @@ function checkTargets(ctx: EngineCtx, state: BoardState, frame: ProcFrame): stri
 /** タイミングの段: 処理条件がある常時効果（12-2-1）を同時処理の項目にする */
 function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<SimulItem, 'status' | 'type'>[] {
   const applied = (frame.eng.applied as string[] | undefined) ?? []
+  // G8b-4（統括38・FAQ:641）: 指名バトルの再指名の《バトルに参加したとき》の窓は、[8][13] とは別の「参加した」＝処理済みの記録を分けて数える
+  const tag = frame.kind === 'battle' && frame.battle?.rejoinPhase ? '#rejoin' : ''
   const condRedirected = !!frame.eng.condRedirected
   // [28]《バトル終了時》に処理される効果（atBattleEnd で預けたもの）
   type AtEnd = { key: string; label: string; by: Seat; sourceIid: string | null; ops: Op[]; env: Env }
@@ -1003,7 +1005,7 @@ function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<
         })
       : []
   return [...atEnd, ...atTurn, ...conditionalHits(ctx, state, frame)
-    .filter((h) => !applied.includes(h.key))
+    .filter((h) => !applied.includes(h.key + tag))
     // H-2: 処理条件がある常時効果による受け渡しは、ダメージ1件につき1回
     .filter((h) => !(condRedirected && h.ab.effect.some((op) => op.op === 'redirectDamage')))
     .map((h) => {
@@ -1130,7 +1132,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
         return [...acts, { type: 'procTrace', entry: { kind: 'name', text: `読み飛ばし:${item.label}` } }, done(true)]
       }
       // この手順（ダメージ1件など）で処理済みの効果として記録する（受け手の差し替えでやり直す段で同じ効果を二度処理しない）
-      if (trig) acts.push({ type: 'procEngine', frameId: trig.id, patch: { applied: [...((trig.eng.applied as string[]) ?? []), item.key] } })
+      if (trig) acts.push({ type: 'procEngine', frameId: trig.id, patch: { applied: [...((trig.eng.applied as string[]) ?? []), item.key + (trig.kind === 'battle' && trig.battle?.rejoinPhase ? '#rejoin' : '')] } })
     }
     // PHASE-R4b0 追加: 処理条件がある常時効果（conditional。宣言を通らないので violations() に届かない）も、
     // 発生源がキャラなら暗黙の対象（(A) と同じ拾い方）が特殊能力の対象にならないキャラなら効果を及ぼさない（FAQ:697・3573）。
