@@ -125,6 +125,7 @@ export type Cond =
   | { battleAt: number[] }                     // 20-4 の手順番号で直接指す
   | { isParticipant: CardRef; side?: 'challenger' | 'challenged' }
   | { same: [CardRef, CardRef] }
+  | { among: [CardRef, CardRef] }            // 1枚目（1体）が2枚目（複数でもよい）に含まれる（対戦キャラが複数のとき。《士気アップ》G8c-2・NH-41④）
   | { friendly: [CardRef, CardRef] }           // 2枚が同じ使用権者の味方か（『味方キャラ』）
   | { isLeader: CardRef }
   | { ready: CardRef }

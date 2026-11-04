@@ -207,6 +207,11 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const b = resolveRef(state, env, c.same[1])
     return a.length === 1 && b.length === 1 && a[0] === b[0]
   }
+  if ('among' in c) {
+    const a = resolveRef(state, env, c.among[0])
+    const b = resolveRef(state, env, c.among[1])
+    return a.length === 1 && b.includes(a[0])
+  }
   if ('friendly' in c) {
     const a = resolveRef(state, env, c.friendly[0])[0]
     const b = resolveRef(state, env, c.friendly[1])[0]
