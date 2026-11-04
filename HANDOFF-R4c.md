@@ -2508,3 +2508,10 @@ turnEnd [1] は同時の項目の順を **AP が選ぶ**（13-2・proc.ts nextIt
 5. tested 316／draft 4／manual 44・R4c ✅1236・verify 緑 ✅
 6. 判断が要る点: 上の「判断メモ」
 7. ツールの呼び出し: 約54回
+
+
+## 統括41の検証（G9a-1）— 途中（5h枠 94% で止めた）
+- 確かめた: コミット 1a70374・2741ec2／rules 65ed8a6。仕組みの diff は6ファイル +58/−7（改行コード: proc.ts・board.ts CRLF、layers/dsl/eval/drive LF＝元のまま）。test:faq を統括が回し直して R2a ✅57・保留1／R2b 37／R3 18／R4a 30／R4b 21／**R4c ✅1236 ❌0**（サブの報告と一致）
+- 読んだ: effectInProgress（simul の effect が running で eng.tasks が残る間は limitFix を返さない）・fitsField（出した後の盤面を仮に作って limitViolations）・charLimitOf（フェンス2・大混雑は AP だけ null）・exempt が addContinuous の exemptLimit 層も見る・callReady は kind call の [13] だけ
+- **まだ**: 統括の別の1か所での ❌ の取り直し／_tested.json で束のカードの status と reason／ケースが仕組みを本当に通っているかの読み／サブの未完（FAQ:1691・4196・4229・HM-12S・妨害工作×蘇生・乱入のタッグ断る側・ラッシュ／フェンスが離れたら戻る・FAQ:1625・大混雑のターン終了の是正 rule:437-442）＝G9a-1 の残りとして次の束の前に片付ける
+- 🔸 サブの判断: 通常の呼び出しは宣言時に5体以上なら drive.ts が宣言を断る（既存）→「HM-12 6体目は是正」を断る形のケースにした。rule:686 と合っているかを統括が確かめる
