@@ -1182,7 +1182,7 @@ function placeChar(state: BoardState, frame: ProcFrame, kiryoku: number | null, 
   }
   let s = moveCard(state, { iid, toOwner: by, toZone: 'char', cardName: c.cardId }).state
   // 呼び出しは消耗状態で、タッグ化は待機状態で出す。summon は frame.summon.orientation の指定どおり（D18「待機状態で」等）
-  const orientation = isSummon ? frame.summon!.orientation : frame.kind === 'call' ? 'rested' : 'ready'
+  const orientation = isSummon ? frame.summon!.orientation : frame.kind === 'call' ? (state.layers.callReady ? 'ready' : 'rested') : 'ready'
   s = { ...s, cards: { ...s.cards, [iid]: { ...s.cards[iid], orientation, kiryoku: kiryoku ?? s.cards[iid].kiryoku, attachedTo: null } } }
   trace.push({ kind: 'name', text: frame.label, id: frame.decl?.id })
   // 【決めたこと】気力0以下で出たキャラはその瞬間にダウンする（FAQ:3266「タッグ化した瞬間に、ダウンした」）
@@ -2179,6 +2179,7 @@ export type ProcAction =
       bound?: Record<string, string | null>
       unusable?: string[]
       usedUsable?: string[]
+      callReady?: boolean
       reuse?: { reusable: string[]; oncePerChar: string[] }
       bar?: { challenge: string[]; any: string[]; receiveRested: string[]; noEntryReady?: string[]; challengeCost?: Record<string, number>; receivePrefer?: Record<string, string[]>; barReceive?: string[]; receiveDeny?: Record<string, string[]>; battleFix?: Record<string, { atk: string | null; def: string | null }> }
       /** 効かなくなっている層の id（エンジンが導き出す）と、再び効き始めた層（seq を今の一番後ろに取り直す。NH-37⑯） */
@@ -2258,7 +2259,7 @@ function applyLayers(state: BoardState, a: Extract<ProcAction, { type: 'procLaye
     }
   }
   const unusable = a.unusable ?? s.layers.unusable
-  s = { ...s, layers: { list, bound, unusable, usedUsable: a.usedUsable ?? s.layers.usedUsable, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, battleFix: a.bar?.battleFix ?? s.layers.battleFix, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
+  s = { ...s, layers: { list, bound, unusable, usedUsable: a.usedUsable ?? s.layers.usedUsable, callReady: a.callReady ?? s.layers.callReady, reusable: a.reuse?.reusable ?? s.layers.reusable, oncePerChar: a.reuse?.oncePerChar ?? s.layers.oncePerChar, barChallenge: a.bar?.challenge ?? s.layers.barChallenge, barAny: a.bar?.any ?? s.layers.barAny, receiveRested: a.bar?.receiveRested ?? s.layers.receiveRested, noEntryReady: a.bar?.noEntryReady ?? s.layers.noEntryReady, challengeCost: a.bar?.challengeCost ?? s.layers.challengeCost, receivePrefer: a.bar?.receivePrefer ?? s.layers.receivePrefer, barReceive: a.bar?.barReceive ?? s.layers.barReceive, receiveDeny: a.bar?.receiveDeny ?? s.layers.receiveDeny, battleFix: a.bar?.battleFix ?? s.layers.battleFix, held: a.held ?? s.layers.held, ...((a.limit ?? s.layers.handLimit) ? { handLimit: a.limit ?? s.layers.handLimit } : {}) } }
   if (a.clamp?.length || a.orient?.length) {
     const cards = { ...s.cards }
     for (const c of a.clamp ?? []) {

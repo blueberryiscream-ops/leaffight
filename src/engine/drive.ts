@@ -44,7 +44,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -870,7 +870,9 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
     // 15-2 同名キャラ制限・キャラ数制限（宣言時の制限 15-10-1）
     // 《HM-13》量産:「同名キャラの制限を受けない」（exemptLimit sameName。手札のこのカード自身の特性で見る FAQ:3536）
     if (!exempt(ctx, state, src.iid, 'sameName') && mine.some((c) => ctx.cards[c.cardId]?.name === info.name)) return { ok: false, reason: '同名のキャラが自分のフィールドにいる（15-2）' }
-    if (mine.filter((c) => c.zone !== 'leader').length >= 5) return { ok: false, reason: 'キャラ数制限（15-2）' }
+    // R4c G9a-1: 上限は charLimitOf（フェンス＝2・大混雑＝なし）・数えないキャラ（乱入）は除く
+    const cap = charLimitOf(ctx, state, req.by)
+    if (cap !== null && mine.filter((c) => c.zone !== 'leader' && !exempt(ctx, state, c.iid, 'charCount')).length >= cap && !exempt(ctx, state, src.iid, 'charCount')) return { ok: false, reason: 'キャラ数制限（15-2）' }
   } else if (kind === 'tag') {
     // 15-10-2[4]: 構成要素の2枚（フィールドの待機状態のキャラ1体以上＋残りは手札）。名前はタッグの名前（「＆」の前後）
     const names = info.name.split('＆')

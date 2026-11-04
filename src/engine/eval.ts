@@ -9,7 +9,7 @@ import { costOfAbility, planPayment } from './cost'
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
-import { attrsNow, battlePlaceNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
+import { fitsField, attrsNow, battlePlaceNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
   if (typeof p === 'string') {
@@ -238,6 +238,10 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     }
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
+  if ('fitsField' in c) {
+    const fid = resolveRef(state, env, c.fitsField)[0]
+    return !!fid && fitsField(ctx, state, fid, env.you, c.ignoreCount)
+  }
   if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
   if ('battleUsed' in c) {
     const xs = resolveRef(state, env, c.battleUsed)

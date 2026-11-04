@@ -132,6 +132,8 @@ export type Cond =
   | { cmp: [Expr, '<' | '<=' | '==' | '>=' | '>', Expr] }
   | { pureAttrs: CardRef; side: 'atk' | 'def' | 'both' } // 用語【属性のみで構成された～】oldrule.txt:1250-1252
   | { exists: Selector }
+  /** そのカード（1枚）を今フィールドに出したら、フィールドのキャラ制限を満たせるか（使用者の席。「満たせない場合は打ち消される」。R4c G9a-1） */
+  | { fitsField: CardRef; ignoreCount?: boolean }
   /** その枠に選んだ答えがある（効果の中の「〜することができる」の選択。R4c G5c） */
   | { picked: string }
   /** 宣誓（slot 名の答え＝キャラクター／バトル／イベント／その他）の通りのカードか。キャラクター＝c／バトル＝b／イベント＝e／その他＝i・f・t（タッグは「その他」FAQ:3093・規 586）。
@@ -445,6 +447,10 @@ export type Continuous =
   | { ce: 'battleAttrSwap'; battleCard: CardRef; requires: 'pureAttrs' }                 // [攻]と[防]の入れ替え
   | { ce: 'battleAttrSet'; battleCard: CardRef; side: 'atk' | 'def'; to: Attr; requires: 'pureAttrs' }
   | { ce: 'controller'; who: CardRef; to: PlayerRef }                                     // 使用権の移動（14-4）
+  /** キャラ数の上限を変える（フェンス＝両者2・大混雑＝アクティブプレイヤーは上限なし null。FAQ:4196 は大混雑が勝つ）。R4c G9a-1 */
+  | { ce: 'charLimit'; max: number | null; seats: 'both' | 'active' }
+  /** 通常の呼び出し（15-10-1[13]）を待機状態にする（ラッシュ。「消耗状態で呼び出す」と書かれた効果は変わらない FAQ:4232）。R4c G9a-1 */
+  | { ce: 'callReady' }
   | { ce: 'exemptLimit'; who: CardRef | Selector; limit: 'charCount' | 'sameName' | 'component' }
   /** 使用代償の増減（K6・D3・D4）。払うとき（15-13-1[9]・16-1[9]）の状態で評価する: 印刷値のコストアイコン枚数・気力コストへ、
    *  当てはまる costMod を全部（層の順で）まとめて加算してから下限をとる（アイコンは種類ごとに0未満にならない。気力コストは最終値が0未満にならない）。

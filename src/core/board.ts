@@ -111,6 +111,8 @@ export interface LayerState {
   unusable: string[]
   /** 使用済みでも選択できるバトルカード（ビッグプロジェクト。20-3・[5][16] の「選択可能な」に使用済みでも入れる。unusable・oncePerChar は今のまま勝つ。R4c G8b-3） */
   usedUsable?: string[]
+  /** 通常の呼び出しを待機状態にする（ラッシュ。エンジンが導き出して置く。R4c G9a-1） */
+  callReady?: boolean
   /** 使用済みにならないバトルカード（battle.reusable。[18] で used にしない） */
   reusable: string[]
   /** 一度挑んだキャラはこのターン中挑めないバトルカード（battle.oncePerCharPerTurn。procMeta.marks に印を控える） */

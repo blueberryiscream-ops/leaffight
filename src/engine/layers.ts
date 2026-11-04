@@ -1179,6 +1179,9 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const unusableChanged = unusableList.join(',') !== [...state.layers.unusable].sort().join(',')
   const usedUsableList = [...usedUsable].sort()
   const usedUsableChanged = usedUsableList.join(',') !== [...(state.layers.usedUsable ?? [])].sort().join(',')
+  // R4c G9a-1 仕組み④: 通常の呼び出しを待機にする（ラッシュ）
+  const callReadyNow = d.effs.some((e) => e.effect.ce === 'callReady')
+  const callReadyChanged = callReadyNow !== !!state.layers.callReady
   // ── 常に消耗状態（stayRested）
   const orient: { iid: string; to: 'ready' | 'rested'; why: string }[] = []
   const update: { id: string; body: Record<string, unknown> }[] = []
@@ -1230,7 +1233,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
   const limChanged = limNow.A !== limPrev.A || limNow.B !== limPrev.B
   const acts: BoardAction[] = []
   const hasBound = Object.keys(bound).length > 0
-  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || usedUsableChanged || reuseChanged || barChanged || clamp.length || orient.length || limChanged) {
+  if (heldChanged || regainedLayers.length || add.length || remove.length || update.length || hasBound || unusableChanged || usedUsableChanged || callReadyChanged || reuseChanged || barChanged || clamp.length || orient.length || limChanged) {
     acts.push({
       type: 'procLayers',
       ...(add.length ? { add } : {}),
@@ -1239,6 +1242,7 @@ export function syncActions(ctx: EngineCtx, state: BoardState): BoardAction[] {
       ...(hasBound ? { bound } : {}),
       ...(unusableChanged ? { unusable: unusableList } : {}),
       ...(usedUsableChanged ? { usedUsable: usedUsableList } : {}),
+      ...(callReadyChanged ? { callReady: callReadyNow } : {}),
       ...(reuseChanged ? { reuse: reuseNow } : {}),
       ...(barChanged ? { bar: { ...barNow, battleFix, noEntryReady, challengeCost, receivePrefer, barReceive, receiveDeny } } : {}),
       ...(clamp.length ? { clamp } : {}),
@@ -1332,6 +1336,11 @@ export const LIMIT_RULES: LimitRule[] = [
 ]
 
 export function exempt(ctx: EngineCtx, state: BoardState, iid: string, limit: 'charCount' | 'sameName' | 'component'): boolean {
+  // R4c G9a-1: 効果で与えた期限つきの免除（乱入・精神支配。addContinuous の層）
+  for (const l of state.layers.list) {
+    const lf = bodyOf(l).effect
+    if (l.ability === null && lf?.ce === 'exemptLimit' && lf.limit === limit && l.targets.includes(iid)) return true
+  }
   // 例外は DSL の exemptLimit（常時効果。カードの特性 FAQ:1962）
   const c = state.cards[iid]
   const def = c ? ctx.defs[c.cardId] : undefined
@@ -1366,6 +1375,31 @@ interface LimitViolation {
   options: string[]
 }
 
+/** R4c G9a-1: そのプレイヤーのキャラ数の上限（フェンス＝2・大混雑＝AP は失う FAQ:4196）。null＝上限なし */
+export function charLimitOf(ctx: EngineCtx, state: BoardState, seat: Seat): number | null {
+  const ap = activeSeat(state)
+  const xs = derived(ctx, state).effs.map((e) => e.effect).filter((f): f is Extract<Continuous, { ce: 'charLimit' }> => f.ce === 'charLimit' && (f.seats === 'both' || seat === ap))
+  if (xs.length === 0) return 5
+  if (xs.some((f) => f.max === null)) return null
+  return Math.min(...xs.map((f) => f.max as number))
+}
+
+/**
+ * R4c G9a-1（仕組み②）: このカードを、この席のフィールドに今出したら、フィールドのキャラ制限（同名・構成要素・キャラ数）を満たせるか。
+ * limitViolations と同じ規則・同じ例外で、出した後の盤面を仮に作って確かめる。数えるのは処理時（FAQ:3669・2007・2734）
+ */
+export function fitsField(ctx: EngineCtx, state: BoardState, iid: string, seat: Seat, ignoreCount = false): boolean {
+  const c = state.cards[iid]
+  if (!c) return false
+  const hyp: BoardState = { ...state, cards: { ...state.cards, [iid]: { ...c, zone: 'char', owner: seat, attachedTo: null } } }
+  return !limitViolations(ctx, hyp).some((v) => v.seat === seat && (v.rule.id === 'sameName' || v.rule.id === 'component' || (v.rule.id === 'charCount' && !ignoreCount)) && v.options.includes(iid))
+}
+
+/** 効果の処理の途中（処理の残りがある効果が走っている間）か。是正はその効果が終わってから（NH-42❹・FAQ:1382） */
+function effectInProgress(state: BoardState): boolean {
+  return state.proc.some((f) => f.simul?.items.some((it) => it.type === 'effect' && it.status === 'running' && Array.isArray((it.eng as { tasks?: unknown[] }).tasks) && (it.eng as { tasks: unknown[] }).tasks.length > 0))
+}
+
 /** 今の違反（AP の側から）。options＝ゴミ箱送りにする候補（制限を受けているものだけ FAQ:3299） */
 export function limitViolations(ctx: EngineCtx, state: BoardState): LimitViolation[] {
   const out: LimitViolation[] = []
@@ -1388,7 +1422,8 @@ export function limitViolations(ctx: EngineCtx, state: BoardState): LimitViolati
     }
     // キャラ数制限（例外のキャラは数えず、選ばない FAQ:3329）
     const counted = chars.filter((c) => c.zone !== 'leader' && !exempt(ctx, state, c.iid, 'charCount'))
-    if (counted.length > 5) out.push({ seat, rule: R('charCount'), options: counted.map((c) => c.iid) })
+    const cap = charLimitOf(ctx, state, seat)
+    if (cap !== null && counted.length > cap) out.push({ seat, rule: R('charCount'), options: counted.map((c) => c.iid) })
     // アイテム（使用権者＝装備しているキャラ／バトルカードの使用者）
     const items = Object.values(state.cards).filter((c) => c.attachedTo && staticSourceActive(state, c.iid) && (controllerOf(state, c.iid) ?? c.owner) === seat)
     const bad = items.filter((c) => equipProblem(ctx, state, c, c.attachedTo!))
@@ -1409,6 +1444,7 @@ export function limitViolations(ctx: EngineCtx, state: BoardState): LimitViolati
  */
 export function limitFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
   if (state.result || state.procMeta.choice) return null
+  if (effectInProgress(state)) return null // R4c G9a-1 仕組み①: 効果の処理が終わってから（drive.ts の駆動ループの前の最初の判定。FAQ:1382）
   const v = limitViolations(ctx, state)[0]
   if (!v || v.options.length === 0) return null
   const reason = `${v.rule.rule}（${v.rule.where}）`
