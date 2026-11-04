@@ -148,6 +148,7 @@ export type Cond =
   // ── R2b で足した
   | { joined: CardRef }                        // いまの段（20-4[8]・[13]）でバトルに参加したキャラ（「バトルに参加したとき」）
   | { battleResult: true }                     // 進行中のダメージ（・ダウン）がバトルの結果ダメージ（20-10。FAQ:3978「攻と防から計算されたもの」）
+  | { challengePicked: CardRef }              // このターン、そのキャラが「挑むキャラ」に一度でも選ばれた（後で中断・伏兵・指名で替わっても。好戦的 G8c-2・NH-41③）
   | { activeIs: PlayerRef }                    // そのプレイヤーのターン（「自分のターンの終了時」）
   | { battlePlace: [CardRef, '屋内' | '屋外' | '水中' | '暗闇'] } // バトルカードの分類
   | { joinedReady: CardRef }                   // 待機状態でバトルに参加したキャラ（《エキサイト》）
@@ -381,6 +382,8 @@ export type Op =
   // ── R2b で足した（HANDOFF-R2b「決めたこと」。バトルの手順の状態を変える・手順を起こす）
   /** バトルの結果ダメージ（to が受ける分）を増減・固定する。計算前なら計算の後に当てる。0以下は増減しない（20-10）。evenIfZero はカードの表記（21） */
   | { op: 'battleDamage'; to: CardRef | 'all'; delta?: Expr; set?: number; evenIfZero?: boolean }
+  /** 痛み分け（G8c-2・NH-41②）: このバトルの参加キャラ（両側・後から入ったキャラも）が受けるダメージ1回ごとに amount 軽減（[28] まで。受けるとき 15-4-2[4]） */
+  | { op: 'battleDamageReduce'; amount: number }
   | { op: 'firstStrike' }                                                           // このバトルの結果で味方キャラが先にダメージを与える（《先手必勝》）
   | { op: 'skipBattleActions' }                                                     // [19]〜[22] を行わずに結果を出す（《出会い頭》FAQ:1375）
   | { op: 'abortBattle' }                                                           // そのバトルは中断する（「放棄」「遅刻」）

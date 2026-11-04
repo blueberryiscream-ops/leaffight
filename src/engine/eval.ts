@@ -4,7 +4,7 @@
  */
 
 import type { BoardState, CardInstance, Seat } from '../core/board'
-import { activeSeat, battleSelectable, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
+import { CHALLENGE_PICKED, activeSeat, battleSelectable, findFrame, inBattle, nearestBattle, type ProcFrame } from '../core/proc'
 import { costOfAbility, planPayment } from './cost'
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
@@ -305,6 +305,11 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   if ('battleResult' in c) {
     const f = triggerFrame(state, env)
     return !!(f?.damage?.battle || f?.down?.byBattle)
+  }
+  if ('challengePicked' in c) {
+    const xs = resolveRef(state, env, c.challengePicked)
+    const picked = state.procMeta.marks[CHALLENGE_PICKED] ?? []
+    return xs.length > 0 && xs.every((x) => picked.includes(x))
   }
   if ('activeIs' in c) return activeSeat(state) === resolvePlayer(state, env, c.activeIs)
   if ('battlePlace' in c) {

@@ -201,6 +201,8 @@ export interface BattleState {
   dmgCap: number | null
   /** 結果ダメージを半分にする（《漫画》FAQ:3985）。null＝しない */
   dmgHalf: 'ceil' | null
+  /** 痛み分け（G8c-2）: このバトルの参加キャラが受けるダメージ1回ごとの軽減の合計（[28] まで。バトルが終われば BattleState ごと無くなる）。受けるとき（15-4-2[4]）に引く */
+  dmgReduce: number
 }
 
 /** 層を足すときの形（id・seq・battleId は core が決める。battleId は until battle か攻防修正のとき最も近いバトル）。R3 で R2b の ProcMod を置き換えた */
@@ -282,6 +284,8 @@ export interface ProcFrame {
     battle?: string | null
     /** 受け手が差し替わる前の受け手（H-13: 対戦キャラ） */
     origRecipient?: string | null
+    /** 痛み分け（G8c-2）: [4] の軽減を当てた */
+    reduced?: boolean
   }
   down?: {
     iid: string
@@ -741,6 +745,7 @@ function newBattle(challenger: Seat, extra: Partial<BattleState> = {}): BattleSt
     negotiated: false,
     dmgCap: null,
     dmgHalf: null,
+    dmgReduce: 0,
     ...extra,
   }
 }
@@ -853,6 +858,13 @@ function nearestActionFrame(state: BoardState): string | null {
 export function nearestBattle(state: BoardState): ProcFrame | undefined {
   for (let i = state.proc.length - 1; i >= 0; i--) if (state.proc[i].kind === 'battle' && state.proc[i].status !== 'done') return state.proc[i]
   return undefined
+}
+
+/** 好戦的（G8c-2・NH-41③）: 「挑むキャラ」に選ばれたキャラを、このターンの記録（procMeta.marks の特別な鍵。ターン終了の段2で消える）に足す。後で中断・伏兵・指名で替わっても残る */
+export const CHALLENGE_PICKED = '__challengePicked'
+function markChallengePicked(state: BoardState, iids: string[]): BoardState {
+  if (iids.length === 0) return state
+  return setMeta(state, { marks: { ...state.procMeta.marks, [CHALLENGE_PICKED]: [...(state.procMeta.marks[CHALLENGE_PICKED] ?? []), ...iids] } })
 }
 
 /** 20-5「バトル中」＝手順[4]〜[28] */
@@ -975,6 +987,16 @@ function enterStep(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
           return setFrame(state, { ...frame, status: 'done' })
         }
         trace.push({ kind: 'name', text: frame.label, id: frame.decl?.id })
+      }
+    }
+    // 痛み分け（G8c-2・NH-41②）: [4] 受けるとき、そのバトル（[28] まで）の参加キャラ（両側・後から入ったキャラも）が受けるダメージ1回ごとに軽減（自動）。0以下なら以後の段は無い
+    if (frame.kind === 'damage' && frame.step === 4 && !frame.damage!.reduced) {
+      const nb = nearestBattle(state)
+      const bb = nb?.battle
+      const d0 = frame.damage!
+      if (bb && nb!.step <= 28 && bb.dmgReduce > 0 && d0.value > 0 && [...bb.participants.A, ...bb.participants.B].includes(d0.recipient)) {
+        trace.push({ kind: 'name', text: `ダメージ軽減:${d0.recipient}:${d0.value}→${Math.max(0, d0.value - bb.dmgReduce)}` })
+        return setFrame(state, { ...frame, damage: { ...d0, value: Math.max(0, d0.value - bb.dmgReduce), reduced: true } })
       }
     }
     if (frame.kind === 'damage' && (frame.damage!.value <= 0 || !onField(state.cards[frame.damage!.recipient]))) {
@@ -1444,7 +1466,7 @@ function applyCoreChoice(state: BoardState, ch: ProcChoice, pick: string[], trac
         s = { ...s, cards: { ...s.cards, [iid]: { ...x, orientation: 'rested' } } }
         trace.push({ kind: 'name', text: `バトル参加:${iid}`, id: `${frame.id}:${iid}` })
       }
-      return setFrame(s, { ...advance(frame), battle: { ...b!, participants: { ...b!.participants, [seat]: pick }, decided: { ...b!.decided, [seat]: pick.length > 0 }, joinedReady } })
+      return setFrame(seat === b!.challenger ? markChallengePicked(s, pick) : s, { ...advance(frame), battle: { ...b!, participants: { ...b!.participants, [seat]: pick }, decided: { ...b!.decided, [seat]: pick.length > 0 }, joinedReady } })
     }
     case 'battleCard':
       return setFrame(state, { ...advance(frame), battle: { ...b!, battleCard: pick[0] ?? null, cardDecided: pick.length > 0, fixedAttrs: fixAttrsOf(state, pick[0] ?? null) } })
@@ -2133,6 +2155,8 @@ export type ProcAction =
       dmgCap?: number
       /** 漫画 R4b-3c-1: 結果ダメージを半分にする（battle.dmgHalf） */
       dmgHalf?: 'ceil'
+      /** 痛み分け（G8c-2）: 受けるダメージ1回ごとの軽減を足す */
+      dmgReduce?: number
       /** R4c G8a-1（NH-39②）: 指名の効果を宣言した印 */
       nominated?: true
     }
@@ -2445,6 +2469,10 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       }
       if (action.dmgCap !== undefined) b = { ...b, dmgCap: action.dmgCap }
       if (action.dmgHalf !== undefined) b = { ...b, dmgHalf: action.dmgHalf }
+      if (action.dmgReduce) {
+        b = { ...b, dmgReduce: b.dmgReduce + action.dmgReduce }
+        trace.push({ kind: 'name', text: `受けるダメージを軽減:${action.dmgReduce}` })
+      }
       if (action.abort && !b.aborted) {
         b = { ...b, aborted: action.abort }
         trace.push({ kind: 'abort', text: `バトル中断: ${action.abort}`, id: f.decl?.id })
@@ -2489,7 +2517,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const s = { ...st0, cards }
       const joined = action.nominate || action.exhaust ? [...joinedBase, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : joinedBase
       if (action.nominate) trace.push({ kind: 'name', text: '指名が通った:' + action.seat + ':' + action.to.join(':') })
-      return { state: setFrame(s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 }, ...(action.rejoin && action.to.length ? { rejoin: [...(b.rejoin ?? []), ...action.to] } : {}) } }), log: '' }
+      return { state: setFrame(action.seat === b.challenger ? markChallengePicked(s, action.to) : s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 }, ...(action.rejoin && action.to.length ? { rejoin: [...(b.rejoin ?? []), ...action.to] } : {}) } }), log: '' }
     }
     case 'procStartBattle': {
       const decl = battleDecl(action.id, action.by)

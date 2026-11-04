@@ -1783,6 +1783,12 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const delta = op.delta !== undefined ? evalExpr(ctx, state, env, op.delta) : undefined
       return { tasks: rest, actions: seats.map((seat) => ({ type: 'procBattle', frameId: bf.id, edit: { seat, delta, set: op.set, evenIfZero: op.evenIfZero } }) as BoardAction) }
     }
+    case 'battleDamageReduce': {
+      // 痛み分け（G8c-2）: そのバトルの参加キャラが受けるダメージ1回ごとの軽減。受けるとき（15-4-2[4]）に core が引く
+      const bf = nearestBattle(state)
+      if (!bf?.battle) return manual('バトル中でない')
+      return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, dmgReduce: op.amount }] }
+    }
     case 'firstStrike': {
       const bf = nearestBattle(state)
       if (!bf) return manual('バトル中でない')
