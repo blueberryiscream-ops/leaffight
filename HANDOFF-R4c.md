@@ -2373,3 +2373,15 @@ turnEnd [1] は同時の項目の順を **AP が選ぶ**（13-2・proc.ts nextIt
 - 🔸 再指名の窓（[17] の中の《バトルに参加したとき》）では宣言の機会も開く（[8][13] と同じ扱い）
 - 🔸 画面の束へ: 再指名の問いの文言（「指名バトル: 参加させる相手キャラを指名する」）・AP→NAP の順・rejoin の窓（2タブ未確認）
 - ✅ **G8b-4 合格＝G8b 完了**。次は G8c（r4c-plan）を原典照合スキルから
+
+## R4c G8c-1（実装: Sonnet 5.5・2026-11-04）
+
+- 完了（下の「未確認」を除く）。tested 299→309。test:faq: R4c 1194件 ✅1194／保留0／❌0（前 1188／❌6）、R2a〜R4b 下がらず。verify 緑。
+- 仕組みの前の出力: `実行（R4c の対象 1194件）: ✅ 1188／保留 0／❌ 6`（❌＝伏兵 AP・消耗のまま・メイフィア模写・不幸の呪い・参加し直し2回・迷子-複数参加(期待の書き方)）。側が challenged 固定のため NAP の伏兵は仕組み前でも ✅（side:own が無くても NAP は challenged）。
+- 直す前 ❌ を「1か所だけ外して」取る確認は **ツール上限のため未実施**（使用者の側／全員を雄蔵1体／readyIfWasReady／joinedReady に入れない／参加し直しの窓／遅刻 perTurn・全体中断と迷子の続行）。仕組み全体を外した状態の ❌6 だけ取った。統括で個別に外して確かめてほしい。
+- ケース: authored/R4c-G8c1.mjs 33本（伏兵 14・足手まとい 5・迷子 6・遅刻 5＋faq-3199・faq-3202（宣言と処理の段.mjs から移動・期待は元のまま））。数値は雄蔵(力4早2)・エリア(早2)から手計算。
+- 仕組み: dsl.ts setParticipants に side:`own`・rejoin／drive.ts setParticipants（env.you の席・rejoin を渡す）／proc.ts: BattleState に rejoinBack・rejoinN、[19][20][22] の中の参加し直しはその段に戻る（resumeFrame・procTimingDone）、stepNames・eval.ts の joined を [17] 限定から外す、applied の鍵に rejoinN（回ごと）、鬼ごっこ等 exhaust:true の参加も joinedReady に入る（待機から参加→伏兵・指名バトルで戻る）。
+- カード: c_立川雄蔵（R・setParticipants own・readyIfWasReady・rejoin）／c_塚本千紗（足手まとい＝寝不足と同じ・迷子＝moveTo hand）／t_たま＆アレイ（遅刻＝abortBattle・perTurn 1）。faqReview: 3199・3202・123=case、2881=na（pool.json に高速印刷なし）。メイフィア faq-3202・攻撃一本槍 faq-3199 を ok→case に。
+- 迷子の (GG) は G アイコン＝ほかのキャラ2体の消耗（payWith）で払うケースにした（同名キャラ制限に注意: pa=桑嶋高子・pb=たま）。迷子後の参加キャラ配列は c1 を含んだまま（alive で数える）ので participants の期待は書かない。
+- 迷ったこと: (1) [25] の窓の断りケースは ✅（既存の窓の定めで断られている）。(2) 迷子・遅刻の [28]/[29] は abortBattle の既存挙動（放棄のケースが見る）に任せ新ケースは足していない。(3) 乱数・時刻は core に入れていない。
+- 未確認: 実機、直す前❌の個別取り（上）、遅刻 perTurn の ILL が perTurn 由来かの切り分け。

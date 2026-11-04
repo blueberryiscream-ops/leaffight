@@ -300,7 +300,7 @@ export type Op =
    */
   | { op: 'callByEffect'; what: CardRef; orientation: 'ready' | 'rested' }
   // ── バトル
-  | { op: 'setParticipants'; side: 'challenger' | 'challenged'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady' }
+  | { op: 'setParticipants'; /** 'own'＝この能力の使用者の側（伏兵 G8c-1。挑んだ側でも挑まれた側でも） */ side: 'challenger' | 'challenged' | 'own'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady'; /** 入ったキャラに《バトルに参加したとき》を改めて起こす（伏兵 NH-41⑩）。[17] をやり直さず今の段で窓を開く */ rejoin?: boolean }
   /**
    * バトル参加キャラを**指名する**（挑戦状・決闘・挑発・挑発アタック。R4c G8a-1・NH-39。「変更」＝setParticipants とは別。しらんぷり・指名手配は指名だけを見る rule:1207-1211）。
    * 処理の順: ①指名手配の付け替え（指名されたキャラの使用者の味方に nominationRedirect を持つキャラがいて、指名した側がその相手なら。2体以上は AP が選ぶ）

@@ -982,7 +982,7 @@ function checkTargets(ctx: EngineCtx, state: BoardState, frame: ProcFrame): stri
 function timingItems(ctx: EngineCtx, state: BoardState, frame: ProcFrame): Omit<SimulItem, 'status' | 'type'>[] {
   const applied = (frame.eng.applied as string[] | undefined) ?? []
   // G8b-4（統括38・FAQ:641）: 指名バトルの再指名の《バトルに参加したとき》の窓は、[8][13] とは別の「参加した」＝処理済みの記録を分けて数える
-  const tag = frame.kind === 'battle' && frame.battle?.rejoinPhase ? '#rejoin' : ''
+  const tag = frame.kind === 'battle' && frame.battle?.rejoinPhase ? '#rejoin' + (frame.battle.rejoinN ?? '') : ''
   const condRedirected = !!frame.eng.condRedirected
   // [28]《バトル終了時》に処理される効果（atBattleEnd で預けたもの）
   type AtEnd = { key: string; label: string; by: Seat; sourceIid: string | null; ops: Op[]; env: Env }
@@ -1132,7 +1132,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
         return [...acts, { type: 'procTrace', entry: { kind: 'name', text: `読み飛ばし:${item.label}` } }, done(true)]
       }
       // この手順（ダメージ1件など）で処理済みの効果として記録する（受け手の差し替えでやり直す段で同じ効果を二度処理しない）
-      if (trig) acts.push({ type: 'procEngine', frameId: trig.id, patch: { applied: [...((trig.eng.applied as string[]) ?? []), item.key + (trig.kind === 'battle' && trig.battle?.rejoinPhase ? '#rejoin' : '')] } })
+      if (trig) acts.push({ type: 'procEngine', frameId: trig.id, patch: { applied: [...((trig.eng.applied as string[]) ?? []), item.key + (trig.kind === 'battle' && trig.battle?.rejoinPhase ? '#rejoin' + (trig.battle.rejoinN ?? '') : '')] } })
     }
     // PHASE-R4b0 追加: 処理条件がある常時効果（conditional。宣言を通らないので violations() に届かない）も、
     // 発生源がキャラなら暗黙の対象（(A) と同じ拾い方）が特殊能力の対象にならないキャラなら効果を及ぼさない（FAQ:697・3573）。
@@ -1837,9 +1837,9 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'setParticipants': {
       const bf = nearestBattle(state)
       if (!bf?.battle) return manual('バトル中でない')
-      const seat: Seat = op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
+      const seat: Seat = op.side === 'own' ? env.you : op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
       const to = 'zone' in op.to ? select(ctx, state, env, op.to) : refs(op.to)
-      return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to, exhaust: op.exhaust, previous: op.previous }] }
+      return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to, exhaust: op.exhaust, previous: op.previous, ...(op.rejoin ? { rejoin: true } : {}) }] }
     }
     // ── R4c G8a-1（NH-39）: 指名。①指名手配の付け替え（2体以上は AP が選ぶ）→ nominateStep（②しらんぷり ③決闘の気力 ④通す）
     case 'nominate': {

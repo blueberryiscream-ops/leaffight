@@ -155,6 +155,10 @@ export interface BattleState {
   /** 指名バトルの再指名（G8b-4）: 指名が通ったキャラ。[17] の窓が済んだら《バトルに参加したとき》の窓（rejoinPhase）を開く（FAQ:635・641） */
   rejoin?: string[]
   rejoinPhase?: string[]
+  /** 伏兵（G8c-1）: [19][20][22] の中で入ったキャラの《バトルに参加したとき》の窓は、その段に戻る（[17] をやり直さない）。戻る段 */
+  rejoinBack?: number
+  /** 参加し直しの窓を開いた回数（処理済みの記録 eng.applied の鍵を回ごとに分ける） */
+  rejoinN?: number
   /** 20-4[10]: 指名の効果をもう宣言した（同じバトルでは1つまで。R4c G8a-1・NH-39②）。打ち消されても残る */
   nominated?: boolean
   /**
@@ -493,7 +497,7 @@ export const STEP_TIMINGS: Record<ProcKind, Record<number, { names: string[]; wi
  * 'ability'/'event' 以外と、アクションアイテムでない宣言は STEP_TIMINGS のまま
  */
 export function stepNames(frame: ProcFrame): string[] {
-  if (frame.kind === 'battle' && frame.step === 17 && frame.battle?.rejoinPhase) return ['バトルに参加したとき']
+  if (frame.kind === 'battle' && frame.battle?.rejoinPhase) return ['バトルに参加したとき']
   const names = STEP_TIMINGS[frame.kind]?.[frame.step]?.names ?? []
   if (frame.decl?.eng.actionItem && frame.kind === 'event' && (frame.step === 8 || frame.step === 11)) return []
   return names
@@ -1678,10 +1682,14 @@ function resumeFrame(state: BoardState, frame: ProcFrame): BoardState {
       // 20-4[19][20][22]「イベントカードを複数回使用できる機会」: 宣言があったら同じ段の機会をもう一度開く（両者が続けて見送るまで）
       // 指名バトルの再指名（G8b-4）: 指名が通ったキャラの《バトルに参加したとき》の窓（[17] の中。済んだら [18] へ）
       if (frame.kind === 'battle' && frame.battle?.rejoinPhase) {
+        // 伏兵（G8c-1）: [19][20][22] の中の参加し直しは、窓が済んだらその段の機会に戻る
+        if (frame.battle.rejoinBack) return setFrame(state, { ...frame, step: frame.battle.rejoinBack, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: undefined, rejoinBack: undefined } })
         return setFrame(state, { ...advance(frame), resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: undefined } })
       }
       if (frame.kind === 'battle' && frame.battle?.rejoin?.length && !frame.battle.aborted) {
-        return setFrame(state, { ...frame, step: 17, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: frame.battle.rejoin, rejoin: [] } })
+        // 指名バトルの再指名は [17] の窓のあと [17] の中で。伏兵は [19][20][22] の今の段で（その段へ戻す）
+        const inAction = frame.step >= 19 && frame.step <= 22
+        return setFrame(state, { ...frame, step: inAction ? frame.step : 17, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, rejoinPhase: frame.battle.rejoin, rejoin: [], rejoinN: (frame.battle.rejoinN ?? 0) + 1, ...(inAction ? { rejoinBack: frame.step } : {}) } })
       }
       if (frame.kind === 'battle' && frame.battle?.reopen && !frame.battle.aborted) {
         return setFrame(state, { ...frame, status: 'enter', resume: undefined, window: null, battle: { ...frame.battle, reopen: false } })
@@ -2327,6 +2335,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // NH-17（D15・R4a-2）: engine が「合成の宣言」（decl 付き）として渡した項目は type:'action'（14段の処理を
       // 通す＝アクション宣言の窓を持たせる）。それ以外はこれまでどおり type:'effect'
       const items: SimulItem[] = [...decls.map(declItem), ...action.items.map((it) => ({ ...it, type: (it.decl ? 'action' : 'effect') as SimulItem['type'], status: 'pending' as const }))]
+      if (items.length === 0 && battle?.rejoinPhase && battle.rejoinBack) return { state: setFrame(s0, { ...g, step: battle.rejoinBack, status: 'enter', resume: undefined, window: null, battle: { ...battle, rejoinPhase: undefined, rejoinBack: undefined } }), log: '' }
       if (items.length === 0) return { state: setFrame(s0, { ...advance({ ...g, battle: battle && battle.rejoinPhase ? { ...battle, rejoinPhase: undefined } : battle }), window: null }), log: '' }
       const s1 = setFrame(s0, { ...g, battle, status: 'resume', resume: 'afterTiming' })
       const label = `《${stepNames(f).join('》《')}》の処理`
@@ -2478,7 +2487,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // 「,」で1段に複数 iid を詰めると画面がカード名に置き換えられず iid のまま出てしまう＝R4b-2c 🔸1）
       trace.push({ kind: 'name', text: action.to.length ? `参加キャラを変更:${action.seat}:${action.to.join(':')}` : `参加キャラを変更:${action.seat}:無し` })
       const s = { ...st0, cards }
-      const joined = action.nominate ? [...joinedBase, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : joinedBase
+      const joined = action.nominate || action.exhaust ? [...joinedBase, ...action.to.filter((iid) => state.cards[iid]?.orientation === 'ready')] : joinedBase
       if (action.nominate) trace.push({ kind: 'name', text: '指名が通った:' + action.seat + ':' + action.to.join(':') })
       return { state: setFrame(s, { ...f, battle: { ...b, joinedReady: joined, participants: { ...b.participants, [action.seat]: action.to }, decided: { ...b.decided, [action.seat]: action.to.length > 0 }, ...(action.rejoin && action.to.length ? { rejoin: [...(b.rejoin ?? []), ...action.to] } : {}) } }), log: '' }
     }

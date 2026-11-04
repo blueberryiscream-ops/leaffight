@@ -293,7 +293,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const b = f?.battle
     if (!f || !b) return false
     // 指名バトルの再指名で通ったキャラの《バトルに参加したとき》（G8b-4・FAQ:635・641。[17] の中の窓）
-    if (f.step === 17 && b.rejoinPhase) {
+    if (b.rejoinPhase) {
       const ys = resolveRef(state, env, c.joined)
       return ys.length > 0 && ys.every((x) => b.rejoinPhase!.includes(x))
     }
