@@ -2445,3 +2445,66 @@ turnEnd [1] は同時の項目の順を **AP が選ぶ**（13-2・proc.ts nextIt
 - (AX) G9a を3束に割った: **G9a-1** 場の制限の土台（HM-12・蘇生・乱入・ラッシュ・大混雑・フェンス＋兄妹／変わり身の打ち消しの書き直し）→ **G9a-2** 出す・場を離れる（巡り合わせ・なつみ＆なつみ・芹香のゴースト・香奈子SP・ド根性）→ **G9a-3** 使用権（夕霧・精神支配・妖刀・隠し部屋＋NH-38④）
 - 統括41が現物で確かめたこと（(AX)「今の作り」）: kind call の [13] は rested（rule:708 どおり）／🚨 **limitFix は drive.ts:490 の駆動ループで効果の途中でも走る**＝NH-42❹ に反する（G9a-1 仕組み①で直す）／兄妹は manual で「是正で近似」＝NH-42⑤ と食い違う（G9a-1 で書き直す）／🚨 **controllerOf はいつも持ち主・ce controller は未実装**（K8。G9a-3 の仕組み⑥）／トークン（ゴースト）の仕組みは無い（G9a-2。大きすぎたらゴーストだけ manual で報告）
 - サブを投げなかった理由: 5h枠が開始時 81%→(AX) を書き終えて 85% 前後（線＝85%超なら投げない）
+
+
+## R4c G9a-1
+
+**完了（束の範囲の中核）／一部は G9a-2 以降に回した。** tested 312 → **316**（draft 5 → 4・manual 41 → 44）・R4c ✅ 1221 → **1236**（❌0）・R2a ✅57保留1／R2b ✅37／R3 ✅18／R4a ✅30／R4b ✅21 は変わらず・`npm run verify` 緑。コミットのハッシュは最後の返答に。ツールの呼び出しは約54回。
+
+### 1. 足した T ケース（`_local/rules/tools/authored/R4c-G9a1.mjs`・15件。期待は本文・FAQ から手で計算）
+| ケース | 内容 | 結果 |
+|---|---|---|
+| text-e_蘇生-1 | ゴミ箱のマルチを消耗で呼び出す（本文） | ✅ |
+| text-e_蘇生-2 | 場が5体→打ち消し（マルチはゴミ箱に残る・是正なし NH-42⑤） | ✅ |
+| text-e_蘇生-3 | フェンス（上限2）で3体目→打ち消し | ✅ |
+| text-f_ラッシュ-1 | 通常の呼び出し→待機 | ✅ |
+| faq-4232 | ラッシュの下の蘇生→消耗のまま | ✅ |
+| text-f_ラッシュ-2 | 相手の呼び出しにも効く | ✅ |
+| text-f_フェンス-1 | 出たとき3体→使用者が選んで2体・ダウン数0 | ✅ |
+| text-e_大混雑-1 | AP は5体で6体目を呼び出せ、是正されない | ✅ |
+| text-e_乱入-1 | 5体に6体目を待機で（制限を超える） | ✅ |
+| text-e_乱入-2 | ターン終了時にゴミ箱・ダウン数0 | ✅ |
+| text-e_乱入-3 | 乱入のキャラは数えない（4体＋乱入＋1体＝是正なし） | ✅ |
+| text-e_乱入-4 | 同名がいる→打ち消し（手札に残る） | ✅ |
+| text-c_HM-12-1 | 同名の HM-12 が2体並ぶ | ✅ |
+| text-c_HM-12-2 | 5体のとき6体目の HM-12 は宣言できない（キャラ数は受ける） | ✅ |
+| text-c_緒方理奈-9a1 | 兄妹：5体のとき英二は手札に残る | ✅ |
+
+**直す前 ❌（1か所ずつ外して test:faq→元に戻した。スクリプト `/tmp/s/brk.mjs` 相当）**
+1. 是正を効果の途中で走らせる（layers.ts `limitFix` の `effectInProgress` を外す）: `❌ text-e_乱入-1: f1 の場所 = A:trash（期待 field）`
+2. 「満たせるか」の判定（`fitsField` を常に true）: `❌ text-e_蘇生-2 / 蘇生-3 / 乱入-4 / text-c_緒方理奈-9a1`（4件。例: `ei の場所 = A:char（期待 hand）`）
+3. フェンスの上限2（`charLimitOf` の min を 5 に）: `❌ text-e_蘇生-3: m の場所 = A:char（期待 trash）` と `❌ text-f_フェンス-1: f3 の場所 = A:char（期待 trash）`
+4. 乱入の「数えない」（層の免除を効かせない）: `❌ text-e_乱入-1` と `❌ text-e_乱入-3: q の場所 = A:hand（期待 field）`
+5. ラッシュの「kind call だけ待機」（効果の呼び出しにも待機を効かせる）: `❌ faq-4232: m の状態 = ready（期待 消耗）`
+
+### 2. カードごと
+- `c_HM-12`: static 2つ（exemptLimit sameName・component）。faqReview 6件＝ok3（2153・2172・3529）／manual2（1746 封印・3526 HM-12S のタッグ化）／na1（3536 ＨＭシリーズはプール外）。
+- `e_蘇生`: 選ぶ（0〜1・ゴミ箱の kind c＝タッグは選べない）→ `fitsField` 偽なら `counter thisEffect` → `callByEffect rested`。関係 FAQ 0件。
+- `e_乱入`: 選ぶ（手札の kind c）→ `fitsField`（`ignoreCount: true`＝キャラ数は免除、同名・構成要素は受ける）偽なら打ち消し → `callByEffect ready` → `addContinuous exemptLimit charCount`（endOfTurn）→ `atTurnEnd`（まだ場にいれば trash）。faqReview: 1691 manual（タッグ化のケースは G9a-2）。
+- `f_ラッシュ`: static `callReady`。faqReview: 4232 case／4229 manual（直接のケースを作っていない）。
+- `e_大混雑`: `addContinuous charLimit max:null seats:active`（endOfTurn）。4196 manual（フェンスと重ねたケース未作成）。
+- `f_フェンス`: static `charLimit max:2 seats:both`。4193 ok／4196 manual。
+- `c_緒方理奈`（兄妹）・`c_長瀬源五郎`（出荷）: manual の打ち消しを `fitsField`＋`counter thisEffect` に置き換え（シャッフルも打ち消しで飛ぶ）。`e_変わり身`: 同名・5体の手書きを `fitsField` に置き換え、faq-1625 の manual を ok に（期待値は変えていない）。
+
+### 3. 足した・変えた仕組み
+- **仕組み① 是正は効果の処理が終わってから**: `layers.ts` の `effectInProgress`（`state.proc` の中に `type:'effect'・status:'running'・eng.tasks が残っている` 項目があるあいだ）が真なら `limitFix` は null を返す（`limitFix` の先頭）。止めた条件の場所は layers.ts `limitFix`。効果が1つ終わった後・アクションの合間・ターン終了の処理（残りの tasks が空）では今までどおり走る。
+- **仕組み② `fitsField`**（layers.ts）＋ Cond `{ fitsField: CardRef; ignoreCount? }`（dsl.ts・eval.ts）: そのカードを使用者の席のフィールドに出した盤面を仮に作り、`limitViolations` の同名・構成要素・キャラ数（同じ `exempt`）の違反に含まれるかで判定。
+- **仕組み③** `ce charLimit { max, seats: 'both'|'active' }`（dsl.ts）・`charLimitOf`（layers.ts。null が勝つ＝大混雑がフェンスに勝つ FAQ:4196）。`limitViolations` のキャラ数と、`drive.ts` 宣言時のキャラ数制限（15-10-1）が使う。`exempt()` は addContinuous で足した `exemptLimit` の層（乱入）も見る。
+- **仕組み④** `ce callReady`（dsl.ts）→ layers.ts が `state.layers.callReady` に導き出す（board.ts・proc.ts `procLayers`）→ proc.ts `placeChar` が kind `call` の向きだけ待機にする（summon・tag はそのまま）。
+- 既存の動きが変わっていない根拠: R4c の既存ケース（是正・量産・狸の置物・模写・変わり身・パーティ・お出迎え 他）は ❌0 のまま（✅1221→1236、増えたのは新規15件）。
+- 仕組み⑤（倒された扱いにならない）: 既存の `procLimitTrash`＝`limitTrash`（proc.ts）は `moveTo(trash)` だけでダウン処理を通さない＝そのまま使える。フェンス・乱入のケースでダウン数0を確認。
+
+### 4. 仕様に無くて決めた・迷った・未完
+- 大混雑の「制限が戻る」タイミング: `endOfTurn` の層が消えるのはターン終了の処理（既存の層の期限切れ）。ターン終了時に越えていれば是正が走る点は **ケース未作成**（rule:437-442 の確認も未実施）。
+- **未完（G9a-2 以降へ）**: FAQ:1691（乱入のキャラのタッグ化）・FAQ:4196（フェンス×大混雑の重なり）・FAQ:4229・HM-12S のタッグ化・妨害工作で蘇生が止まる（⑯）・乱入の「タッグは選べない」の断る側・ラッシュが場を離れたら消耗に戻る・フェンスが場を離れたら5体に戻る・変わり身の構成要素（FAQ:1625）のケース。
+- 判断メモ: 通常の呼び出しの宣言時のキャラ数制限（drive.ts）は既存のまま（5体なら宣言できない）だったので、PHASE の「HM-12：6体目は是正」は「宣言できない」に直してケース化した（統括の確認を）。フェンスの「3体目を呼び出せない（宣言はできて呼び出されない）」は効果の呼び出し（蘇生）で確かめた。
+- 改行コード: layers.ts・dsl.ts・eval.ts は LF、drive.ts・proc.ts・board.ts は CRLF（node で数えて確認。置換は EOL を保つヘルパで実施）。
+
+### 5. 自己点検
+1. ケース一覧と直す前 ❌ ✅（上）
+2. カードごと ✅（上）
+3. 仕組み ✅（上）
+4. 盤面の状態（消耗・待機・気力）を原典の手順どおりに ✅（蘇生＝消耗・乱入＝待機・ラッシュ＝待機）。期待値は本文・FAQ から手で書いた（実装の出力を写していない）
+5. tested 316／draft 4／manual 44・R4c ✅1236・verify 緑 ✅
+6. 判断が要る点: 上の「判断メモ」
+7. ツールの呼び出し: 約54回
