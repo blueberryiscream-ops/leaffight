@@ -39,6 +39,7 @@ import {
 import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
+import { tagComponents } from './tagParts'
 import { costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
@@ -160,9 +161,8 @@ export type DeclareOutcome =
 /** 今の窓で、その宣言ができるか（できるなら BoardAction の列を返す）。
  *  「次のうち１つ」のカードで option が無ければ、選択肢を順に試して最初に合法なものを使う */
 /** R4c G9a-1b: タッグの構成要素の名前。「＆」で区切る。ＨＭ－１２Ｓのように「＆」の無いタッグは同じ名前の2体（末尾の「Ｓ」を除いた名前＝FAQ:3529「ＨＭ－１２とＨＭ－１２」） */
-function tagParts(name: string): string[] {
-  const ps = name.split('＆')
-  return ps.length === 1 && name.endsWith('Ｓ') ? [name.slice(0, -1), name.slice(0, -1)] : ps
+function tagParts(ctx: EngineCtx, name: string): string[] {
+  return tagComponents(ctx, name)
 }
 
 export function declare(state: BoardState, ctx: EngineCtx, req: DeclareReq): DeclareOutcome {
@@ -385,7 +385,7 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
     // 17-3[3] 装備対象（フィールドのキャラ。種類の制限 17-1 は K4＝R3）・15-10-2[4] 構成要素（自分のフィールドの待機状態のキャラか手札の、名前が合う2枚）
     if (info.kind === 'i') return [{ slot: '装備対象', min: 1, max: 1, options: Object.values(state.cards).filter((c) => isCharOnField(c)).map((c) => c.iid) }]
     if (info.kind === 't') {
-      const names = tagParts(info.name)
+      const names = tagParts(ctx, info.name)
       const options = Object.values(state.cards)
         .filter((c) => c.owner === req.by && names.includes(ctx.cards[c.cardId]?.name ?? '') && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
         .map((c) => c.iid)
@@ -881,7 +881,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
     if (cap !== null && mine.filter((c) => c.zone !== 'leader' && !exempt(ctx, state, c.iid, 'charCount')).length >= cap && !exempt(ctx, state, src.iid, 'charCount')) return { ok: false, reason: 'キャラ数制限（15-2）' }
   } else if (kind === 'tag') {
     // 15-10-2[4]: 構成要素の2枚（フィールドの待機状態のキャラ1体以上＋残りは手札）。名前はタッグの名前（「＆」の前後）
-    const names = tagParts(info.name)
+    const names = tagParts(ctx, info.name)
     if (targets.length !== 2) return { ok: false, reason: '構成要素の2枚を提示できない（15-10-2[4][5]）' }
     const used: string[] = []
     let onFieldN = 0

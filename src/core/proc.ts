@@ -2805,6 +2805,8 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     case 'procCancelDown': {
       const f = findFrame(state, action.frameId)
       if (!f || f.kind !== 'down') return null
+      // 15-5-1: 「ダウンせず」にできるのは [2]《ダウンするとき》の窓まで（[4]《ダウンしたとき》はもうダウンした後。R4c G9a-2b）
+      if (f.step > 2) return null
       trace.push({ kind: 'name', text: `ダウンしない:${f.down!.iid}` })
       return { state: setFrame(state, { ...f, down: { ...f.down!, canceled: true } }), log: 'ダウンしない' }
     }

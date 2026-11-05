@@ -18,6 +18,7 @@ import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../co
 import { COPY_BASE, GRANT_BASE, abilityAt, findAbilityOn } from './abilities'
 import type { Ability, ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
+import { tagComponents } from './tagParts'
 import { evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 
 export const ATTRS: Attr[] = ['力', '早', '賢', '根', '感']
@@ -1417,8 +1418,8 @@ export function limitViolations(ctx: EngineCtx, state: BoardState): LimitViolati
     // 構成要素キャラ制限（タッグの名前は構成要素の名前を「＆」でつないだもの）
     const tags = chars.filter((c) => ctx.cards[c.cardId]?.kind === 't' && !exempt(ctx, state, c.iid, 'component'))
     for (const t of tags) {
-      const names = nameOf(t).split('＆')
-      const clash = chars.filter((c) => c.iid !== t.iid && !exempt(ctx, state, c.iid, 'component') && (names.includes(nameOf(c)) || (ctx.cards[c.cardId]?.kind === 't' && nameOf(c).split('＆').some((n) => names.includes(n)))))
+      const names = tagComponents(ctx, nameOf(t))
+      const clash = chars.filter((c) => c.iid !== t.iid && !exempt(ctx, state, c.iid, 'component') && (names.includes(nameOf(c)) || (ctx.cards[c.cardId]?.kind === 't' && tagComponents(ctx, nameOf(c)).some((n) => names.includes(n)))))
       if (clash.length) out.push({ seat, rule: R('component'), options: [t, ...clash].filter(trashable).map((c) => c.iid) })
     }
     // キャラ数制限（例外のキャラは数えず、選ばない FAQ:3329）
