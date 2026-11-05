@@ -443,6 +443,8 @@ export function lostDownFix(ctx: EngineCtx, state: BoardState): BoardAction | nu
   const lost = derived(ctx, state).lost
   for (const [iid, c] of Object.entries(state.cards)) {
     if (!isCharOnField(c) || !lost.has(iid) || !ctx.defs[c.cardId]?.downIfLost || (c.kiryoku ?? 1) > 0) continue
+    // 統括41: ダウン処理の途中（[6] で場を離れるまで）は積み直さない（積み直すと駆動ループが止まらなかった）
+    if (state.proc.some((f) => f.kind === 'down' && f.down?.iid === iid)) continue
     return { type: 'procDown', iid }
   }
   return null
