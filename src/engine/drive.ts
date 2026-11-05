@@ -39,7 +39,7 @@ import {
 import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
-import { tagComponents } from './tagParts'
+import { componentKey, tagComponents } from './tagParts'
 import { registerToken, tokenIdOf } from './tokens'
 import { costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
@@ -388,7 +388,7 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
     if (info.kind === 't') {
       const names = tagParts(ctx, info.name)
       const options = Object.values(state.cards)
-        .filter((c) => ((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) === req.by && names.includes(ctx.cards[c.cardId]?.name ?? '') && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
+        .filter((c) => ((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) === req.by && names.includes(componentKey(ctx, ctx.cards[c.cardId]?.name ?? '')) && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
         .map((c) => c.iid)
       return [{ slot: '構成要素', min: 2, max: 2, options }]
     }
@@ -910,8 +910,8 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
       const nm = ctx.cards[c.cardId]?.name ?? ''
       if (tagComponentBarred(ctx, state, t)) return { ok: false, reason: `タッグ化の構成要素に指定できないキャラ: ${nm}` }
       if (c.baseCardId) return { ok: false, reason: `二重人格で別のキャラとして扱われているキャラは構成要素にできない: ${nm}（FAQ:1539）` }
-      if (((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) !== req.by || !names.includes(nm) || used.filter((u) => u === nm).length >= names.filter((n) => n === nm).length) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
-      used.push(nm)
+      if (((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) !== req.by || !names.includes(componentKey(ctx, nm)) || used.filter((u) => u === componentKey(ctx, nm)).length >= names.filter((n) => n === componentKey(ctx, nm)).length) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
+      used.push(componentKey(ctx, nm))
       if (isCharOnField(c)) {
         if (c.orientation !== 'ready') return { ok: false, reason: `構成要素のキャラが待機状態でない: ${nm}（15-10-2）` }
         onFieldN++

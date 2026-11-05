@@ -9,7 +9,7 @@ import { costOfAbility, planPayment } from './cost'
 import type { Ability, CardRef, Choice, Cond, Expr, Op, PlayerRef, Selector } from './dsl'
 import { controllerOf, isCharOnField, other, type EngineCtx, type Env } from './ctx'
 import { abilityAt } from './abilities'
-import { tagComponents } from './tagParts'
+import { componentKey, tagComponents } from './tagParts'
 import { fitsField, attrsNow, battlePlaceNow, battleMod, charTypesOf, currentStat, sexOf } from './layers'
 
 export function resolvePlayer(state: BoardState, env: Env, p: PlayerRef): Seat {
@@ -247,7 +247,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     const part = resolveRef(state, env, c.componentOf[1])[0]
     if (!tag || !part) return false
     const nm = (i: string) => ctx.cards[state.cards[i]?.cardId ?? '']?.name ?? ''
-    return ctx.cards[state.cards[tag]?.cardId ?? '']?.kind === 't' && tagComponents(ctx, nm(tag)).includes(nm(part))
+    return ctx.cards[state.cards[tag]?.cardId ?? '']?.kind === 't' && tagComponents(ctx, nm(tag)).includes(componentKey(ctx, nm(part)))
   }
   if ('fitsField' in c) {
     const fid = resolveRef(state, env, c.fitsField)[0]
