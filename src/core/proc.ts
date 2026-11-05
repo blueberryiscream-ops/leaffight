@@ -1170,13 +1170,14 @@ function enterCardUse(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): 
 
 /** 15-10-1[13]・15-10-2[13] フィールドに出す（気力はエンジンが決める: 呼び出しは印刷値、タッグはダメージを引き継ぐ）。
  *  kind summon（D17・効果で呼び出す）も同じ手順を流用する: fromZone に残っているかを確かめ、frame.summon の向きで出す */
+const SUMMON_STOPPED = '__summonStopped'
 function placeChar(state: BoardState, frame: ProcFrame, kiryoku: number | null, trace: ProcTrace[]): BoardState {
   const isSummon = frame.kind === 'summon'
   const iid = isSummon ? frame.summon!.iid : frame.decl!.sourceIid!
   const by = isSummon ? frame.summon!.seat : frame.decl!.by
   const fromZone = isSummon ? frame.summon!.fromZone : 'pending'
   const c = state.cards[iid]
-  if (!c || c.zone !== fromZone) {
+  if (!c || c.zone !== fromZone || (isSummon && state.procMeta.marks[SUMMON_STOPPED]?.includes(iid))) {
     if (isSummon) return setFrame(state, { ...frame, summon: { ...frame.summon!, canceled: true }, status: 'done' })
     return abortFrame(state, frame, '再提示できない', trace)
   }
@@ -1640,7 +1641,7 @@ function enterSummon(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): B
   switch (frame.step) {
     case 2: {
       // カードが宣言時点の場所からまだ動いていなければ場に出す。動いていれば（他の効果で失われた等）何もしない
-      if (state.cards[d.iid]?.zone !== d.fromZone) {
+      if (state.cards[d.iid]?.zone !== d.fromZone || state.procMeta.marks[SUMMON_STOPPED]?.includes(d.iid)) {
         trace.push({ kind: 'name', text: `呼び出せない（場所を失った）:${d.iid}` })
         return setFrame(state, { ...frame, summon: { ...d, canceled: true }, status: 'done' })
       }
@@ -2575,7 +2576,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
     case 'procSummon': {
       // D17: 効果で「呼び出す」。kind summon のフレームを積む（宣言[1]〜[5]は経ない・down と同じ軽い形）
       const s = pushFrame(
-        state,
+        setMeta(state, { marks: { ...state.procMeta.marks, [SUMMON_STOPPED]: (state.procMeta.marks[SUMMON_STOPPED] ?? []).filter((i) => i !== action.iid) } }),
         { kind: 'summon', step: 1, status: 'enter', window: null, by: action.seat, label: `呼び出し（効果）:${action.iid}`, summon: { iid: action.iid, seat: action.seat, orientation: action.orientation, fromZone: action.fromZone }, eng: {} },
         'summon',
       )[0]
@@ -2633,6 +2634,8 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       const c = state.cards[action.iid]
       if (!c) return { state, log: '' }
       let s = state
+      // R4c G9a-1b: ゴミ箱にいるカードをゴミ箱送りにする効果（妨害工作×蘇生）は場所が変わらないが、呼び出しは止まる（NH-42⑯）。印を enterSummon・placeChar が見る
+      if (action.to === 'trash' && c.zone === 'trash') s = setMeta(s, { marks: { ...s.procMeta.marks, [SUMMON_STOPPED]: [...(s.procMeta.marks[SUMMON_STOPPED] ?? []), c.iid] } })
       if (action.to === 'field') {
         s = moveCard(s, { iid: c.iid, toOwner: c.owner, toZone: 'char', cardName: c.cardId }).state
         const moved = s.cards[c.iid]
