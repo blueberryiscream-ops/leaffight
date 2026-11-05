@@ -7,7 +7,7 @@ import type { BoardState, Mode, ModScope, Modifier, Orientation, Seat, ZoneId } 
 import { applyProc, type ProcAction, type ProcTrace } from './proc'
 
 export type BoardAction =
-  | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId }
+  | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId; token?: boolean; orientation?: Orientation; kiryoku?: number }
   | { type: 'moveCard'; iid: string; toOwner?: Seat; toZone: ZoneId; toIndex?: number; cardName: string }
   | { type: 'setOrientation'; iid: string; orientation: Orientation; cardName: string }
   | { type: 'toggleOrientation'; iid: string; cardName: string }

@@ -1662,6 +1662,7 @@ function enterDown(state: BoardState, frame: ProcFrame, trace: ProcTrace[]): Boa
       trace.push({ kind: 'name', text: `ダウン:${d.iid}`, id: `${frame.id}:${d.iid}` })
       return setFrame(state, advance(frame))
     case 3:
+      if (state.cards[d.iid]?.token) return setFrame(state, advance(frame)) // トークンはダウン数に数えない（勝利条件に含まれない・ボーナスドローも無い rule:645）
       trace.push({ kind: 'name', text: 'ダウン数+1' })
       return setFrame(state, { ...advance(frame), down: { ...d, added: true } })
     case 5: {

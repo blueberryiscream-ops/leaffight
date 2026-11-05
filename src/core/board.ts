@@ -40,6 +40,8 @@ export interface CardInstance {
   baseCardId?: string
   /** 二重人格で上に乗せたカード（aside にある）が、どのキャラ（iid）の上に乗っているか */
   personaOf?: string
+  /** トークン（カードでないキャラ＝ゴースト。R4c G9a-2c）: 場を離れたら消える（どの領域にも行かない FAQ:264）・ダウンしてもダウン数に数えない。能力値は ctx.cards[cardId]（engine/tokens.ts が登録） */
+  token?: boolean
 }
 
 /** 修正の切れ方の目印。自動消滅はしない（DESIGN.md §4.16）。人間が見て判断・削除する */
@@ -361,7 +363,7 @@ export interface Result {
 
 export function spawnCard(
   state: BoardState,
-  args: { iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId },
+  args: { iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId; token?: boolean; orientation?: Orientation; kiryoku?: number },
 ): Result {
   const { iid, cardId, cardName, owner, zone } = args
   // フィールドは共有1枚なので、座席を問わず既存の有無だけで index を決める
@@ -375,9 +377,11 @@ export function spawnCard(
     // 実物同様、場に出た瞬間は消耗状態（召喚酔い。DESIGN.md §4.5）。手札等は待機扱いでよい
     orientation: zone === 'char' || zone === 'battle' || zone === 'leader' ? 'rested' : 'ready',
     faceUp: zone !== 'deck',
-    kiryoku: null,
+    kiryoku: args.kiryoku ?? null,
     attachedTo: null,
+    ...(args.token ? { token: true } : {}),
   }
+  if (args.orientation) instance.orientation = args.orientation
   const next = cloneBoard(state)
   next.cards[iid] = instance
   return { state: next, log: `${cardName} を ${ZONE_LABEL[zone]} に置いた` }
@@ -401,6 +405,11 @@ export function moveCard(
 ): Result {
   const card = state.cards[args.iid]
   if (!card) return { state, log: '' }
+  // トークンは場を離れたら消える（ゴミ箱・手札・デッキへ行かない FAQ:264）
+  if (card.token && (card.zone === 'char' || card.zone === 'leader') && args.toZone !== 'char' && args.toZone !== 'leader') {
+    const gone = removeCard(state, { iid: card.iid, cardName: args.cardName })
+    return { state: normalizeZone(gone.state, card.owner, card.zone), log: `${args.cardName} は場を離れて消えた` }
+  }
   const toOwner = args.toOwner ?? card.owner
   const fromZone = card.zone
   const fromOwner = card.owner

@@ -178,6 +178,7 @@ export function select(ctx: EngineCtx, state: BoardState, env: Env, sel: Selecto
         if (sel.class === 'タッグキャラクター' && info.kind !== 't') return false
       }
       if (sel.kind && !sel.kind.includes(info.kind)) return false
+      if (c.token && (sel.kind || sel.class === 'キャラクター' || sel.class === 'タッグキャラクター')) return false // トークンはキャラクターカードではない（FAQ:3302）。「キャラ」の選び方には入る（FAQ:4142）
       if (sel.excludeLeader && c.zone === 'leader') return false
       if (excl.has(c.iid)) return false
       if (sel.fromSlot && !(env.slots[sel.fromSlot] ?? []).includes(c.iid)) return false

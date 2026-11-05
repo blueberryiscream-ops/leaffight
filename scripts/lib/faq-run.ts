@@ -59,6 +59,7 @@ export function buildBoard(spec: BoardSpec, ctx: EngineCtx): { state: BoardState
     cards[cs.ref] = {
       iid: cs.ref,
       cardId: cs.card,
+      ...(cs.card.startsWith('token:') ? { token: true } : {}),
       owner,
       zone,
       index,

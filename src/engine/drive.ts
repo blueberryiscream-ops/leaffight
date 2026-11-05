@@ -40,6 +40,7 @@ import type { LayerSeed } from '../core/proc'
 import { abilityAt, conditionalHits, findAbility, findAbilityOn, stillMatches, triggerMatches, type Activated, type Conditional, type Play } from './abilities'
 import { controllerOf, infoOf, isCharOnField, nameOf, other, type EngineCtx, type Env } from './ctx'
 import { tagComponents } from './tagParts'
+import { registerToken, tokenIdOf } from './tokens'
 import { costOfAbility, effectiveCost, parseCostText, payNow, planPayment } from './cost'
 import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
@@ -1383,6 +1384,14 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     }
     case 'remember':
       return { tasks: rest, patch: { env: { ...eng.env, slots: { ...eng.env.slots, [op.slot]: [String(evalExpr(ctx, state, env, op.value))] } } }, actions: [] }
+    case 'createToken': {
+      // R4c G9a-2c: トークン（ゴースト）を場に出す。「出す」＝呼び出さない（《呼び出されるとき》の窓なし・妨害工作は使えない FAQ:1379）
+      registerToken(ctx, op.token)
+      const seat = resolvePlayer(state, env, op.side)
+      let n = 1
+      while (state.cards['tk' + n]) n++
+      return { tasks: rest, actions: [{ type: 'spawnCard', iid: 'tk' + n, cardId: tokenIdOf(op.token), cardName: op.token.name, owner: seat, zone: 'char', token: true, orientation: op.orientation, kiryoku: op.token.kiryoku }] }
+    }
     case 'callByEffect': {
       // D17: 効果で「呼び出す」。カードが宣言時（今）の場所から動いていなければ実行する
       const iid = refs(op.what)[0]
@@ -1962,7 +1971,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       return { tasks: rest, actions: [{ type: 'procBattle', frameId: bf.id, battleChoice: { seat, key: op.key, value } }] }
     }
     default:
-      return manual(`R2a の範囲外の操作 ${op.op}`)
+      return manual(`R2a の範囲外の操作 ${(op as { op: string }).op}`)
   }
 }
 

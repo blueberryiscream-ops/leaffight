@@ -22,6 +22,7 @@ import { HOLES } from '../src/engine/holes'
 import type { CardDef } from '../src/engine/dsl'
 import type { CardInfo, EngineCtx } from '../src/engine/ctx'
 import { parseCostText } from '../src/engine/cost'
+import { registerTokens } from '../src/engine/tokens'
 import { cardInfoOf, runCase, type CaseResult } from './lib/faq-run'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -145,14 +146,14 @@ for (const c of cases) {
   // 3. ref
   if (c.setup) {
     const defined = setupRefs(c.setup)
-    for (const r of usedRefs(c)) if (!defined.has(r)) fail(id, `ref が setup に無い: ${r}`)
+    for (const r of usedRefs(c)) if (!defined.has(r) && !/^tk[0-9]+$/.test(r)) fail(id, `ref が setup に無い: ${r}`) // tk<N>＝createToken が作るトークンの iid（R4c G9a-2c）
     const cardIds: string[] = []
     const collect = (cs?: CardSpec) => { if (!cs) return; cardIds.push(cs.card); cs.equips?.forEach(collect) }
     for (const side of [c.setup.you, c.setup.opponent]) {
       collect(side.leader); side.field?.forEach(collect); collect(side.fieldCard); side.battleCards?.forEach(collect)
       side.hand?.forEach(collect); side.trash?.forEach(collect); side.deckTop?.forEach(collect)
     }
-    if (poolIds) for (const cid of cardIds) if (!poolIds.has(cid)) fail(id, `setup のカードが pool.json に無い: ${cid}`)
+    if (poolIds) for (const cid of cardIds) if (!poolIds.has(cid) && !cid.startsWith('token:')) fail(id, `setup のカードが pool.json に無い: ${cid}`)
   } else if (c.steps || c.expect) fail(id, 'setup が無いのに steps/expect がある')
   const nSteps = c.steps?.length ?? 0
   for (const e of (c.expect ?? []) as Expect[]) {
@@ -254,6 +255,7 @@ const scopeF = readScope('_r4c-scope.json')
 const scope = new Set<string>([...scopeA, ...scopeB, ...scopeC, ...scopeD, ...scopeE, ...scopeF])
 if (Object.keys(cardInfos).length) {
   const ctx: EngineCtx = { cards: cardInfos, defs, shuffle: (xs) => xs }
+  registerTokens(ctx)
   const results: (CaseResult & { inScope: boolean })[] = []
   for (const c of cases.filter((c) => c.grade === 'T')) {
     // 調べたいケースだけ詳しく出す: DEBUG_CASE=<id> npm run test:faq（R4c G5e で足した道具）

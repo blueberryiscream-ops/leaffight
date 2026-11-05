@@ -15,6 +15,7 @@ import { declare, declareTargets, drive, validPick, type DeclareReq, type Target
 import { grantedAbilities, type Violation } from '../../engine/layers'
 import { abilityCostText, costOfAbility, paymentCovers, poolOnlyPayment } from '../../engine/cost'
 import type { CardDef } from '../../engine/dsl'
+import { registerTokens } from '../../engine/tokens'
 import type { EngineReq, PublicStep } from '../../net/session'
 
 // ───────────────────────────────────────────────────────────────
@@ -57,7 +58,9 @@ export function cardInfoFromPool(p: PoolCardLike): CardInfo {
 export function buildEngineCtx(pool: PoolCardLike[], defs: Record<string, CardDef> | null | undefined, shuffle?: (iids: string[]) => string[]): EngineCtx {
   const cards: Record<string, CardInfo> = {}
   for (const p of pool) cards[p.id] = cardInfoFromPool(p)
-  return { cards, defs: defs ?? {}, ...(shuffle ? { shuffle } : {}) }
+  const ctx: EngineCtx = { cards, defs: defs ?? {}, ...(shuffle ? { shuffle } : {}) }
+  registerTokens(ctx)
+  return ctx
 }
 
 // ───────────────────────────────────────────────────────────────
