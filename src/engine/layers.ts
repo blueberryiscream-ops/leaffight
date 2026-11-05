@@ -14,6 +14,7 @@
 
 import type { BoardAction } from '../core/actions'
 import type { BoardState, CardInstance, Layer, Seat } from '../core/board'
+import { userOf } from '../core/control'
 import { activeSeat, type LayerSeed, type ProcDecl, type ProcFrame } from '../core/proc'
 import { COPY_BASE, GRANT_BASE, abilityAt, findAbilityOn } from './abilities'
 import type { Ability, ActionPattern, Attr, CardDef, CardRef, Continuous, Cost, CostIcon, Op, PlayerRef, Selector } from './dsl'
@@ -1412,11 +1413,41 @@ export function charLimitOf(ctx: EngineCtx, state: BoardState, seat: Seat): numb
  * R4c G9a-1（仕組み②）: このカードを、この席のフィールドに今出したら、フィールドのキャラ制限（同名・構成要素・キャラ数）を満たせるか。
  * limitViolations と同じ規則・同じ例外で、出した後の盤面を仮に作って確かめる。数えるのは処理時（FAQ:3669・2007・2734）
  */
-export function fitsField(ctx: EngineCtx, state: BoardState, iid: string, seat: Seat, ignoreCount = false): boolean {
+export function fitsField(ctx: EngineCtx, state: BoardState, iid: string, seat: Seat, ignoreCount = false, onlyCount = false): boolean {
   const c = state.cards[iid]
   if (!c) return false
-  const hyp: BoardState = { ...state, cards: { ...state.cards, [iid]: { ...c, zone: 'char', owner: seat, attachedTo: null } } }
-  return !limitViolations(ctx, hyp).some((v) => v.seat === seat && (v.rule.id === 'sameName' || v.rule.id === 'component' || (v.rule.id === 'charCount' && !ignoreCount)) && v.options.includes(iid))
+  const hyp: BoardState = { ...state, cards: { ...state.cards, [iid]: { ...c, zone: 'char', owner: seat, controller: undefined, attachedTo: null } } }
+  return !limitViolations(ctx, hyp).some((v) => v.seat === seat && ((!onlyCount && (v.rule.id === 'sameName' || v.rule.id === 'component')) || (v.rule.id === 'charCount' && !ignoreCount)) && v.options.includes(iid))
+}
+
+/** アイテムが装備キャラに与える使用権（ce controller。妖刀）。いま働いていなければ null */
+function controlGrant(ctx: EngineCtx, state: BoardState, it: CardInstance): Seat | null {
+  if (!it.attachedTo) return null
+  const host = state.cards[it.attachedTo]
+  if (!host || !isCharOnField(host) || !staticSourceActive(state, it.iid) || equipProblem(ctx, state, it, it.attachedTo) || derived(ctx, state).itemsLost.has(it.attachedTo)) return null
+  for (const ab of ctx.defs[it.cardId]?.abilities ?? []) {
+    if (ab.kind !== 'static') continue
+    for (const f of ab.effects) if (f.ce === 'controller') return f.to === 'active' ? activeSeat(state) : f.to === 'nonActive' ? other(activeSeat(state)) : null
+  }
+  return null
+}
+
+/** 使用権の同期（妖刀: 装備キャラは今のアクティブプレイヤーが使用する FAQ:734・746。外れたらノンアクティブ側に戻る FAQ:749）。違いがあれば直す1アクションを返す */
+export function controllerFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  for (const it of Object.values(state.cards)) {
+    const want = controlGrant(ctx, state, it)
+    if (!want || !it.attachedTo) continue
+    const host = state.cards[it.attachedTo]
+    if (userOf(host) !== want || host.controllerSrc !== it.iid) return { type: 'setController', iid: host.iid, seat: want === host.owner ? null : want, src: it.iid }
+  }
+  for (const c of Object.values(state.cards)) {
+    if (!c.controllerSrc) continue
+    const it = state.cards[c.controllerSrc]
+    if (it && it.attachedTo === c.iid && controlGrant(ctx, state, it)) continue
+    const back = other(activeSeat(state))
+    return { type: 'setController', iid: c.iid, seat: back === c.owner ? null : back }
+  }
+  return null
 }
 
 /** 効果の処理の途中（処理の残りがある効果が走っている間）か。是正はその効果が終わってから（NH-42❹・FAQ:1382） */

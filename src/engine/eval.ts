@@ -251,7 +251,7 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
   }
   if ('fitsField' in c) {
     const fid = resolveRef(state, env, c.fitsField)[0]
-    return !!fid && fitsField(ctx, state, fid, env.you, c.ignoreCount)
+    return !!fid && fitsField(ctx, state, fid, c.seat ? resolvePlayer(state, env, c.seat) : env.you, c.ignoreCount, c.onlyCount)
   }
   if ('picked' in c) return (env.slots[c.picked]?.length ?? 0) > 0
   if ('battleUsed' in c) {

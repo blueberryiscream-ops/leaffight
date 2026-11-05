@@ -2686,3 +2686,37 @@ tested 322 → **323**（t_なつみ&なつみ）。R4c 1271 → **1285**（✅ 
 - 🚨 verify が終わらなかった（サブの verify も統括の1回目も test:faq の実行で止まった）。原因＝lostDownFix がダウン処理の途中（[6] で場を離れる前）に procDown を積み直し続けた→統括が「その iid の down フレームがある間は積み直さない」を layers.ts に1行。以後 verify 緑（EXIT 0）・R4c ✅1303 ❌0・tested 325／draft 4／manual 40（香奈子SP tested）
 - 🚨 サブの ❌ の取り直しで止まらない test:faq が裏に残った（18:06 の node 4つ。統括の Stop-Process は許可が下りず、後で消えていた）→次の依頼文に「test:faq に timeout を付ける・自分の node が残っていないか確かめる」を足した
 - 🔸 香奈子SP の FAQ:2802 は「効果の処理から外す」形（対象に選ぶこと自体は止めていない）。本文「対象にはならない」＝単体対象の手札戻し・回復で香奈子（気力0以下）を選べないのが正しいはず→対象の選び方の口（untargetableBy 等）に寄せる束で直す
+
+
+## R4c G9a-3a（使用権の土台・砧夕霧・妖刀）
+
+**完了／未完**: 仕組み⑥（使用権と持ち主を分ける）・夕霧・妖刀＝記述＋T ケース 13件で ✅。**未完**: 夕霧の faqReview faq-2383（リーダーの夕霧が使うと敗北）と妖刀の faq-743（ティリア未記述）は manual → 2枚とも draft（tested にならない）。精神支配・隠し部屋・NH-38④ は次の束（G9a-3b）で未着手。tested **325 → 325**（manual 40 → 42）。R4c **1303 → 1316**（✅ 全部・❌0）。verify 緑（exit 0）。
+
+### 仕組み（core はカード知識ゼロのまま）
+- `CardInstance.controller?`／`controllerSrc?`（core/board.ts）: 持ち主（owner）と別の使用者。場（char／leader）を離れたら `moveCard` が消す＝ゴミ箱・手札・デッキは常に持ち主（FAQ:3246）。
+- `src/core/control.ts`（新規）: `userOf(c)`＝controller ?? owner・`setController`（core action `setController`。actions.ts）。
+- 使用者で見る所（置き換え一覧）: core/proc.ts `fieldChars`（挑む候補・エントリーの待機化・リーダー検索の元）→userOf／`pushDown` の `by`・`down.seat`→userOf（ダウン数・ボーナスドローは使っている側 FAQ:2380・737）。engine/ctx.ts `controllerOf`→controller（以後 layers／eval／abilities の `controllerOf(...) ?? owner` はそのまま使用権で働く。layers.ts limitViolations・exempt・装備判定など約12か所）。engine/cost.ts:283・332（コストの発生源・支払いの候補）→使用権。engine/drive.ts: 構成要素の宣言（mine／names の2か所）・コスト発生源の候補 fieldCands・hasSource→使用権。**持ち主のままにした所**: 手札・デッキ・ゴミ箱の `c.owner`（board.ts 全般・drive.ts のデッキ操作）、layers.ts:392・1567 の chooser equipper（装備させたプレイヤー＝アイテムの持ち主）、core/proc.ts:657 の moveTo の行き先（持ち主）、バトルカード（持ち主）。
+- 夕霧: op `giveControl`（drive.ts・dsl.ts）＋ Cond `fitsField` に `seat`／`onlyCount`（キャラ数制限だけ見る。同名は見ない＝NH-42⑧。layers.ts `fitsField`）。
+- 妖刀: `ce controller`（既存の宣言）を `layers.ts controllerFix` が実装（drive.ts の駆動ループで limitFix の前に同期。装備キャラの使用者＝今のアクティブプレイヤー。外れたらノンアクティブ側 FAQ:749）。キャラ数に含めない＝exemptLimit charCount（装備先に与える。既存の仕組み）。
+
+### §5 自己点検
+1. ✅ T ケース 13件（`authored/R4c-G9a3a.mjs`）: 夕霧 6（3a1 移る／3a2 相手5体で打ち消し／3a3 同名は移って相手が是正／3a4 ターン終了で戻らない／3a5 FAQ:2380 ダウン／3a6 アイテムも移る）・妖刀 7（3a1 FAQ:734／3a2 数えない／3a3 FAQ:740／3a4 FAQ:746／3a5 FAQ:737／3a6 FAQ:749／3a7 リーダーに付けられない）。使用権の移動は実際の「おでかけ」の宣言・妖刀の装備の宣言で作った。新しい期待 `{ user: [ref, side] }`（faqCase.ts・faq-run.ts。アイテムは装備先の使用者）。
+   **直す前 ❌（1か所ずつ外した test:faq の R4c 件数。個々のケース名は取っていない）**:
+   - A 使用権で見る所（ctx.ts controllerOf を持ち主に）: R4c ❌8
+   - C 妖刀のアクティブプレイヤー（controlGrant を逆に）: ❌5
+   - D ダウンは使っている側（pushDown の seat を持ち主に）: ❌2
+   - E 夕霧のキャラ数の打ち消し（fitsField の charCount を見ない）: ❌6
+   - F 夕霧は同名でも移れる（onlyCount を効かせない）: ❌1
+   - G 妖刀はキャラ数に含めない（カードの exemptLimit を外す）: ❌1
+   - **B ゴミ箱は持ち主: ❌ を取れなかった**（board.moveCard の既定の行き先を使用者にしても、proc.ts:657 の moveTo の行き先を使用者にしても ❌0）。ダウンのゴミ箱送りは別の経路で、使用権が移ったキャラを owner 以外へ動かす経路が現状無いため。ケース 3a5（Z('yu','trash','you')）は通るが、この1か所を外して落ちることは確認できていない。
+2. カード: 夕霧（faqReview case3／na1／manual1＝faq-2383）・妖刀（case5／manual1＝faq-743）。似た書き方は兄妹（fitsField＋counter thisEffect）・狸の置物（exemptLimit を装備先に）。
+3. 既存の動き: test:faq の R2a〜R4b は前後同数、R4c は ❌0 のまま増えただけ。改行コード: board/actions/proc は CRLF のまま・他は元のまま（diff 11ファイル +88/−17・新規 core/control.ts）。
+4. 盤面は原典の手順どおり（夕霧は待機→R で消耗→移動／妖刀は手札から WWWW で装備）。期待値は本文・FAQ から手計算。
+5. tested 325→325・R4c 1316 ✅・verify 緑。
+6. 判断・迷い・穴の候補:
+   - 🔸 **FAQ:2374／2377 の「相手のエントリー時に待機に戻る」は、ケースで確かめていない**。実行器の ターン終了 は次のターンの開始まで進まず R(待機) の期待が取れなかった（3a4 は「ターン終了後も相手の場にいる」だけ）。core の `fieldChars`（エントリーの待機化の対象）は userOf に替えたので動くはずだが未確認。次の束で、ターンをまたぐ実行の形（advancePhase の拡張）を足して確かめる。
+   - 🔸 リーダーの夕霧が使うと敗北（FAQ:2383）は未実装＝夕霧は tested にならない。`giveControl` がリーダーのときに 9-1 の敗北（ownerのリーダー喪失）を起こす形が要る。
+   - 妖刀が外れたとき「ノンアクティブ側に戻る」は照合表の字義どおり実装（FAQ:749）。自分のキャラに付けた妖刀を自分のターンに外すと、持ち主ではなく相手の側に移る（字義どおりだが不自然）。**持ち主に戻す読みのほうが自然かもしれない＝統括の判断を請う**（controllerFix の外れ側 `back`）。
+   - 画面（src/ui）は触っていない。使用権が移ったキャラを「どちらの側に表示するか」はまだ持ち主の側＝次の束で UI の対応が要る。
+   - drive.ts の構成要素の宣言（タッグ化）の `c.owner` は、場の側を使用権にした（手札側は持ち主）。他の engine の `c.owner`（デッキ操作など）は持ち主のまま。
+7. ツールの呼び出し回数: 約54回。

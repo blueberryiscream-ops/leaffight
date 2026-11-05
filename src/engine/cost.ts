@@ -280,7 +280,7 @@ function readyAttrsOk(ctx: EngineCtx, state: BoardState, by: Seat, attrs: Attr[]
   // 「コストを発生できない」キャラ（《ビンボー》《電波の傀儡》）は属性だけを出すこともできない（FAQ:2754。R4c G3c）
   const noGen = cannotGenerateIids(ctx, state)
   return attrs.every((a) =>
-    Object.values(state.cards).some((c) => isCharOnField(c) && c.owner === by && c.orientation === 'ready' && !exclude.includes(c.iid) && !noGen.has(c.iid) && attrsNow(ctx, state, c.iid).includes(a)),
+    Object.values(state.cards).some((c) => isCharOnField(c) && (c.controller ?? c.owner) === by && c.orientation === 'ready' && !exclude.includes(c.iid) && !noGen.has(c.iid) && attrsNow(ctx, state, c.iid).includes(a)),
   )
 }
 
@@ -329,7 +329,7 @@ function candidatesFor(ctx: EngineCtx, state: BoardState, by: Seat, sourceIid: s
   }
   const mk = (iid: string, i: CostIcon): CostSource => ({ iid, from: 'field', icon: i, attrs: attrsNow(ctx, state, iid) })
   if (icon === 'R') return sourceIid && ok(sourceIid) ? mk(sourceIid, 'R') : null
-  const chars = Object.values(state.cards).filter((c) => isCharOnField(c) && c.owner === by).sort((a, b) => (a.zone === b.zone ? a.index - b.index : a.zone === 'leader' ? -1 : 1))
+  const chars = Object.values(state.cards).filter((c) => isCharOnField(c) && (c.controller ?? c.owner) === by).sort((a, b) => (a.zone === b.zone ? a.index - b.index : a.zone === 'leader' ? -1 : 1))
   if (icon === 'L') {
     const l = chars.find((c) => c.zone === 'leader')
     return l && ok(l.iid) ? mk(l.iid, 'L') : null

@@ -79,7 +79,7 @@ export function controllerOf(state: BoardState, iid: string): Seat | null {
   const c = state.cards[iid]
   if (!c) return null
   if (c.attachedTo) return state.cards[c.attachedTo]?.zone === 'battle' ? c.owner : controllerOf(state, c.attachedTo) // バトルカードには使用者がいない＝アイテムの持ち主（F⑫・R4c G8b-1）
-  return c.owner
+  return (c.zone === 'char' || c.zone === 'leader') && c.controller ? c.controller : c.owner // 使用権（14-4・K8。夕霧・妖刀）
 }
 
 /** 元の気力の上限（リーダーは元×2・maxKiryokuFor と同じ）。層を重ねた今の上限は engine/layers.ts の maxKiryokuOf（R3） */

@@ -79,6 +79,7 @@ export type Step =
 /** FAQ の答えに書いてある結果だけ */
 export type Expect = (
   | { kiryoku: [ref: string, value: number] }
+  | { user: [ref: string, side: Side] }   // 使用権を持つプレイヤー（アイテムは装備先の使用者。R4c G9a-3a）
   | { zone: [ref: string, zone: 'field' | 'hand' | 'trash' | 'deck' | 'aside' | 'gone', owner?: Side] }
   /** steps の index 番目の宣言が立ち消え（11-4）た */
   | { fizzled: { step: number } }

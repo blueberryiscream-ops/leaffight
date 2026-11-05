@@ -21,6 +21,7 @@
 //    （画面では警告して通すが、FAQ の「できません」はその宣言をしないプレイヤーとして扱う。盤面は宣言の前に戻す）
 //  - force は、それより前の step で始めた手順（宣言の処理）を終えてから起こす（状況を作る出来事は、宣言した行動の処理の後のこと）
 
+import { controllerOf } from '../../src/engine/ctx'
 import type { BoardAction } from '../../src/core/actions'
 import { EMPTY_BOARD, type BoardState, type CardInstance, type Seat, type ZoneId } from '../../src/core/board'
 import { awaitingSeat, currentWindow, startBattleAt, type ProcFrame, type ProcTrace } from '../../src/core/proc'
@@ -481,6 +482,11 @@ function checkExpect(run: Run, e: Expect, c: FaqCase): { ok: boolean | 'pending'
   if ('kiryoku' in e) {
     const v = card(e.kiryoku[0])?.kiryoku
     return { ok: v === e.kiryoku[1], msg: `気力 ${e.kiryoku[0]} = ${v}（期待 ${e.kiryoku[1]}）` }
+  }
+  if ('user' in e) {
+    const x = card(e.user[0])
+    const u = x ? controllerOf(run.state, x.iid) : null
+    return { ok: !!x && u === seatOf(e.user[1]), msg: `${e.user[0]} の使用者 = ${u}（期待 ${e.user[1]}）` }
   }
   if ('zone' in e) {
     const x = card(e.zone[0])

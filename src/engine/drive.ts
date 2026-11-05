@@ -46,7 +46,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, opImmuneTo, lostDownFix, untargetableBy, violations, type Violation } from './layers'
+import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, controllerFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, opImmuneTo, lostDownFix, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -388,7 +388,7 @@ export function declareTargets(state: BoardState, ctx: EngineCtx, req: DeclareRe
     if (info.kind === 't') {
       const names = tagParts(ctx, info.name)
       const options = Object.values(state.cards)
-        .filter((c) => c.owner === req.by && names.includes(ctx.cards[c.cardId]?.name ?? '') && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
+        .filter((c) => ((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) === req.by && names.includes(ctx.cards[c.cardId]?.name ?? '') && ((isCharOnField(c) && c.orientation === 'ready') || c.zone === 'hand'))
         .map((c) => c.iid)
       return [{ slot: '構成要素', min: 2, max: 2, options }]
     }
@@ -491,6 +491,14 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
         out.warnings.push('継続効果の層の足し外しが受け付けられない')
         break
       }
+      continue
+    }
+    // 使用権の同期（妖刀。14-4・FAQ:746）
+    const cfix = controllerFix(ctx, s)
+    if (cfix) {
+      const before = out.state
+      apply(cfix)
+      if (out.state === before) { out.warnings.push('使用権の同期が受け付けられない'); break }
       continue
     }
     // K12（R3）: 場の制限の是正（15-2・17-1・17-2・19-1。違反なら使用権者が選ぶ）
@@ -879,7 +887,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
   // 終了フェイズのアクションは特殊能力・イベント・コスト発生・その他だけ（10-6-1 oldrule.txt:422-429）
   if (state.turn && state.turn.phase !== 'メイン') return { ok: false, reason: `${state.turn.phase}フェイズには行えない（メインフェイズのアクション 10-5-1・10-6-1）` }
   const kind = ({ c: 'call', t: 'tag', i: 'equip', f: 'field', b: 'battleCard' } as const)[info.kind as 'c' | 't' | 'i' | 'f' | 'b']
-  const mine = Object.values(state.cards).filter((c) => isCharOnField(c) && c.owner === req.by)
+  const mine = Object.values(state.cards).filter((c) => isCharOnField(c) && (c.controller ?? c.owner) === req.by)
   const targets = (req.targets ?? []).filter((t) => t in state.cards)
   const eng: Record<string, unknown> = { cardId: src.cardId, usePool: true }
   let equipTo: string | null = null
@@ -901,7 +909,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
       const c = state.cards[t]
       const nm = ctx.cards[c.cardId]?.name ?? ''
       if (c.baseCardId) return { ok: false, reason: `二重人格で別のキャラとして扱われているキャラは構成要素にできない: ${nm}（FAQ:1539）` }
-      if (c.owner !== req.by || !names.includes(nm) || used.filter((u) => u === nm).length >= names.filter((n) => n === nm).length) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
+      if (((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) !== req.by || !names.includes(nm) || used.filter((u) => u === nm).length >= names.filter((n) => n === nm).length) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
       used.push(nm)
       if (isCharOnField(c)) {
         if (c.orientation !== 'ready') return { ok: false, reason: `構成要素のキャラが待機状態でない: ${nm}（15-10-2）` }
@@ -1222,7 +1230,7 @@ function itemStep(ctx: EngineCtx, state: BoardState, frame: ProcFrame, warnings:
       if (pay.stage === 'ask') {
         if (ans.length === 0) return finishPayFromPool(state, frame, item, eng, save, a, pay)
         // 発生源の候補（0件選んでもよい。7-2[3] の窓で臨時収入・助太刀などを使うだけでも発生させられる＝FAQ:1347）
-        const fieldCands = Object.values(state.cards).filter((c) => c.owner === seat && isCharOnField(c) && c.orientation === 'ready')
+        const fieldCands = Object.values(state.cards).filter((c) => (c.controller ?? c.owner) === seat && isCharOnField(c) && c.orientation === 'ready')
         const handCands = Object.values(state.cards).filter((c) => c.owner === seat && c.zone === 'hand' && ['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? ''))
         const cands = [...fieldCands, ...handCands]
         const id2 = `${a.id}:src`
@@ -1402,6 +1410,14 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       let n = 1
       while (state.cards['tk' + n]) n++
       return { tasks: rest, actions: [{ type: 'spawnCard', iid: 'tk' + n, cardId: tokenIdOf(op.token), cardName: op.token.name, owner: seat, zone: 'char', token: true, orientation: op.orientation, kiryoku: op.token.kiryoku }] }
+    }
+    case 'giveControl': {
+      // 使用権を移す（夕霧「おでかけ」。14-4・FAQ:2377）。持ち主は変わらない
+      const iid = refs(op.what)[0]
+      const to = resolvePlayer(state, env, op.to)
+      const c = iid ? state.cards[iid] : undefined
+      if (!c || !isCharOnField(c) || !to) return { tasks: rest, actions: [] }
+      return { tasks: rest, actions: [{ type: 'setController', iid: c.iid, seat: to === c.owner ? null : to }] }
     }
     case 'callByEffect': {
       // D17: 効果で「呼び出す」。カードが宣言時（今）の場所から動いていなければ実行する
@@ -1744,7 +1760,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       let forced = false
       if (op.mandatory && Array.isArray(amount)) {
         const pool = state.costs[who] ?? []
-        const hasSource = Object.values(state.cards).some((c) => c.owner === who && ((isCharOnField(c) && c.orientation === 'ready') || (c.zone === 'hand' && (['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? '') || !!ctx.defs[c.cardId]?.abilities.some((a) => a.kind === 'play' && a.speed === '割込型' && a.trigger?.timing === 'コストを発生するとき')))))
+        const hasSource = Object.values(state.cards).some((c) => ((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) === who && ((isCharOnField(c) && c.orientation === 'ready') || (c.zone === 'hand' && (['c', 't'].includes(ctx.cards[c.cardId]?.kind ?? '') || !!ctx.defs[c.cardId]?.abilities.some((a) => a.kind === 'play' && a.speed === '割込型' && a.trigger?.timing === 'コストを発生するとき')))))
         if (pool.length >= amount.length || !hasSource) {
           return { tasks: rest, patch: { awaiting: { id, kind: 'payByPlayer', pay: { stage: 'auto', who, giveTo, amount, recordAs: op.recordAs, addToBattlePaid: op.addToBattlePaid, ifPaid: op.ifPaid, ifNot: op.ifNot } } }, actions: [] }
         }

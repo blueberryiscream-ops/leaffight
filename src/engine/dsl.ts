@@ -133,7 +133,7 @@ export type Cond =
   | { pureAttrs: CardRef; side: 'atk' | 'def' | 'both' } // 用語【属性のみで構成された～】oldrule.txt:1250-1252
   | { exists: Selector }
   /** そのカード（1枚）を今フィールドに出したら、フィールドのキャラ制限を満たせるか（使用者の席。「満たせない場合は打ち消される」。R4c G9a-1） */
-  | { fitsField: CardRef; ignoreCount?: boolean }
+  | { fitsField: CardRef; ignoreCount?: boolean; seat?: PlayerRef; onlyCount?: boolean }  // seat＝どちらの側のフィールドへ出すか（省略＝使用者）／onlyCount＝キャラ数制限だけ見る（夕霧）
   /** 1枚目（タッグ）の構成要素に2枚目のキャラの名前が入っている（タッグの名前を「＆」で区切った読み方＝limitViolations と同じ。《巡り合わせ》R4c G9a-2） */
   | { componentOf: [CardRef, CardRef] }
   /** 進行中のダウンが気力0以下によるものか（効果・バトル・コストで明示的にダウンさせるものは偽。香奈子SP「あやつり人形」FAQ:1431 生け贄は働く） */
@@ -281,6 +281,7 @@ export type Op =
    * part: 'kiryokuDown'（R4c G11b-3・命の香炉 NH-31①）＝その効果のうち、only のカードへの気力を減らす操作（op:kiryoku・recover でない負の delta）だけを打ち消す（他のキャラへの気力減・他の op は処理する）。
    * 'thisEffect' はこの効果自身（env.declId のフレーム）を指す。残りの Op（rest）は実行しない
    */
+  | { op: 'giveControl'; what: CardRef; to: PlayerRef }   // 使用権を移す（持ち主は変わらない。夕霧「おでかけ」14-4）
   | { op: 'counter'; what: 'thisEffect' | { declared: CardRef }; part?: 'draw' | 'kiryokuDown'; only?: CardRef }
   /**
    * 効果の乗っ取り（D11〜D15・R4a-2）。what.declared が指す宣言（いただきます＝相手のイベント／幸せ泥棒＝

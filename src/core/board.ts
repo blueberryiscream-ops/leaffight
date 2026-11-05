@@ -42,6 +42,10 @@ export interface CardInstance {
   personaOf?: string
   /** トークン（カードでないキャラ＝ゴースト。R4c G9a-2c）: 場を離れたら消える（どの領域にも行かない FAQ:264）・ダウンしてもダウン数に数えない。能力値は ctx.cards[cardId]（engine/tokens.ts が登録） */
   token?: boolean
+  /** 使用権（14-4・K8）: 持ち主と別のプレイヤーが使用しているときだけ（夕霧・妖刀）。無ければ持ち主。場を離れたら消える */
+  controller?: Seat
+  /** 使用権を与えているカードの iid（妖刀。外れたら戻すのに使う） */
+  controllerSrc?: string
 }
 
 /** 修正の切れ方の目印。自動消滅はしない（DESIGN.md §4.16）。人間が見て判断・削除する */
@@ -462,6 +466,13 @@ export function moveCard(
     if (fromOwner !== toOwner || fromZone !== args.toZone) {
       next = normalizeZone(next, fromOwner, fromZone)
     }
+  }
+
+  if (args.toZone !== 'char' && args.toZone !== 'leader' && next.cards[card.iid] && (next.cards[card.iid].controller !== undefined || next.cards[card.iid].controllerSrc !== undefined)) {
+    const { controller: _c, controllerSrc: _s, ...rest } = next.cards[card.iid]
+    void _c
+    void _s
+    next.cards[card.iid] = rest
   }
 
   const log = publicMove

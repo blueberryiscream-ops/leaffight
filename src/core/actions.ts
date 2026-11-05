@@ -3,11 +3,13 @@
 // ここでも乱数・時刻は持たない。呼び出し側が iid・並び順を決めて渡す。
 
 import * as board from './board'
+import { setController } from './control'
 import type { BoardState, Mode, ModScope, Modifier, Orientation, Seat, ZoneId } from './board'
 import { applyProc, type ProcAction, type ProcTrace } from './proc'
 
 export type BoardAction =
   | { type: 'spawnCard'; iid: string; cardId: string; cardName: string; owner: Seat; zone: ZoneId; token?: boolean; orientation?: Orientation; kiryoku?: number }
+  | { type: 'setController'; iid: string; seat: Seat | null; src?: string }
   | { type: 'moveCard'; iid: string; toOwner?: Seat; toZone: ZoneId; toIndex?: number; cardName: string }
   | { type: 'setOrientation'; iid: string; orientation: Orientation; cardName: string }
   | { type: 'toggleOrientation'; iid: string; cardName: string }
@@ -51,6 +53,8 @@ function applyActionCore(state: BoardState, action: BoardAction): board.Result &
   switch (action.type) {
     case 'spawnCard':
       return board.spawnCard(state, action)
+    case 'setController':
+      return setController(state, action)
     case 'moveCard':
       return board.moveCard(state, action)
     case 'setOrientation':

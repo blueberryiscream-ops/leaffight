@@ -24,6 +24,7 @@
 //   10-4 エントリーフェイズ [1]〜[5]（384-389）／10-7 手札調整フェイズ [1]〜[4]（430-435）／10-8 ターン終了（436-441）
 //   7-2[3]《コストを発生するとき》の窓は宣言の段で開く（244-250・統括11 の検証 C19）
 
+import { userOf } from './control'
 import { cardsInZone, moveCard, shuffleDeck, type BoardState, type CardInstance, type Layer, type Seat, type ZoneId } from './board'
 import type { CostKind } from './types'
 
@@ -709,9 +710,9 @@ function pushDown(state: BoardState, iid: string, costOf: string | null, byBattl
     step: 1,
     status: 'enter',
     window: null,
-    by: card.owner,
+    by: userOf(card),
     label: `ダウン:${card.cardId}`,
-    down: { iid, seat: card.owner, added: false, canceled: false, wasLeader: card.zone === 'leader', costOf, byBattle, byLowKiryoku },
+    down: { iid, seat: userOf(card), added: false, canceled: false, wasLeader: card.zone === 'leader', costOf, byBattle, byLowKiryoku },
     eng: {},
   }
   return { ...s, proc: [...s.proc, frame] }
@@ -1047,7 +1048,7 @@ function coreChoice(state: BoardState, frame: ProcFrame, choice: Omit<ProcChoice
 
 function fieldChars(state: BoardState, seat: Seat): CardInstance[] {
   return Object.values(state.cards)
-    .filter((c) => onField(c) && c.owner === seat)
+    .filter((c) => onField(c) && userOf(c) === seat)
     .sort((a, b) => (a.zone === b.zone ? a.index - b.index : a.zone === 'leader' ? -1 : 1))
 }
 
