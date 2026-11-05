@@ -2630,3 +2630,11 @@ tested 322 → **323**（t_なつみ&なつみ）。R4c 1271 → **1285**（✅ 
 5. 仕組み: `src/engine/tagParts.ts`（`resolveCharName`／`tagComponents`・ctx.cards ごとにキャッシュ）。drive.ts は `tagParts(ctx, name)`。eval の componentOf は「1枚目の kind が t」を見る（今までは「＆」の有無）。
 6. 判断・懸念: (a) SP・覆製身を構成要素から除く読み（上の表の要確認3件）は原典で決まっていない。決めるなら tagParts.ts の resolveCharName。(b) HM-12S が「末尾Ｓ」で ＨＭ－１２ ×2 に解決されるため、構成要素制限（場にＨＭ－１２Ｓと＋ＨＭ－１２）が掛かる（量産で免除されている。既存ケースは変わらず ✅）。(c) 香奈子SP の manual 3件と、なつみ＆なつみ以外のタッグの FAQ の読み直しは G9a-2c へ。
 7. ツールの呼び出し回数: 約52回。
+
+
+## 統括41の検証（G9a-2b）— 合格（構成要素の名前の解決）
+- 統括が test:faq・tested.ts を回し直して一致（R4c ✅1285 ❌0・tested 323／draft 4／manual 42・_tested.json 差分なし）。diff 小（新規 src/engine/tagParts.ts＝engine の層・core 隔離は verify が見る）
+- core: procCancelDown は 15-5-1 [2] まで（step>2 なら受け付けない）。原典どおり（ダウンせずにできるのは《ダウンするとき》）と統括が判断＝承認
+- ❓ **利用者に聞く（仮に決めて進めた）**: タッグの構成要素の短い名前に、SP・覆製身の別名カードは入るか。今は「入らない」（あかり＆志保の『あかり』＝神岸あかりだけ・神岸あかりSP は入らない。瑞穂＆香奈子の太田香奈子SP・蝉丸＆光岡の坂神蝉丸・覆製身も同じ）。FAQ に記述なし（統括が oldfaq で探した）。同名キャラ制限でも SP は別名＝並べられる、と揃う読み。違えば src/engine/tagParts.ts の resolveCharName を直す
+- 既存ケース text-c_篠塚弥生-3 の相手リーダーを太田香奈子→たまに替えた（解決後は瑞穂＆香奈子と構成要素制限で当たるため。期待値は不変）＝妥当
+- 香奈子SP の manual 3件（FAQ:2802・2811・1431）は G9a-2c へ
