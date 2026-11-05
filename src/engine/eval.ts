@@ -238,6 +238,15 @@ export function evalCond(ctx: EngineCtx, state: BoardState, env: Env, c: Cond): 
     }
   }
   if ('exists' in c) return select(ctx, state, env, c.exists).length > 0
+  if ('downByLowKiryoku' in c) return !!triggerFrame(state, env)?.down?.byLowKiryoku
+  if ('downCanceled' in c) return !!triggerFrame(state, env)?.down?.canceled
+  if ('componentOf' in c) {
+    const tag = resolveRef(state, env, c.componentOf[0])[0]
+    const part = resolveRef(state, env, c.componentOf[1])[0]
+    if (!tag || !part) return false
+    const nm = (i: string) => ctx.cards[state.cards[i]?.cardId ?? '']?.name ?? ''
+    return nm(tag).split('＆').length > 1 && nm(tag).split('＆').includes(nm(part))
+  }
   if ('fitsField' in c) {
     const fid = resolveRef(state, env, c.fitsField)[0]
     return !!fid && fitsField(ctx, state, fid, env.you, c.ignoreCount)

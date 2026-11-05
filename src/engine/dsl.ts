@@ -134,6 +134,12 @@ export type Cond =
   | { exists: Selector }
   /** そのカード（1枚）を今フィールドに出したら、フィールドのキャラ制限を満たせるか（使用者の席。「満たせない場合は打ち消される」。R4c G9a-1） */
   | { fitsField: CardRef; ignoreCount?: boolean }
+  /** 1枚目（タッグ）の構成要素に2枚目のキャラの名前が入っている（タッグの名前を「＆」で区切った読み方＝limitViolations と同じ。《巡り合わせ》R4c G9a-2） */
+  | { componentOf: [CardRef, CardRef] }
+  /** 進行中のダウンが気力0以下によるものか（効果・バトル・コストで明示的にダウンさせるものは偽。香奈子SP「あやつり人形」FAQ:1431 生け贄は働く） */
+  | { downByLowKiryoku: true }
+  /** 進行中のダウンが打ち消されたか（ド根性が香奈子SP の打ち消しの後で働かないため） */
+  | { downCanceled: true }
   /** その枠に選んだ答えがある（効果の中の「〜することができる」の選択。R4c G5c） */
   | { picked: string }
   /** 宣誓（slot 名の答え＝キャラクター／バトル／イベント／その他）の通りのカードか。キャラクター＝c／バトル＝b／イベント＝e／その他＝i・f・t（タッグは「その他」FAQ:3093・規 586）。
@@ -302,7 +308,8 @@ export type Op =
    * （このときキャラはまだ場に出ていない）→ ②元の場所に残っていれば指定の向きで場に出す → ③《呼び出されたとき》の機会（NH-18）。
    * what が元の場所（宣言時のゾーン）から動いていなければ実行し、動いていれば（他の効果で失われた等）何もしない
    */
-  | { op: 'callByEffect'; what: CardRef; orientation: 'ready' | 'rested' }
+  /** inheritFrom＝アイテムとダメージを引き継ぐ元（なつみ＆なつみ「目覚め」。呼び出しが成立したときだけ。満たせず打ち消されたら引き継がない） */
+  | { op: 'callByEffect'; what: CardRef; orientation: 'ready' | 'rested'; inheritFrom?: CardRef }
   // ── バトル
   | { op: 'setParticipants'; /** 'own'＝この能力の使用者の側（伏兵 G8c-1。挑んだ側でも挑まれた側でも） */ side: 'challenger' | 'challenged' | 'own'; to: CardRef | Selector; exhaust: boolean; previous: 'keepState' | 'readyIfWasReady'; /** 入ったキャラに《バトルに参加したとき》を改めて起こす（伏兵 NH-41⑩）。[17] をやり直さず今の段で窓を開く */ rejoin?: boolean }
   /**
@@ -478,7 +485,7 @@ export type Continuous =
   | { ce: 'grantAbility'; who: CardRef; ability: Extract<Ability, { kind: 'activated' }> }
   /** 模写（《メイフィア》R4c G6b-2）でコピーした能力。who（メイフィア）が、cardId の能力 index をターン終了時まで持つ。op grantAbility { copyOf } が足す層の中身（カードの記述には書かない） */
   | { ce: 'copiedAbility'; who: CardRef; cardId: string; index: number }
-  | { ce: 'cannotEquip'; who: CardRef }
+  | { ce: 'cannotEquip'; who: CardRef; when?: Cond }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
   // ── R3 で足した（HANDOFF-R3「決めたこと」）

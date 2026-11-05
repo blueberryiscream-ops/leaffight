@@ -1387,7 +1387,17 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // D17: 効果で「呼び出す」。カードが宣言時（今）の場所から動いていなければ実行する
       const iid = refs(op.what)[0]
       if (!iid || !(iid in state.cards)) return { tasks: rest, actions: [] }
-      return { tasks: rest, actions: [{ type: 'procSummon', iid, seat: env.you, orientation: op.orientation, fromZone: state.cards[iid].zone }] }
+      // R4c G9a-2: inheritFrom＝アイテムとダメージを引き継ぐ（putOntoField と同じ計算）
+      let from: string | undefined
+      let kiryoku: number | undefined
+      if (op.inheritFrom) {
+        from = refs(op.inheritFrom)[0] ?? (op.inheritFrom.ref === 'self' ? env.self ?? undefined : undefined)
+        const old = from ? state.cards[from] : undefined
+        const oldMax = old ? ctx.cards[old.cardId]?.kiryoku ?? null : null
+        const newMax = ctx.cards[state.cards[iid].cardId]?.kiryoku ?? null
+        if (old && old.kiryoku !== null && oldMax !== null && newMax !== null) kiryoku = newMax - (oldMax - old.kiryoku)
+      }
+      return { tasks: rest, actions: [{ type: 'procSummon', iid, seat: env.you, orientation: op.orientation, fromZone: state.cards[iid].zone, ...(from ? { inheritFrom: from, inheritKiryoku: kiryoku } : {}) }] }
     }
     case 'redirectDamage': {
       const to = refs(op.to)[0]

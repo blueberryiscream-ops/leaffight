@@ -315,7 +315,7 @@ export interface ProcFrame {
   }
   /** 効果で「呼び出す」（D17・R4a-2。kind summon）。fromZone＝宣言時点（Op 実行時点）でカードがあった場所。
    *  [2] にそこにまだあれば場に出す。動いていれば（他の効果で失われた等）canceled のまま何もしない */
-  summon?: { iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId; canceled?: boolean }
+  summon?: { iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId; canceled?: boolean; inheritFrom?: string; inheritKiryoku?: number }
   aborted?: string
   /** ダメージ[6] で起きたダウン（ダメージの手順が終わってから積む） */
   pendingDowns?: string[]
@@ -1184,7 +1184,10 @@ function placeChar(state: BoardState, frame: ProcFrame, kiryoku: number | null, 
   let s = moveCard(state, { iid, toOwner: by, toZone: 'char', cardName: c.cardId }).state
   // 呼び出しは消耗状態で、タッグ化は待機状態で出す。summon は frame.summon.orientation の指定どおり（D18「待機状態で」等）
   const orientation = isSummon ? frame.summon!.orientation : frame.kind === 'call' ? (state.layers.callReady ? 'ready' : 'rested') : 'ready'
-  s = { ...s, cards: { ...s.cards, [iid]: { ...s.cards[iid], orientation, kiryoku: kiryoku ?? s.cards[iid].kiryoku, attachedTo: null } } }
+  s = { ...s, cards: { ...s.cards, [iid]: { ...s.cards[iid], orientation, kiryoku: (isSummon ? frame.summon!.inheritKiryoku : undefined) ?? kiryoku ?? s.cards[iid].kiryoku, attachedTo: null } } }
+  // R4c G9a-2: 効果の呼び出しで引き継ぐアイテム（なつみ＆なつみ「目覚め」）
+  const inh = isSummon ? frame.summon!.inheritFrom : undefined
+  if (inh) for (const item of Object.values(s.cards)) if (item.attachedTo === inh) s = { ...s, cards: { ...s.cards, [item.iid]: { ...item, attachedTo: iid } } }
   trace.push({ kind: 'name', text: frame.label, id: frame.decl?.id })
   // 【決めたこと】気力0以下で出たキャラはその瞬間にダウンする（FAQ:3266「タッグ化した瞬間に、ダウンした」）
   if ((s.cards[iid].kiryoku ?? 1) <= 0) s = pushDown(setFrame(s, advance(frame)), iid, null)
@@ -2202,7 +2205,7 @@ export type ProcAction =
   /** 効果でキャラをダウンさせる（15-5 のダウン処理を起こす。《サクリファイス》） */
   | { type: 'procDown'; iid: string }
   /** 効果で「呼び出す」（D17・R4a-2）: kind summon のフレームを積む。fromZone＝実行時点でカードがあった場所 */
-  | { type: 'procSummon'; iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId }
+  | { type: 'procSummon'; iid: string; seat: Seat; orientation: 'ready' | 'rested'; fromZone: ZoneId; inheritFrom?: string; inheritKiryoku?: number }
   /** そのフェイズの段を始める（エントリー 10-4・手札調整 10-7）。エンジンの drive が出す */
   | { type: 'procPhaseStart' }
   /** フェイズを進める（10-2-2 のフェイズ終了の合意の後。ターン全体の進行は R2u） */
@@ -2577,7 +2580,7 @@ function applyProcCore(state: BoardState, action: ProcAction, trace: ProcTrace[]
       // D17: 効果で「呼び出す」。kind summon のフレームを積む（宣言[1]〜[5]は経ない・down と同じ軽い形）
       const s = pushFrame(
         setMeta(state, { marks: { ...state.procMeta.marks, [SUMMON_STOPPED]: (state.procMeta.marks[SUMMON_STOPPED] ?? []).filter((i) => i !== action.iid) } }),
-        { kind: 'summon', step: 1, status: 'enter', window: null, by: action.seat, label: `呼び出し（効果）:${action.iid}`, summon: { iid: action.iid, seat: action.seat, orientation: action.orientation, fromZone: action.fromZone }, eng: {} },
+        { kind: 'summon', step: 1, status: 'enter', window: null, by: action.seat, label: `呼び出し（効果）:${action.iid}`, summon: { iid: action.iid, seat: action.seat, orientation: action.orientation, fromZone: action.fromZone, ...(action.inheritFrom ? { inheritFrom: action.inheritFrom, inheritKiryoku: action.inheritKiryoku } : {}) }, eng: {} },
         'summon',
       )[0]
       return { state: s, log: `${action.iid} を呼び出す（効果）` }

@@ -824,6 +824,7 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl, pr
   if (decl.kind === 'equip' && decl.equipTo) {
     for (const e of d.effs) {
       if (e.effect.ce !== 'cannotEquip' || !targetsOf(ctx, state, e).includes(decl.equipTo)) continue
+      if (e.effect.when && !evalCond(ctx, state, e.env, e.effect.when)) continue
       out.push({ kind: 'prohibit', text: `${name(decl.equipTo)}は「${e.layer.label}」によりアイテムを装備できない`, source: e.layer.label, sourceIid: e.layer.source })
     }
   }
