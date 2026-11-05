@@ -2672,3 +2672,11 @@ tested 322 → **323**（t_なつみ&なつみ）。R4c 1271 → **1285**（✅ 
 ## 統括41の検証（G9a-2c）— ゴースト合格・香奈子SP は G9a-2d へ
 - 統括が test:faq・tested.ts を回し直して一致（R4c ✅1297 ❌0・tested 324／draft 4／manual 41・差分なし）。diff 10ファイル +105/−7（core: board.ts の token 印・moveCard で場を離れたトークンを消す・ダウン [3] でトークンは数えない。engine: tokens.ts＝能力値の出所1か所）
 - 🔸 画面（src/ui）のゴーストの表示は未確認＝2タブの確認のときに見る。コスト発生不可はケース無し
+
+## R4c G9a-2d（香奈子SP の残り: 手札戻し／回復の対象外・能力を失ったらダウン）
+
+**完了**: 香奈子SP の manual 2件（FAQ:2802・2811）を外した。生け贄（FAQ:1431）は香奈子SP の関係 FAQ に無く、`cards/` に生け贄のカードも無い＝記述は別件（faqReview は触らず）。
+- 仕組み: `ce opImmune`（dsl.ts・layers.ts opImmuneTo・drive.ts の kiryoku recover／moveTo hand で処理から外す）／`CardDef.downIfLost`（layers.ts lostDownFix・drive.ts の駆動ループ。特殊能力を失い気力0以下の場へ procDown＝あやつり人形の打ち消しは働かない）。
+- T ケース6件（`authored/R4c-G9a2d.mjs`: -5〜-9・faq-2811）。R4c ✅ +6・❌0。
+- 直す前 ❌: 手札戻し外し→`sp の場所 = A:hand（期待 field）`／ダウン外し→`sp の場所 = A:char（期待 trash） / ダウン数 you = 0（期待 1）`／回復外し→DEBUG_CASE の trace に `気力:sp:+1`（期待は 0 のまま）。回復外しの全体 test:faq は終わらなかった（原因未調査・要確認）。
+- 🔸 限界: 「対象に選べない」ではなく効果の処理から外す形（腹ぺこと同じ）。単体対象のイベントで選ぶこと自体は止めていない。
