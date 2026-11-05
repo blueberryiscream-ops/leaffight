@@ -942,7 +942,8 @@ function advance(frame: ProcFrame): ProcFrame {
 function battleLost(state: BoardState, b: BattleState): string | null {
   for (const seat of ['A', 'B'] as Seat[]) {
     const remaining = b.participants[seat].filter((iid) => !b.resultDowned.includes(iid))
-    if (remaining.length > 0 && remaining.every((iid) => !onField(state.cards[iid]))) {
+    // 使用権が移ったキャラ（精神支配 FAQ:1438）も、その陣営のキャラでなくなった＝失われたと考える
+    if (remaining.length > 0 && remaining.every((iid) => !onField(state.cards[iid]) || userOf(state.cards[iid]) !== seat)) {
       return 'バトル参加キャラが失われた（20-6・NH-8: その陣営の参加キャラが全員失われた）'
     }
   }

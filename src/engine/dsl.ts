@@ -550,6 +550,8 @@ export type Continuous =
   /** 「エントリー時に待機状態に戻すことができなくなる」（《病気》R4c G11a-2・FAQ:631）: 10-4[2] の規定の待機戻しの候補から外す（効果で待機にするのは可 FAQ:628）。
    *  core はカードを知らない: エンジンが layers で iid を導き出して core の LayerState.noEntryReady に置く（reusable と同じ流れ） */
   | { ce: 'noEntryReady'; who: CardRef | Selector }
+  /** タッグ化の構成要素に指定できない（精神支配 NH-42❸。15-10-2[4] の確かめで断る） */
+  | { ce: 'barTagComponent'; who: CardRef | Selector }
   /** 《フランク長瀬》しらんぷり（R4c G8a-1・NH-39⑦）: このキャラがバトル参加キャラを指名する効果の指名先になったら、その指名を打ち消す（強制）。「変更」「指定」には効かない */
   | { ce: 'ignoreNomination'; who: CardRef | Selector }
   /** 《指名手配》（R4c G8a-1・NH-39⑧）: 味方キャラ（リーダーを含む）に対する相手のバトル参加キャラの指名は、常にこの who（装備先）を対象とする。層の使用者＝装備先のキャラの使用者。付け替え先は対象をとり直さない */

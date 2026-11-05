@@ -46,7 +46,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, controllerFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, opImmuneTo, lostDownFix, untargetableBy, violations, type Violation } from './layers'
+import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, controllerFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, opImmuneTo, lostDownFix, untargetableBy, tagComponentBarred, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -908,6 +908,7 @@ function declareCardUse(ctx: EngineCtx, state: BoardState, req: DeclareReq, id: 
     for (const t of targets) {
       const c = state.cards[t]
       const nm = ctx.cards[c.cardId]?.name ?? ''
+      if (tagComponentBarred(ctx, state, t)) return { ok: false, reason: `タッグ化の構成要素に指定できないキャラ: ${nm}` }
       if (c.baseCardId) return { ok: false, reason: `二重人格で別のキャラとして扱われているキャラは構成要素にできない: ${nm}（FAQ:1539）` }
       if (((c.zone === 'char' || c.zone === 'leader') ? (c.controller ?? c.owner) : c.owner) !== req.by || !names.includes(nm) || used.filter((u) => u === nm).length >= names.filter((n) => n === nm).length) return { ok: false, reason: `構成要素でない: ${nm}（15-10-2）` }
       used.push(nm)

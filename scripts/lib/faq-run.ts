@@ -677,11 +677,12 @@ export function runCase(c: FaqCase, ctx: EngineCtx, debug = false): CaseResult &
         driveRun(run)
         let ok2 = ok
         if (ok && step.advancePhase.entry) {
-          for (let g = 0; g < 600 && (run.state.proc.length || baseOpen(run.state)) && !run.state.result; g++) if (!autoStep(run)) break
-          ok2 = apply(run, { type: 'procPhaseStart' })
+          // 次のエントリー [2] の問い（entryReady）が出たら、既定の答えを入れずに止める
+          for (let g = 0; g < 600 && (run.state.proc.length || baseOpen(run.state)) && !run.state.result && run.state.procMeta.choice?.purpose !== 'entryReady'; g++) if (!autoStep(run)) break
+                    apply(run, { type: 'procPhaseStart' }) // 問いで止まっているときはエントリーが始まっていて null＝失敗ではない
           driveRun(run)
           // エントリー [2] の「待機に戻すキャラ」の問いが出るまで窓を見送る。問いには答えずに止める（ケースの choose で答える）
-          for (let g = 0; g < 100 && run.state.proc.length && !run.state.procMeta.choice && !run.state.result; g++) if (!autoStep(run)) break
+          for (let g = 0; g < 100 && (run.state.proc.length || baseOpen(run.state)) && !run.state.procMeta.choice && !run.state.result; g++) if (!autoStep(run)) break
           const ch0 = run.state.procMeta.choice
           if (ch0) lookaheadChoose(run, i, ch0.by)
         }

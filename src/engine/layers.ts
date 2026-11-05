@@ -193,6 +193,12 @@ export function isCharSource(ctx: EngineCtx, state: BoardState, iid: string | nu
 }
 
 /** そのカードが、その種類の行動の対象にならないか（層の untargetable）。skip＝判定中の効果（自分で自分を調べない） */
+/** タッグ化の構成要素に指定できないキャラか（ce barTagComponent。精神支配 NH-42❸） */
+export function tagComponentBarred(ctx: EngineCtx, state: BoardState, iid: string): boolean {
+  for (const e of derived(ctx, state).effs) if (e.effect.ce === 'barTagComponent' && targetsOf(ctx, state, e).includes(iid)) return true
+  return false
+}
+
 export function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff): Eff | null {
   for (const e of derived(ctx, state).effs) {
     if (e === skip || e.effect.ce !== 'untargetable' || !e.effect.by.kinds.includes(kind)) continue
