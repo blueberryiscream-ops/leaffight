@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core'
 import type { Seat, ZoneId } from '../../core/board'
 import { cardsInZone, fieldCard } from '../../core/board'
+import { userOf } from '../../core/control'
 import { nearestBattle } from '../../core/proc'
 import type { AnnotationsMap, PoolCard } from '../../data/types'
 import { BattlePanel } from './BattlePanel'
@@ -267,8 +268,16 @@ export function Board({
   const isBattleMarked = (iid: string) =>
     !!battleNow && (battleNow.participants.A.includes(iid) || battleNow.participants.B.includes(iid) || battleNow.battleCard === iid)
 
+  // 使用権（K8・14-4）: 使用者の側のフィールドに表示する。自分の持ち物はそのままの位置、使用権が移ってきたキャラは空いている位置へ
+  const charsOfUser = (seat: Seat) => {
+    const m = new Map<number, ReturnType<typeof cardsInZone>[number]>()
+    const all = Object.values(board.cards).filter((c) => c.zone === 'char' && userOf(c) === seat).sort((x, y) => x.index - y.index)
+    for (const c of all) if (c.owner === seat) m.set(c.index, c)
+    for (const c of all) if (c.owner !== seat) { let i = 0; while (m.has(i)) i++; m.set(i, c) }
+    return m
+  }
   const charCell = (owner: Seat, index: number) => {
-    const inst = cardsInZone(board, owner, 'char').find((c) => c.index === index)
+    const inst = charsOfUser(owner).get(index)
     return (
       <DroppableSlot key={`${owner}-char-${index}`} dropId={`${owner}:char:${index}`} label="キャラ" size={cellSquare}>
         {inst && (

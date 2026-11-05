@@ -69,7 +69,7 @@ export type Step =
       /** 宣言時に選ぶ選択肢（バニッシュのどれか・回復する数など） */
       option?: string } }
   | { generateCost: { by: Side; source: string; icon: 'W' | 'R' | 'G' | 'L' | 'T'; attr?: Attr; at?: WindowRef; also?: string[] } }
-  | { advancePhase: { to: 'エントリー' | 'メイン' | '終了' | '手札調整' | 'ターン終了' } }
+  | { advancePhase: { to: 'エントリー' | 'メイン' | '終了' | '手札調整' | 'ターン終了'; entry?: boolean } }   // entry＝ターン終了のあと次のターンのエントリーフェイズまで実行する（相手のエントリーで待機に戻る FAQ:2374・2377）
   | { pass: Side | { side: Side; at?: WindowRef } }
   | { choose: { by: Side; pick: string[] | string } }
   | { answer: { by: Side; accept: boolean } }

@@ -430,7 +430,7 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
 }
 
 /** 手札に戻す／回復の効果が及ばないキャラか（ce opImmune。香奈子SP FAQ:2802）。及ばないなら効果の名前 */
-export function opImmuneTo(ctx: EngineCtx, state: BoardState, iid: string, op: 'recover' | 'toHand'): string | null {
+export function opImmuneTo(ctx: EngineCtx, state: BoardState, iid: string, op: 'recover' | 'toHand' | 'trash'): string | null {
   for (const e of derived(ctx, state).effs) if (e.effect.ce === 'opImmune' && e.effect.ops.includes(op) && effectOn(ctx, state, e, iid)) return e.layer.label
   return null
 }
@@ -1432,18 +1432,40 @@ function controlGrant(ctx: EngineCtx, state: BoardState, it: CardInstance): Seat
   return null
 }
 
-/** 使用権の同期（妖刀: 装備キャラは今のアクティブプレイヤーが使用する FAQ:734・746。外れたら持ち主に戻る 14-4・FAQ:749）。違いがあれば直す1アクションを返す */
+/**
+ * 使用権を与える層（ce controller）の一覧: 持ち主以外が使用するキャラごとに、一番後に発揮した層（seq が最大。後から掛かった方 NH-42⑰・14-4）を採る。
+ * アイテムの常時効果（妖刀）は controlGrant で今働いているかを確かめ、効果で足した層（精神支配 addContinuous）は対象・when（同名がいたら失われる）を effectOn で確かめる。
+ */
+function controlCands(ctx: EngineCtx, state: BoardState): Map<string, { seat: Seat; src: string; seq: number }> {
+  const out = new Map<string, { seat: Seat; src: string; seq: number }>()
+  const put = (host: string, seat: Seat, src: string, seq: number) => {
+    const o = out.get(host)
+    if (!o || seq > o.seq) out.set(host, { seat, src, seq })
+  }
+  for (const e of derived(ctx, state).effs) {
+    if (e.effect.ce !== 'controller') continue
+    if (e.layer.ability !== null) {
+      const it = e.layer.source ? state.cards[e.layer.source] : undefined
+      const want = it ? controlGrant(ctx, state, it) : null
+      if (it && want && it.attachedTo) put(it.attachedTo, want, it.iid, e.layer.seq)
+    } else {
+      const seat = e.effect.to === 'you' ? e.env.you : e.effect.to === 'opponent' ? other(e.env.you) : null
+      if (!seat) continue
+      for (const iid of targetsOf(ctx, state, e)) if (isCharOnField(state.cards[iid]) && (state.cards[iid].controlAt ?? -1) < e.layer.seq && effectOn(ctx, state, e, iid)) put(iid, seat, e.layer.id, e.layer.seq)
+    }
+  }
+  return out
+}
+
+/** 使用権の同期（妖刀: 装備キャラは今のアクティブプレイヤーが使用する FAQ:734・746。精神支配: ターン終了時まで。後から掛かった方 NH-42⑰。外れたら持ち主に戻る 14-4・FAQ:749）。違いがあれば直す1アクションを返す */
 export function controllerFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
-  for (const it of Object.values(state.cards)) {
-    const want = controlGrant(ctx, state, it)
-    if (!want || !it.attachedTo) continue
-    const host = state.cards[it.attachedTo]
-    if (userOf(host) !== want || host.controllerSrc !== it.iid) return { type: 'setController', iid: host.iid, seat: want === host.owner ? null : want, src: it.iid }
+  const cands = controlCands(ctx, state)
+  for (const [iid, w] of cands) {
+    const host = state.cards[iid]
+    if (host && (userOf(host) !== w.seat || host.controllerSrc !== w.src)) return { type: 'setController', iid, seat: w.seat === host.owner ? null : w.seat, src: w.src }
   }
   for (const c of Object.values(state.cards)) {
-    if (!c.controllerSrc) continue
-    const it = state.cards[c.controllerSrc]
-    if (it && it.attachedTo === c.iid && controlGrant(ctx, state, it)) continue
+    if (!c.controllerSrc || cands.get(c.iid)?.src === c.controllerSrc) continue
     // 統括41: 外れたら持ち主に戻す（14-4 使用権の既定＝持ち主。FAQ:749 はノンアクティブ側＝持ち主の例）
     return { type: 'setController', iid: c.iid, seat: null }
   }

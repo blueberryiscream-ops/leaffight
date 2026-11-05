@@ -1353,7 +1353,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'setBattleUsed':
       return { tasks: rest, actions: [{ type: 'procBattleUsed', iids: select(ctx, state, env, op.what), used: op.used }] }
     case 'trash':
-      return { tasks: rest, actions: refs(op.what).filter((iid) => !trashImmune(ctx, state, iid, env.self)).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
+      return { tasks: rest, actions: refs(op.what).filter((iid) => !trashImmune(ctx, state, iid, env.self) && !opImmuneTo(ctx, state, iid, 'trash')).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
       return { tasks: rest, actions: refs(op.what).filter((iid) => !(op.to === 'hand' && opImmuneTo(ctx, state, iid, 'toHand'))).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
     case 'mustUse': {

@@ -488,7 +488,7 @@ export type Continuous =
   | { ce: 'copiedAbility'; who: CardRef; cardId: string; index: number }
   | { ce: 'cannotEquip'; who: CardRef; when?: Cond }
   /** 「手札に戻す効果や回復効果の対象にはならない」（《太田香奈子SP》FAQ:2802）。who は ops の効果（moveTo hand／kiryoku recover:true）の処理から外れる（when の間） */
-  | { ce: 'opImmune'; who: CardRef; ops: ('recover' | 'toHand')[]; when?: Cond }
+  | { ce: 'opImmune'; who: CardRef; ops: ('recover' | 'toHand' | 'trash')[]; when?: Cond }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
   // ── R3 で足した（HANDOFF-R3「決めたこと」）

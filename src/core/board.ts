@@ -45,6 +45,7 @@ export interface CardInstance {
   /** 使用権（14-4・K8）: 持ち主と別のプレイヤーが使用しているときだけ（夕霧・妖刀）。無ければ持ち主。場を離れたら消える */
   controller?: Seat
   /** 使用権を与えているカードの iid（妖刀。外れたら戻すのに使う） */
+  controlAt?: number
   controllerSrc?: string
 }
 
