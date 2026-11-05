@@ -486,6 +486,8 @@ export type Continuous =
   /** 模写（《メイフィア》R4c G6b-2）でコピーした能力。who（メイフィア）が、cardId の能力 index をターン終了時まで持つ。op grantAbility { copyOf } が足す層の中身（カードの記述には書かない） */
   | { ce: 'copiedAbility'; who: CardRef; cardId: string; index: number }
   | { ce: 'cannotEquip'; who: CardRef; when?: Cond }
+  /** 「手札に戻す効果や回復効果の対象にはならない」（《太田香奈子SP》FAQ:2802）。who は ops の効果（moveTo hand／kiryoku recover:true）の処理から外れる（when の間） */
+  | { ce: 'opImmune'; who: CardRef; ops: ('recover' | 'toHand')[]; when?: Cond }
   | { ce: 'notCountedAsDown'; who: CardRef }                                              // 勝利条件に含まれない（9-2-1）
   | { ce: 'manual'; note: string }
   // ── R3 で足した（HANDOFF-R3「決めたこと」）
@@ -658,6 +660,8 @@ export interface CardDef {
   status: DefStatus
   /** この記述が依存しているルールの穴 */
   holes?: HoleId[]
+  /** 特殊能力（この記述の能力）を失ったとき、気力が0以下ならダウンする（《太田香奈子SP》「あやつり人形」FAQ:2811。drive.ts lostDownFix） */
+  downIfLost?: boolean
   cost?: Cost
   /**
    * 装備対象（17-1）。notLeader＝リーダーには装備できない／leaderOnly＝リーダーのみ／friendlyOnly＝味方キャラのみ（持ち主の味方。使用権の移動 K8 は後）／

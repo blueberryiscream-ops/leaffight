@@ -428,6 +428,26 @@ export function recoverIgnored(ctx: EngineCtx, state: BoardState, iid: string): 
   return null
 }
 
+/** 手札に戻す／回復の効果が及ばないキャラか（ce opImmune。香奈子SP FAQ:2802）。及ばないなら効果の名前 */
+export function opImmuneTo(ctx: EngineCtx, state: BoardState, iid: string, op: 'recover' | 'toHand'): string | null {
+  for (const e of derived(ctx, state).effs) if (e.effect.ce === 'opImmune' && e.effect.ops.includes(op) && effectOn(ctx, state, e, iid)) return e.layer.label
+  return null
+}
+
+/**
+ * 効果が失われたら（特殊能力を失った）気力0以下でダウンする（CardDef.downIfLost。香奈子SP FAQ:2811）の1手（無ければ null）。
+ * 効果の処理中・選択待ち・ゲーム終了後は行わない。ダウンは「効果で明示的に」（byLowKiryoku でない＝あやつり人形の打ち消しは働かない）
+ */
+export function lostDownFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
+  if (state.result || state.procMeta.choice || effectInProgress(state)) return null
+  const lost = derived(ctx, state).lost
+  for (const [iid, c] of Object.entries(state.cards)) {
+    if (!isCharOnField(c) || !lost.has(iid) || !ctx.defs[c.cardId]?.downIfLost || (c.kiryoku ?? 1) > 0) continue
+    return { type: 'procDown', iid }
+  }
+  return null
+}
+
 /**
  * 手札の上限枚数（席ごと・null＝無限）。4-2-1 の 7 を基準に、層の handLimit を計算する（R4c G7・NH-38）:
  * 基準7 → set の数（層の連番が一番後ろのもの）→ delta を全部足す → set 'infinite' があれば無限 → 0 未満は 0。出た順には依らない（FAQ:4240）。

@@ -46,7 +46,7 @@ import { ENFORCE } from './enforce'
 import type { Ability, Attr, BattleExpr, CardRef, Choice, CostIcon, Expr, Op, Selector } from './dsl'
 import { battleModOf, currentStat, evalCond, evalExpr, resolvePlayer, resolveRef, select } from './eval'
 import { HOLES } from './holes'
-import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, untargetableBy, violations, type Violation } from './layers'
+import { charLimitOf, ATTRS, nominationHolders, ignoresNomination, copyLayer, copyableAbilityNames, adjustGenerated, attrsNow, drawCancelled, clearableMods, costGenFx, editCostGen, collectEffectTargets, continuousSeed, damagePrevented, exempt, grantedAbilities, isCharSource, limitFix, maxKiryokuOf, modSeed, recoverIgnored, swapChoiceFix, levelChoiceFix, staticSourceActive, syncActions, opImmuneTo, lostDownFix, untargetableBy, violations, type Violation } from './layers'
 
 // ───────────────────────────────────────────────────────────────
 // 効果の実行の状態（同時処理の項目の eng に置く）
@@ -500,6 +500,17 @@ export function drive(state: BoardState, ctx: EngineCtx, opts: { openMain?: bool
       apply(fix)
       if (out.state === before) {
         out.warnings.push('場の制限の是正が受け付けられない')
+        break
+      }
+      continue
+    }
+    // R4c G9a-2d: 特殊能力を失った香奈子SP（気力0以下）はダウンする（FAQ:2811）
+    const lostDown = lostDownFix(ctx, s)
+    if (lostDown) {
+      const before = out.state
+      apply(lostDown)
+      if (out.state === before) {
+        out.warnings.push('能力を失った後のダウンが受け付けられない')
         break
       }
       continue
@@ -1313,7 +1324,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       // R4c G11b-3（命の香炉・NH-31①）: 部分の打ち消し(kiryokuDown)＝この宣言の効果のうち only のカードへの気力減（recover でない負の delta）だけ及ばない。他のカードへの気力減・他の op は通る
       const cf = env.declId ? findFrame(state, env.declId) : undefined
       const kiryokuCut = cf?.counterPart === 'kiryokuDown' && !op.recover && delta < 0 ? cf.counterOnly : undefined
-      const hit = refs(op.who).filter((iid) => iid !== kiryokuCut && !(op.recover && recoverIgnored(ctx, state, iid)))
+      const hit = refs(op.who).filter((iid) => iid !== kiryokuCut && !(op.recover && (recoverIgnored(ctx, state, iid) || opImmuneTo(ctx, state, iid, 'recover'))))
       // countTo（R4c G3b-1・おもてなし）: 実際に増えた点数（上限で切れた分は数えない。規 1172）を枠に足す
       let patch: Partial<ItemEng> | undefined
       if (op.countTo) {
@@ -1336,7 +1347,7 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
     case 'trash':
       return { tasks: rest, actions: refs(op.what).filter((iid) => !trashImmune(ctx, state, iid, env.self)).map((iid) => ({ type: 'procMove', iid, to: 'trash' }) as BoardAction) }
     case 'moveTo':
-      return { tasks: rest, actions: refs(op.what).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
+      return { tasks: rest, actions: refs(op.what).filter((iid) => !(op.to === 'hand' && opImmuneTo(ctx, state, iid, 'toHand'))).map((iid) => ({ type: 'procMove', iid, to: op.to }) as BoardAction) }
     case 'mustUse': {
       // R4c G5e: 提示の回数を覚え、ターン終了時（手札調整の後）に「手札にあり、その後提示されていない」ならゴミ箱送りにする遅延を層に預ける（atTurnEnd と同じ形）
       const iid = refs(op.what)[0]
