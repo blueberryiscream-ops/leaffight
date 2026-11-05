@@ -1432,7 +1432,7 @@ function controlGrant(ctx: EngineCtx, state: BoardState, it: CardInstance): Seat
   return null
 }
 
-/** 使用権の同期（妖刀: 装備キャラは今のアクティブプレイヤーが使用する FAQ:734・746。外れたらノンアクティブ側に戻る FAQ:749）。違いがあれば直す1アクションを返す */
+/** 使用権の同期（妖刀: 装備キャラは今のアクティブプレイヤーが使用する FAQ:734・746。外れたら持ち主に戻る 14-4・FAQ:749）。違いがあれば直す1アクションを返す */
 export function controllerFix(ctx: EngineCtx, state: BoardState): BoardAction | null {
   for (const it of Object.values(state.cards)) {
     const want = controlGrant(ctx, state, it)
@@ -1444,8 +1444,8 @@ export function controllerFix(ctx: EngineCtx, state: BoardState): BoardAction | 
     if (!c.controllerSrc) continue
     const it = state.cards[c.controllerSrc]
     if (it && it.attachedTo === c.iid && controlGrant(ctx, state, it)) continue
-    const back = other(activeSeat(state))
-    return { type: 'setController', iid: c.iid, seat: back === c.owner ? null : back }
+    // 統括41: 外れたら持ち主に戻す（14-4 使用権の既定＝持ち主。FAQ:749 はノンアクティブ側＝持ち主の例）
+    return { type: 'setController', iid: c.iid, seat: null }
   }
   return null
 }
