@@ -32,6 +32,7 @@ import { buildEngineCtx } from '../engine/host'
 import { ProcPanel } from '../engine/ProcPanel'
 import { useEngineUI } from '../engine/useEngineUI'
 import type { CardDef } from '../../engine/dsl'
+import { listTokenSpecs } from '../../engine/tokens'
 import { currentStats, layersOn, maxKiryokuOf } from '../../engine/layers'
 
 // 盤面レイアウト（PHASE2.7.md。原本図 _local/reference/layout_sketch.png.png が正）。
@@ -162,7 +163,21 @@ export function Board({
   const mySeat: Seat = localSeat
   const theirSeat: Seat = otherSeat(localSeat)
 
-  const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
+  // トークン（ゴースト等）は cards に無い＝記述の TokenSpec から印刷情報だけの面を作る（能力値を読む口は engine/tokens.ts）
+  const tokenCards = useMemo(
+    () =>
+      listTokenSpecs(cardDefs as Record<string, CardDef>).map(
+        (t) =>
+          ({
+            id: `token:${t.name}`, kind: 'c', name: t.name, kana: '', setVer: '', printings: [], num: -1,
+            kiryoku: t.kiryoku, stats: t.stats, cost: '', attr: t.attrs.join(''), battleAtk: '', battleDef: '',
+            abilities: t.traits.length ? [{ header: 'トークン', cost: '', auto: true, text: 'トークン（カードではないキャラ）' }] : [],
+            illust: '', cells: [], image: null, sex: t.sex === '男性' || t.sex === '女性' ? t.sex : '', charTypes: [...t.types],
+          }) as unknown as PoolCard,
+      ),
+    [cardDefs],
+  )
+  const cardMap = useMemo(() => new Map([...tokenCards, ...cards].map((c) => [c.id, c])), [cards, tokenCards])
   const cardOf = (cardId: string) => cardMap.get(cardId)
   const imageUrlOf = (cardId: string) => imageUrls.get(cardId)
   const annotationsOf = (cardId: string) => annotations[cardId]
@@ -275,6 +290,12 @@ export function Board({
     for (const c of all) if (c.owner === seat) m.set(c.index, c)
     for (const c of all) if (c.owner !== seat) { let i = 0; while (m.has(i)) i++; m.set(i, c) }
     return m
+  }
+  // 6体目以降（大混雑・ゴースト・精神支配で一時的に6体）: 5つの外のマスを足して全員を出す
+  const extraCharCells = (seat: Seat) => {
+    const m = charsOfUser(seat)
+    const idx = [...m.keys()].filter((i) => i >= 5).sort((a, b) => a - b)
+    return idx.map((i) => charCell(seat, i))
   }
   const charCell = (owner: Seat, index: number) => {
     const inst = charsOfUser(owner).get(index)
@@ -421,6 +442,7 @@ export function Board({
             {charCell(theirSeat, 0)}
             {charCell(theirSeat, 1)}
             {charCell(theirSeat, 2)}
+            {extraCharCells(theirSeat)}
           </>
         }
         right={
@@ -459,6 +481,7 @@ export function Board({
             {charCell(mySeat, 0)}
             {charCell(mySeat, 1)}
             {charCell(mySeat, 2)}
+            {extraCharCells(mySeat)}
           </>
         }
       />
@@ -523,6 +546,7 @@ export function Board({
             {charCell(theirSeat, 0)}
             {charCell(theirSeat, 1)}
             {charCell(theirSeat, 2)}
+            {extraCharCells(theirSeat)}
           </>
         }
       />
@@ -536,6 +560,7 @@ export function Board({
             {charCell(mySeat, 0)}
             {charCell(mySeat, 1)}
             {charCell(mySeat, 2)}
+            {extraCharCells(mySeat)}
           </>
         }
       />

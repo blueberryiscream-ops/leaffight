@@ -41,3 +41,20 @@ export function registerTokens(ctx: EngineCtx): void {
   }
   for (const d of Object.values(ctx.defs)) walk(d.abilities)
 }
+
+/** 記述の中の createToken の TokenSpec を列挙する（画面が `token:` の cardId を名前・能力値つきで出すため。能力値を読む口は引き続きここだけ） */
+export function listTokenSpecs(defs: Record<string, CardDef>): TokenSpec[] {
+  const out = new Map<string, TokenSpec>()
+  const walk = (x: unknown): void => {
+    if (Array.isArray(x)) return x.forEach(walk)
+    if (!x || typeof x !== 'object') return
+    const o = x as Record<string, unknown>
+    if (o.op === 'createToken' && o.token) {
+      const spec = o.token as TokenSpec
+      out.set(tokenIdOf(spec), spec)
+    }
+    for (const v of Object.values(o)) walk(v)
+  }
+  for (const d of Object.values(defs)) walk(d.abilities)
+  return [...out.values()]
+}
