@@ -199,9 +199,29 @@ export function tagComponentBarred(ctx: EngineCtx, state: BoardState, iid: strin
   return false
 }
 
-export function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff): Eff | null {
+/** 宣言した行動の効果に、手札に戻す（moveTo hand）／回復（kiryoku recover）の op が含まれるか（untargetable の ops 用） */
+function declHasOps(ctx: EngineCtx, decl: ProcDecl | undefined, ops: ('toHand' | 'recover')[]): boolean {
+  const cardId = decl?.eng.cardId as string | undefined
+  const idx = decl?.eng.index as number | undefined
+  if (!decl || cardId === undefined || idx === undefined) return false
+  const ab = abilityAt(ctx, cardId, idx)
+  if (!ab || (ab.kind !== 'activated' && ab.kind !== 'play')) return false
+  const walk = (x: unknown): boolean => {
+    if (Array.isArray(x)) return x.some(walk)
+    if (!x || typeof x !== 'object') return false
+    const o = x as Record<string, unknown>
+    if (o.op === 'moveTo' && o.to === 'hand' && ops.includes('toHand')) return true
+    if (o.op === 'kiryoku' && o.recover === true && ops.includes('recover')) return true
+    return Object.values(o).some(walk)
+  }
+  return walk(ab.effect)
+}
+
+export function untargetableBy(ctx: EngineCtx, state: BoardState, iid: string, kind: ActionPattern['kinds'][number], skip?: Eff, decl?: ProcDecl): Eff | null {
   for (const e of derived(ctx, state).effs) {
     if (e === skip || e.effect.ce !== 'untargetable' || !e.effect.by.kinds.includes(kind)) continue
+    if (e.effect.ops && !declHasOps(ctx, decl, e.effect.ops)) continue
+    if (e.effect.when && !evalCond(ctx, state, e.env, e.effect.when)) continue
     if (targetsOf(ctx, state, e).includes(iid)) return e
   }
   return null
@@ -814,7 +834,7 @@ export function violations(ctx: EngineCtx, state: BoardState, decl: ProcDecl, pr
   }
   const allTargets = new Set([...decl.targets, ...implicitTargetsOf(ctx, state, decl)])
   for (const t of allTargets) {
-    const u = untargetableBy(ctx, state, t, kind)
+    const u = untargetableBy(ctx, state, t, kind, undefined, decl)
     if (u) out.push({ kind: 'untargetable', text: `${name(t)}は「${u.layer.label}」により${kind}の対象にならない（空打ち 11-3）`, source: u.layer.label, sourceIid: u.layer.source })
   }
   // FAQ:1168・228: 支払い方法（payWith）で提示したコスト発生の発生源（場のキャラ）も「コスト発生」の対象として扱う

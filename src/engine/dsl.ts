@@ -494,7 +494,8 @@ export type Continuous =
   // ── R3 で足した（HANDOFF-R3「決めたこと」）
   /** 【～の対象にならない】（oldrule.txt:1178-1179）。by の種類の行動の対象に指定すると空打ち（11-3・FAQ:706）。
    *  その種類の常時効果の影響も受けない（《魔法のサークレット》FAQ:697・709） */
-  | { ce: 'untargetable'; who: CardRef | Selector; by: ActionPattern }
+  /** ops＝「手札に戻す効果・回復効果の対象にならない」（香奈子SP FAQ:2802）: 宣言した行動の効果にその op があるときだけ対象にならない（選べない）。無ければ全部の宣言 */
+  | { ce: 'untargetable'; who: CardRef | Selector; by: ActionPattern; ops?: ('toHand' | 'recover')[]; when?: Cond }
   /** 「ダメージを受けない」「ダメージを与えない」。from＝ダメージの発生元の条件（it＝発生元）。battle: only＝バトルの結果ダメージだけ・except＝それ以外だけ。
    *  処理するのは 15-4-2[5] の前（身代わり [4] の後 FAQ:1706）。deal＝このキャラが与えるダメージも（《インスタントヴィジョン》） */
   | { ce: 'preventDamage'; who: CardRef | Selector; from?: Cond; battle?: 'only' | 'except'; deal?: boolean }

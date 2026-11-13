@@ -2797,3 +2797,28 @@ tested 322 → **323**（t_なつみ&なつみ）。R4c 1271 → **1285**（✅ 
 ## 統括41（追記）— 利用者の決定: 別名のカードもタッグの構成要素に入る（NH-42⑳）
 - src/engine/tagParts.ts に componentKey（キャラ名→そのキャラ名で始まる、より短いキャラ名のうち最も長いもの＝元のキャラ）。タッグ化の宣言（drive.ts 2か所）・構成要素制限（layers.ts）・componentOf（eval.ts）がそろえた名前で突き合わせる。当たる別名: 神岸あかりSP・太田香奈子SP・坂神蝉丸・覆製身・杜若きよみ・覆製身・スフィー（マジカルサンダー）（スフィーは利用者の言う「SP など」と同じ別名のカードと統括が判断）
 - ケース3件（authored/R4c-G9a2b.mjs: あかりSP でタッグ化・あかりSP と あかり＆志保の是正・太田香奈子SP と 瑞穂＆香奈子の是正）。直す前 ❌ 3件（componentKey を外す→ ❌ text-t_あかり&志保-9b4: 構成要素でない: 神岸あかりSP ほか）。R4c ✅1348 ❌0・tested 328・verify 緑
+
+## R4c G9a-3d（画面の不具合2つ・是正／人数調整／隠し部屋のケース・香奈子SP の対象）
+
+**完了**: 項目1〜6 済み・項目7 は見立てのみ。R4c **1348→1357 ✅・❌0**（R2a〜R4b 前後同数）。tested 328／draft 4／manual 41（変わらず）。verify 緑（exit 0）。ツール約55回。
+
+### 項目ごと
+1. 済み 画面: トークン。engine/tokens.ts に `listTokenSpecs(defs)`（記述の createToken を列挙）を足し、Board.tsx が `token:<名前>` を名前・気力・能力値・属性・タイプつきの面（PoolCard 形・画像なし）にして cardMap に足す。能力値を読む口は tokens.ts のまま。tsc 通過・起動の煙試験は未実施（2タブは統括）。
+2. 済み 画面: 6体目以降。`extraCharCells(seat)`＝charsOfUser が index 5 以上を返すとき、各陣営の外側の行（キャラ3枚の行）にマスを足す（A・B 両レイアウト）。overflow は使っていない。見た目の最終は画面の束で。
+3. 済み 構成要素の是正: `text-e_精神支配-3d1`（あかり＆志保＋相手のあかりに精神支配→自分があかりを選ぶ→あかりは**持ち主（相手）のゴミ箱**）・3d2（タッグを選ぶ→タッグが自分のゴミ箱・あかりは使用権が自分のまま残る）。
+4. 済み 人数調整: `text-e_人数調整-3d1`（相手3体・精神支配で1体奪う→使用者で数えて相手が1体だけ消耗）。
+5. 済み 隠し部屋: 3d1（受けるキャラに選べない）・3d2（対照）・3d3（鬼ごっこ）。**3d3 は ❌ で本当の不具合が出た**: 鬼ごっこの setParticipants が隠し部屋（barFromBattle any）のキャラを参加キャラに入れていた→ drive.ts の setParticipants で `state.layers.barAny` を除く修正。
+6. 済み 香奈子SP: dsl の `ce untargetable` に `ops?: ('toHand'|'recover')[]`・`when?` を足し、layers.ts `declHasOps`（宣言した行動の効果にその op があるときだけ働く）。カードに untargetable（イベント・特殊能力・ops＝toHand/recover・気力0以下）を足した。ケース 3d1（安眠で気力0の香奈子SP は選べない）・3d2・3d3（気力1なら選べる）。`opImmune` は残した＝**全体の効果（大浴場・はじめからはじめる）は FAQ:2802 のとおり気力0の香奈子を外す**（対象をとらない効果でも FAQ:2802 が「回復されない」と答えている）。⚠ ops 付きは declHasOps の判定が decl を渡す violations（宣言）でのみ働く＝処理時に選ぶ（chooseOp）単体選択では選べてしまう経路が残る（今のプールの該当カードは未調査）。
+7. 見立てのみ（変わり身 manual）: 残りの manual は3つ。(a) FAQ:1625 タッグの構成要素の確認＝統括41の tagParts.ts `componentKey` で**今は記述にできる**（呼び出す前に場のタッグの構成要素に同名があれば打ち消し）。(b) バトル参加キャラへの追加＝setParticipants は置き換え専用。`add` を足す（procSetParticipants に add フラグ）＝core（CRLF）の小さな変更。(c) 呼び出しコストの支払い判定（NH-19）＝一番重い。(a)(b) だけでは manual が残り tested にならない＝(c) の見立てが要る。無理に広げず未着手。
+
+### 直す前 ❌（1か所ずつ外して前景 `timeout 550 npm run test:faq`。R4c の行）
+- 鬼ごっこ（drive.ts の barAny 除外を外す）: ❌1 text-i_隠し部屋-3d3「参加キャラ = youLeader・x・z（期待 youLeader・z）／ x の状態 = rested（期待 待機）」（※修正前にも同じ ❌ で出た）
+- 受ける（proc.ts の受けるキャラの候補 free から barAny を外す）: ❌2 text-i_隠し部屋-3d1「steps[1] が合法でない: いいえ（通った）」・text-e_穏形法-1（既存）。※receiveBlockedByEffect の barAny だけ外しても ❌0＝二重の守り
+- **ゴミ箱は持ち主（proc.ts moveTo の行き先を使用者に）: ❌1 text-e_精神支配-3d1「a の場所 = A:trash（期待 trash・opponent）」＝G9a-3a から取れなかった ❌ がこれで取れた**（board.ts moveCard の既定だけ外しても ❌0＝proc.ts が toOwner を明示している）
+- 人数調整（eval.ts の数を持ち主で数える）: ❌3 text-e_人数調整-3c1（o1・oppLeader が rested）・3d1（steps[2] が合法でない: o3 は選択肢に無い）・text-i_隠し部屋-3d3 の副作用は無し（3c1 は同数でも持ち主数えで ❌ になる＝弱くはなかった）
+- 香奈子SP（layers.ts の ops 判定を外す）: ❌1 text-c_太田香奈子SP-3d1「steps[0] が合法でない: いいえ（通った）」
+- 全部元に戻し ❌0 を前景で確認してから tested.ts。
+
+### メモ
+- 🔸 _lib の `Z(ref, zone, owner)` は**第3引数（持ち主）を落とす**（_lib.mjs の Z は2引数）。既存の G9a-3c ケース（3c4 など）の Z(…, 'opponent') の持ち主確認は効いていない可能性。本束は authored 内の `ZO` で持ち主つきにした。_lib 直しは既存ケースが動く恐れがあり未実施（統括の判断）。
+- コミット: 親 ccc4da3（画面）・02325c0（鬼ごっこ）・最終（dsl/layers 香奈子SP＋HANDOFF）／rules 4882745・最終。
