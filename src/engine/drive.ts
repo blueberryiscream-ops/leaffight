@@ -1899,7 +1899,8 @@ function execOp(ctx: EngineCtx, state: BoardState, frame: ProcFrame, item: Simul
       const bf = nearestBattle(state)
       if (!bf?.battle) return manual('バトル中でない')
       const seat: Seat = op.side === 'own' ? env.you : op.side === 'challenger' ? bf.battle.challenger : other(bf.battle.challenger)
-      const to = 'zone' in op.to ? select(ctx, state, env, op.to) : refs(op.to)
+      // 参加できないキャラ（隠し部屋 barFromBattle any）は変更後の参加キャラにも入らない（鬼ごっこ）
+      const to = ('zone' in op.to ? select(ctx, state, env, op.to) : refs(op.to)).filter((iid) => !state.layers.barAny.includes(iid))
       return { tasks: rest, actions: [{ type: 'procSetParticipants', frameId: bf.id, seat, to, exhaust: op.exhaust, previous: op.previous, ...(op.rejoin ? { rejoin: true } : {}) }] }
     }
     // ── R4c G8a-1（NH-39）: 指名。①指名手配の付け替え（2体以上は AP が選ぶ）→ nominateStep（②しらんぷり ③決闘の気力 ④通す）
